@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Frontend
+node_modules/
+dist/
+build/
+.next/
+coverage/
+
+# 실제 환경변수와 비밀정보
+.env
+.env.*
+!.env.example
+
+# 실행 중 생성되는 데이터
+uploads/
+captures/
+pgdata/
+*.db
+*.sqlite3
+*.log
+
+# AI 데이터셋과 학습 결과
+datasets/
+checkpoints/
+weights/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# OS / 개인 IDE 설정
+.DS_Store
+Thumbs.db
+.idea/

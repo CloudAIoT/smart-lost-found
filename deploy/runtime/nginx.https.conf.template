@@ -1,0 +1,17 @@
+server {
+    listen 80 default_server;
+    server_name __DOMAIN__;
+    location /.well-known/acme-challenge/ { root /var/www/acme; }
+    location / { return 308 https://__DOMAIN__$request_uri; }
+}
+server {
+    listen 443 ssl;
+    server_name __DOMAIN__;
+    ssl_certificate /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location = /health { proxy_pass http://backend:8000; }
+    location = /ready { proxy_pass http://backend:8000; }
+    # Business APIs and Swagger remain closed until an authentication design is implemented.
+    location / { return 503; }
+}

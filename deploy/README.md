@@ -10,7 +10,7 @@ GitHub `production` Environment를 환경설정의 관리 원본으로 사용한
 - 배포 경로: `/opt/smart-lost-found`
 - API 도메인·FE 주소·인증: 미정
 
-현재는 HTTP `/health`, `/ready`만 공개한다. 업무 API와 Swagger는 Nginx에서 503으로 차단하며 앱의 `LOCAL_DEVELOPMENT=false`도 강제한다. GitHub Variables에 같은 이름으로 true를 추가해도 활성화되지 않는다. 인증·공개 API 계약이 정해진 뒤 별도 코드 변경으로 개방한다. CORS는 FE 주소가 확정될 때 허용 출처를 지정한다.
+현재는 HTTP `/health`, `/ready`, `/docs`, `/openapi.json`을 공개한다. 도메인 없이도 `http://52.78.12.168/docs`에서 Swagger와 API 계약을 확인할 수 있다. 업무 API는 Nginx에서 503으로 차단하며 앱의 `LOCAL_DEVELOPMENT=false`도 강제하므로 Swagger에서 업무 API를 실행하면 503이 반환된다. GitHub Variables에 같은 이름으로 true를 추가해도 활성화되지 않는다. 인증·공개 API 계약이 정해진 뒤 별도 코드 변경으로 개방한다. CORS는 FE 주소가 확정될 때 허용 출처를 지정한다.
 
 ## GitHub 설정
 

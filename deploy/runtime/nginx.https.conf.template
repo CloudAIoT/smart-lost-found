@@ -12,6 +12,8 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     location = /health { proxy_pass http://backend:8000; }
     location = /ready { proxy_pass http://backend:8000; }
-    # Business APIs and Swagger remain closed until an authentication design is implemented.
+    location = /docs { proxy_pass http://backend:8000; }
+    location = /openapi.json { proxy_pass http://backend:8000; }
+    # Business APIs remain closed until an authentication design is implemented.
     location / { return 503; }
 }

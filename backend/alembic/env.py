@@ -3,6 +3,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.db import Base, engine
+from app import models  # noqa: F401 - register all application metadata
 
 config = context.config
 target_metadata = Base.metadata

@@ -19,6 +19,16 @@ class Settings(BaseSettings):
     postgres_password: SecretStr
     db_host: str = "db"
     db_port: int = Field(default=5432, ge=1, le=65535)
+    # Business APIs stay disabled until explicitly enabled for local development.
+    local_development: bool = False
+    s3_bucket: str | None = None
+    s3_region: str | None = None
+    preview_ttl_seconds: int | None = Field(default=None, gt=0)
+    max_image_bytes: int | None = Field(default=None, gt=0)
+    pi_timeout_seconds: float | None = Field(default=None, gt=0)
+    command_ttl_seconds: int | None = Field(default=None, gt=0)
+    # Per-kiosk device routing stays in server configuration, never FE input.
+    pi_devices: dict[str, dict[str, str]] = Field(default_factory=dict)
 
     @property
     def database_url(self) -> URL:

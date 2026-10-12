@@ -22,3 +22,5 @@ GET /api/kiosks, GET /api/categories, POST /api/registrations,
 GET /api/registrations/{id}를 제공한다.
 
 [API 계약](../docs/api.md)을 참고한다.
+
+두 번의 촬영·S3 미리보기·AI 분석 연결 API를 추가했다. 실제 장치/버킷 설정은 .env.example을 참고한다. AI 기본 구현은 AI_NOT_CONFIGURED를 반환한다.

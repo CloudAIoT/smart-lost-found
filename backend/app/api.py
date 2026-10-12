@@ -3,12 +3,14 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query
+import httpx
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db import get_session
+from app.integrations import IntegrationError, PiGateway, UnconfiguredAnalyzer, make_store
 from app.models import Category, Kiosk, Locker, Registration
 from app import services
 
@@ -23,12 +25,23 @@ DB = Annotated[Session, Depends(get_session)]
 Config = Annotated[Settings, Depends(get_settings)]
 
 
+def get_gateway(settings: Config) -> Generator[PiGateway, None, None]:
+    with httpx.Client(trust_env=False) as client:
+        yield PiGateway(settings, client)
 
 
+def get_store(settings: Config):
+    return make_store(settings)
 
 
+def get_analyzer():
+    return UnconfiguredAnalyzer()
 
 
+Gateway = Annotated[object, Depends(get_gateway)]
+Store = Annotated[object, Depends(get_store)]
+Analyzer = Annotated[object, Depends(get_analyzer)]
+ShotOrder = Annotated[int, Path(ge=1, le=2)]
 
 
 class RegistrationInput(BaseModel):
@@ -81,3 +94,26 @@ def create_registration(body: RegistrationInput, session: DB):
 @router.get("/registrations/{registration_id}", response_model=RegistrationView)
 def get_registration(registration_id: UUID, session: DB):
     return registration_view(session, services.registration(session, registration_id))
+
+
+@router.post("/registrations/{registration_id}/shots/{shot_order}", response_model=RegistrationView)
+def capture(registration_id: UUID, shot_order: ShotOrder, session: DB, gateway: Gateway, store: Store, settings: Config):
+    if not settings.command_ttl_seconds or not settings.max_image_bytes:
+        raise IntegrationError("CAPTURE_NOT_CONFIGURED")
+    services.capture(session, registration_id, shot_order, gateway, store,
+                     ttl=settings.command_ttl_seconds, max_bytes=settings.max_image_bytes)
+    return registration_view(session, services.registration(session, registration_id))
+
+
+@router.get("/registrations/{registration_id}/shots/{shot_order}/preview")
+def preview(registration_id: UUID, shot_order: ShotOrder, session: DB, store: Store):
+    services.registration(session, registration_id)
+    value = next((value for value in services.images(session, registration_id) if value.shot_order == shot_order), None)
+    if value is None:
+        raise services.BusinessError("IMAGE_NOT_FOUND", 404)
+    return {"url": store.preview(value.object_key)}
+
+
+@router.post("/registrations/{registration_id}/analysis", response_model=RegistrationView)
+def analyze(registration_id: UUID, session: DB, analyzer: Analyzer, store: Store):
+    return registration_view(session, services.analyze(session, registration_id, analyzer, store))

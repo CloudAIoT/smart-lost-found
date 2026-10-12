@@ -21,3 +21,15 @@ analysis_status, images, locker_number가 있다. 최초 상태는 draft/pending
 locker_number는 null이다. 생성 요청은 멱등이 아니므로 응답 ID를 후속 조회에 사용한다.
 업무 오류는 {"detail":{"code":"..."}}이며 잘못된 참조는 404, 로컬 모드 비활성화는 503이다.
 공개 검색과 반환 기능은 보류한다.
+
+| 메서드 | 경로 | 설명 |
+| --- | --- | --- |
+| POST | /api/registrations/{id}/shots/{1 또는 2} | 순차 JPEG 촬영·S3 저장 |
+| GET | /api/registrations/{id}/shots/{1 또는 2}/preview | 임시 서명 URL |
+| POST | /api/registrations/{id}/analysis | 두 사진의 특징 추출 연결 |
+
+촬영 성공 재요청은 기존 사진을 반환한다. 순서 위반/진행 중은 409이다.
+저장/장치 오류는 502, 설정 누락은 503이다. 촬영 실패는 blocked로 보존하며 자동 재촬영하지 않는다.
+AI는 교체 가능한 내부 경계이며 기본 연결은 503 AI_NOT_CONFIGURED이다.
+분석 성공은 입력 사진 ID·순서와 일치하는 결과에서만 ready가 된다.
+테스트용 AI를 실제 장치에 연결하는 실행 옵션은 제공하지 않는다.

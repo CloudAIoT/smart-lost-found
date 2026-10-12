@@ -1,0 +1,16 @@
+**
+!backend/
+!backend/requirements.txt
+!backend/app/
+!backend/app/**
+!backend/alembic/
+!backend/alembic/**
+!backend/alembic.ini
+!deploy/
+!deploy/Dockerfile
+!deploy/runtime/
+!deploy/runtime/**
+**/__pycache__/
+**/*.pyc
+**/.env
+**/.env.*

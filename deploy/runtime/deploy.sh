@@ -34,7 +34,8 @@ if [[ -n "$previous" && -f "$previous/db.env" ]] && ! cmp -s "$previous/db.env" 
   echo 'Database settings changed. Perform a planned database credential migration before redeploying.' >&2
   exit 1
 fi
-if [[ ! -f "$root/proxy/default.conf" ]]; then
+# Refresh HTTP routes on redeployment; configured TLS is rendered by enable_https.sh.
+if [[ -z "$domain" || ! -f "$root/proxy/default.conf" ]]; then
   cp "$release/nginx.http.conf" "$root/proxy/default.conf"
 fi
 

@@ -122,3 +122,104 @@ def analyze(session: Session, registration_id: UUID, analyzer: FeatureAnalyzer, 
 def assignment_for(session: Session, registration_id: UUID) -> StorageAssignment | None:
     return session.scalar(select(StorageAssignment).join(FoundItem).where(
         FoundItem.registration_id == registration_id, StorageAssignment.ended_at.is_(None)))
+
+
+def open_deposit(session: Session, registration_id: UUID, gateway: DeviceGateway, *, ttl: int) -> StorageAssignment:
+    reg = registration(session, registration_id)
+    if reg.status in ("awaiting_deposit", "stored"):
+        return assignment_for(session, registration_id)
+    reg = claim(session, registration_id, ("ready",), "opening")
+    current = images(session, registration_id)
+    if (reg.analysis_status != "succeeded" or [image.shot_order for image in current] != [1, 2]
+            or reg.analysis_input_image_ids != [str(image.id) for image in current]):
+        session.rollback()
+        raise BusinessError("ANALYSIS_REQUIRED")
+    # Serialize allocation within a kiosk before taking a fresh availability snapshot.
+    # Locking only a candidate row can see a stale NOT EXISTS result when another
+    # transaction commits its reservation between the snapshot and row lock.
+    session.execute(select(Kiosk.id).where(Kiosk.id == reg.kiosk_id).with_for_update()).scalar_one()
+    # Partial UNIQUE indexes remain the final guard against out-of-band writers.
+    locker = session.scalar(select(Locker).where(Locker.kiosk_id == reg.kiosk_id, ~exists().where(
+        StorageAssignment.locker_id == Locker.id, StorageAssignment.ended_at.is_(None)))
+        .order_by(Locker.locker_number).limit(1).with_for_update(skip_locked=True))
+    if locker is None:
+        session.rollback()
+        raise BusinessError("NO_AVAILABLE_LOCKER")
+    item = FoundItem(registration_id=registration_id)
+    session.add(item)
+    session.flush()
+    assignment = StorageAssignment(found_item_id=item.id, locker_id=locker.id)
+    session.add(assignment)
+    try:
+        session.flush()
+        command = DeviceCommand(command_id=str(uuid4()), registration_id=registration_id, action="open",
+                                storage_assignment_id=assignment.id, expires_at=now() + timedelta(seconds=ttl))
+        session.add(command)
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise BusinessError("ALLOCATION_CONFLICT") from None
+    try:
+        gateway.open(reg.kiosk_id, locker.locker_number, command.command_id, command.expires_at)
+    except IntegrationError as error:
+        command.status = "unknown" if error.uncertain else "failed"
+        command.error_code = error.code
+        reg.status = "blocked"
+        # Keep the assignment until a recovery policy is agreed, including explicit failures.
+        session.commit()
+        raise
+    command.status = "succeeded"
+    assignment.status = "awaiting_deposit"
+    reg.status = "awaiting_deposit"
+    session.commit()
+    return assignment
+
+
+def complete_deposit(session: Session, registration_id: UUID, gateway: DeviceGateway) -> StorageAssignment:
+    reg = registration(session, registration_id)
+    assignment = assignment_for(session, registration_id)
+    if reg.status == "stored":
+        return assignment
+    if reg.status != "awaiting_deposit" or assignment is None or assignment.status != "awaiting_deposit":
+        raise BusinessError("DEPOSIT_NOT_OPENED")
+    locker = session.get(Locker, assignment.locker_id)
+    door = gateway.door(reg.kiosk_id, locker.locker_number)
+    if door != "closed":
+        raise BusinessError("DOOR_NOT_CLOSED")
+    # The API call itself is the explicit user confirmation. A sensor poll never completes a deposit.
+    # Reload under a row lock after the sensor call. Two completion requests must
+    # preserve the first deposited_at rather than overwrite it from stale objects.
+    reg = session.scalar(select(Registration).where(Registration.id == registration_id)
+                         .with_for_update().execution_options(populate_existing=True))
+    if reg.status == "stored":
+        session.rollback()
+        return assignment_for(session, registration_id)
+    if reg.status != "awaiting_deposit":
+        session.rollback()
+        raise BusinessError("DEPOSIT_NOT_OPENED")
+    session.refresh(assignment)
+    reg.status = "stored"
+    assignment.status = "stored"
+    assignment.deposited_at = assignment.deposited_at or now()
+    session.get(FoundItem, assignment.found_item_id).status = "stored"
+    session.commit()
+    return assignment
+
+
+def search_stored_items(session: Session, *, category_id: UUID | None = None, kiosk_id: UUID | None = None,
+                        limit: int = 20, offset: int = 0) -> list[dict]:
+    """Internal exact-filter experiment; not a public search contract."""
+    if not 1 <= limit <= 100 or offset < 0:
+        raise ValueError("Invalid pagination")
+    query = (select(FoundItem, Registration, Kiosk).join(Registration, FoundItem.registration_id == Registration.id)
+             .join(StorageAssignment, StorageAssignment.found_item_id == FoundItem.id)
+             .join(Locker, StorageAssignment.locker_id == Locker.id).join(Kiosk, Locker.kiosk_id == Kiosk.id)
+             .where(FoundItem.status == "stored", StorageAssignment.status == "stored", StorageAssignment.ended_at.is_(None)))
+    if category_id is not None:
+        query = query.where(Registration.primary_category_id == category_id)
+    if kiosk_id is not None:
+        query = query.where(Kiosk.id == kiosk_id)
+    rows = session.execute(query.order_by(FoundItem.created_at, FoundItem.id).limit(limit).offset(offset))
+    return [{"item_id": item.id, "category_id": reg.primary_category_id, "kiosk_id": kiosk.id,
+             "kiosk_name": kiosk.name, "location_description": kiosk.location_description,
+             "latitude": kiosk.latitude, "longitude": kiosk.longitude} for item, reg, kiosk in rows]

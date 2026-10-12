@@ -117,3 +117,22 @@ def preview(registration_id: UUID, shot_order: ShotOrder, session: DB, store: St
 @router.post("/registrations/{registration_id}/analysis", response_model=RegistrationView)
 def analyze(registration_id: UUID, session: DB, analyzer: Analyzer, store: Store):
     return registration_view(session, services.analyze(session, registration_id, analyzer, store))
+
+
+@router.post("/registrations/{registration_id}/deposit/open", response_model=RegistrationView)
+def open_deposit(registration_id: UUID, session: DB, gateway: Gateway, settings: Config):
+    if not settings.command_ttl_seconds:
+        raise IntegrationError("DEVICE_NOT_CONFIGURED")
+    services.open_deposit(session, registration_id, gateway, ttl=settings.command_ttl_seconds)
+    return registration_view(session, services.registration(session, registration_id))
+
+
+class CompletionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmed: Literal[True]
+
+
+@router.post("/registrations/{registration_id}/deposit/complete", response_model=RegistrationView)
+def complete_deposit(registration_id: UUID, body: CompletionInput, session: DB, gateway: Gateway):
+    services.complete_deposit(session, registration_id, gateway)
+    return registration_view(session, services.registration(session, registration_id))

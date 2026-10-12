@@ -1,27 +1,24 @@
 # smart-lost-found Backend
 
-분실물 관리 서비스의 백엔드. 현재는 개발 환경과 상태 확인 API만 구성되어 있다.
+Python 3.12, FastAPI, PostgreSQL 17, SQLAlchemy, Alembic 기반 로컬 개발 API.
 
-백엔드 [ERD·기능 명세와 검토 기록](docs/README.md)은 `docs/`에서 관리한다. 원문 요구, 사용자 결정, 설계 제안과 미정 사항을 구분한 개발 전 검토 문서이다.
+등록의 카테고리와 자유 입력은 선택값이다. 업무 API는 LOCAL_DEVELOPMENT=true에서만 활성화한다.
+인증이 미정이므로 localhost 바인딩을 유지한다.
 
-## 개발 환경
+저장소 루트에서 backend/.env.example을 backend/.env로 복사하고 LOCAL_DEVELOPMENT=true를 설정한다.
+기존 .env는 덮어쓰지 않는다.
 
-- Python 3.12 · FastAPI · Uvicorn
-- PostgreSQL 17 · SQLAlchemy 2.x · psycopg 3
-- pydantic-settings · Alembic
-- pytest · httpx
-- Docker Compose
+```powershell
+docker compose --env-file backend/.env up -d --build
+docker compose --env-file backend/.env exec backend alembic upgrade head
+docker compose --env-file backend/.env exec backend python -m app.seed_local
+docker compose --env-file backend/.env exec backend pytest -q
+```
 
-환경변수는 `backend/.env`에서 관리한다. Docker Compose로 백엔드와 DB를 실행하며, 코드 수정 시 자동 재시작한다.
+Swagger: http://127.0.0.1:8000/docs
 
-## API
+GET /health는 서버 상태, GET /ready는 DB 연결을 확인한다.
+GET /api/kiosks, GET /api/categories, POST /api/registrations,
+GET /api/registrations/{id}를 제공한다.
 
-| Method | Path | 설명 |
-| --- | --- | --- |
-| GET | `/health` | 서버 상태 확인. DB 연결과 무관하게 200 반환 |
-| GET | `/ready` | DB 연결 확인. 성공 시 200, 실패 시 503 반환 |
-
-기본 주소: `http://127.0.0.1:8000`
-
-- Swagger UI: `/docs`
-- OpenAPI: `/openapi.json`
+[API 계약](../docs/api.md)을 참고한다.

@@ -1,0 +1,123 @@
+name: Backend CI and EC2 deployment
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: PostgreSQL tests and production build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_DB: backend_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d backend_test"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+    env:
+      POSTGRES_DB: backend_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ci-only-password
+      DB_HOST: localhost
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:ci-only-password@localhost:5432/backend_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r backend/requirements-dev.txt
+      - name: Backend tests including PostgreSQL concurrency
+        working-directory: backend
+        run: python -m pytest -q
+      - name: Deployment configuration tests
+        run: python -m pytest -q deploy/tests
+      - name: Check deployment shell scripts
+        run: for script in deploy/runtime/*.sh; do bash -n "$script"; done
+      - name: Validate production Compose
+        run: python deploy/check_compose.py
+      - name: Build production image
+        run: docker build --platform linux/amd64 -f deploy/Dockerfile -t smart-lost-found:ci .
+      - name: Production image smoke test
+        run: |
+          docker run -d --name backend-smoke --network host --read-only --tmpfs /tmp \
+            -e POSTGRES_DB -e POSTGRES_USER -e POSTGRES_PASSWORD -e DB_HOST \
+            -e LOCAL_DEVELOPMENT=false smart-lost-found:ci
+          trap 'docker rm -f backend-smoke >/dev/null' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/ready >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8000/ready
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/kiosks)" = 503
+
+  deploy:
+    name: Deploy to EC2
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: production
+    concurrency:
+      group: smart-lost-found-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      CONFIG_PARAMETER: ${{ vars.CONFIG_PARAMETER }}
+      POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      S3_REGION: ${{ vars.AWS_REGION }}
+      API_DOMAIN: ${{ vars.API_DOMAIN }}
+      TLS_EMAIL: ${{ vars.TLS_EMAIL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: slf-${{ github.run_id }}
+      - name: Build and publish commit image
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ECR_REPOSITORY" =~ ^[a-z0-9/_-]+$ ]]
+          account=$(aws sts get-caller-identity --query Account --output text)
+          registry="$account.dkr.ecr.$AWS_REGION.amazonaws.com"
+          release="$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$registry"
+          docker build --platform linux/amd64 -f deploy/Dockerfile -t "$registry/$ECR_REPOSITORY:$release" .
+          docker push "$registry/$ECR_REPOSITORY:$release"
+          digest=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$release" --query 'imageDetails[0].imageDigest' --output text)
+          echo "BACKEND_IMAGE=$registry/$ECR_REPOSITORY@$digest" >> "$GITHUB_ENV"
+          echo "RELEASE_ID=$release" >> "$GITHUB_ENV"
+      - run: pip install boto3==1.35.99
+      - name: Synchronize configuration and deploy through SSM
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: python deploy/publish.py

@@ -55,6 +55,7 @@ def main():
         required("TLS_EMAIL", r"[^\s@]+@[^\s@]+\.[^\s@]+")
     payload = {key: os.environ.get(key, "") for key in
                ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "S3_BUCKET", "S3_REGION")}
+    payload["BUSINESS_API_ENABLED"] = os.environ.get("BUSINESS_API_ENABLED", "false")
     # Validate before publishing. Temporary files contain secrets and are removed immediately.
     import tempfile
     with tempfile.TemporaryDirectory() as temp:
@@ -82,7 +83,7 @@ def main():
             continue
         status = result["Status"]
         if status == "Success":
-            print("Deployment completed. Business APIs remain disabled.")
+            print(f"Deployment completed. BUSINESS_API_ENABLED={payload['BUSINESS_API_ENABLED']}")
             return
         if status in {"Cancelled", "TimedOut", "Failed", "Cancelling"}:
             # SSM logs are inspected in AWS; do not copy arbitrary container output to Actions.

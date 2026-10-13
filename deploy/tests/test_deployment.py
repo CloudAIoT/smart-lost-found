@@ -25,7 +25,8 @@ def test_raw_config_preserves_special_characters_and_separates_db(tmp_path):
 
 
 @pytest.mark.parametrize("key,value", [("POSTGRES_PASSWORD", "short"), ("POSTGRES_PASSWORD", "x" * 32 + "\nLOCAL_DEVELOPMENT=true"),
-                                       ("POSTGRES_DB", "db; DROP DATABASE"), ("S3_BUCKET", "")])
+                                       ("POSTGRES_DB", "db; DROP DATABASE"), ("S3_BUCKET", ""),
+                                       ("BUSINESS_API_ENABLED", "yes"), ("BUSINESS_API_ENABLED", "true\nLOCAL_DEVELOPMENT=true")])
 def test_bad_runtime_config_is_rejected(tmp_path, key, value):
     config = payload()
     config[key] = value
@@ -34,11 +35,21 @@ def test_bad_runtime_config_is_rejected(tmp_path, key, value):
     assert not (tmp_path / "backend.env").exists()
 
 
-def test_runtime_config_cannot_enable_business_api(tmp_path):
+def test_runtime_config_cannot_enable_local_mode(tmp_path):
     config = payload()
     config["LOCAL_DEVELOPMENT"] = "true"
     with pytest.raises(ValueError):
         render(config, tmp_path)
+
+
+@pytest.mark.parametrize("enabled", [None, "false", "true"])
+def test_runtime_api_switch_and_legacy_config(tmp_path, enabled):
+    config = payload()
+    if enabled is not None:
+        config["BUSINESS_API_ENABLED"] = enabled
+    render(config, tmp_path)
+    assert f'BUSINESS_API_ENABLED={enabled or "false"}\n' in (tmp_path / "backend.env").read_text()
+    assert "BUSINESS_API_ENABLED" not in (tmp_path / "db.env").read_text()
 
 
 def test_ssm_command_contains_no_secret_values():

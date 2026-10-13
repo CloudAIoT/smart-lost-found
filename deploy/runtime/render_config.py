@@ -10,8 +10,11 @@ import boto3
 
 def render(payload: dict, output: Path) -> None:
     allowed = {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "S3_BUCKET", "S3_REGION"}
-    if not isinstance(payload, dict) or set(payload) != allowed:
+    if not isinstance(payload, dict) or not allowed <= set(payload) or set(payload) - allowed - {"BUSINESS_API_ENABLED"}:
         raise ValueError("Invalid deployment configuration keys")
+    payload = {"BUSINESS_API_ENABLED": "false", **payload}
+    if payload["BUSINESS_API_ENABLED"] not in ("true", "false"):
+        raise ValueError("BUSINESS_API_ENABLED must be true or false")
     for key, value in payload.items():
         if not isinstance(value, str) or not value or any(c in value for c in "\r\n\0"):
             raise ValueError(f"Invalid deployment setting: {key}")

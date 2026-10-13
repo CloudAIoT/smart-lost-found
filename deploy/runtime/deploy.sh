@@ -65,10 +65,14 @@ trap rollback ERR
 "${compose[@]}" exec -T nginx nginx -s reload
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8000/ready >/dev/null
 code="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8000/api/kiosks)"
-[[ "$code" == 503 ]]
+expected=503
+if grep -qx 'BUSINESS_API_ENABLED=true' "$release/backend.env"; then
+  expected=200
+fi
+[[ "$code" == "$expected" ]]
 ln -sfn "$release" "$root/current"
 trap - ERR
-echo 'Backend deployed; business APIs remain disabled.'
+echo "Backend deployed; business API status=$code."
 
 # TLS failure is reported separately from a successful backend deployment.
 if [[ -n "$domain" ]]; then

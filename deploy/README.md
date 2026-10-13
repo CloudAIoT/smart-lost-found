@@ -10,7 +10,9 @@ GitHub `production` Environment를 환경설정의 관리 원본으로 사용한
 - 배포 경로: `/opt/smart-lost-found`
 - API 도메인·FE 주소·인증: 미정
 
-현재는 HTTP `/health`, `/ready`, `/docs`, `/openapi.json`을 공개한다. 도메인 없이도 `http://52.78.12.168/docs`에서 Swagger와 API 계약을 확인할 수 있다. 업무 API는 Nginx에서 503으로 차단하며 앱의 `LOCAL_DEVELOPMENT=false`도 강제하므로 Swagger에서 업무 API를 실행하면 503이 반환된다. GitHub Variables에 같은 이름으로 true를 추가해도 활성화되지 않는다. 인증·공개 API 계약이 정해진 뒤 별도 코드 변경으로 개방한다. CORS는 FE 주소가 확정될 때 허용 출처를 지정한다.
+Swagger 주소는 `http://52.78.12.168/docs`다. 업무 API는 GitHub production Variable `BUSINESS_API_ENABLED`를 `true`로 설정하고 재배포하면 사용할 수 있다. 값이 없거나 `false`면 503을 반환한다. `LOCAL_DEVELOPMENT=false`는 유지한다.
+
+아직 인증이 없어 활성화한 API는 누구나 호출할 수 있다. Pi·AI 설정이 필요한 기능은 활성화 후에도 미설정 오류를 반환한다.
 
 ## GitHub 설정
 
@@ -25,6 +27,7 @@ GitHub `production` Environment를 환경설정의 관리 원본으로 사용한
 | Variable | CONFIG_PARAMETER | /smart-lost-found/production/config |
 | Variable | POSTGRES_DB / POSTGRES_USER | smart_lost_found |
 | Variable | S3_BUCKET | smart-lost-found-images-s3 |
+| Variable | BUSINESS_API_ENABLED | true: 업무 API 활성화, false 또는 미등록: 비활성화 |
 | Secret | POSTGRES_PASSWORD | 생성된 32자 이상 임의 비밀번호 |
 | Variable | API_DOMAIN | DNS 연결 후 입력. 현재 생략 |
 | Variable | TLS_EMAIL | 도메인 설정 시 함께 입력할 인증서 연락 이메일 |
@@ -63,7 +66,7 @@ Ubuntu 24.04의 현재 저장소에서는 `apt install awscli` 설치 후보가 
 4. EC2가 이미지를 pull하고 이미지에 포함된 배포 스크립트를 해당 릴리스 디렉터리로 복사. EC2에서 소스를 빌드하지 않음.
 5. EC2 역할로 설정을 읽어 권한 0600의 env 파일 생성. Compose raw env 형식으로 `$`·따옴표를 그대로 보존.
 6. 고정 PostgreSQL 볼륨 유지, 마이그레이션 전 pg_dump, `alembic upgrade head`.
-7. 백엔드 교체 후 `/ready`와 업무 API 503 확인. 실패 시 가능한 경우 이전 이미지로 복귀하고 실패로 보고.
+7. 백엔드 교체 후 `/ready`와 `/api/kiosks` 확인. 활성화 상태면 200, 비활성화 상태면 503이어야 한다. 실패 시 가능한 경우 이전 이미지로 복귀하고 실패로 보고.
 
 GitHub와 서버의 배포 잠금으로 동시 배포를 직렬화한다. GitHub 실행을 강제 취소해도 이미 전송된 SSM 명령은 계속 실행될 수 있으므로 SSM 명령 상태를 확인한 뒤 재실행한다. 이 구성은 단일 서버이며 컨테이너 교체 중 잠깐의 중단이 있을 수 있다. DB 스키마는 자동 downgrade하지 않는다. 마이그레이션은 이전 앱과 호환되도록 작성해야 이미지 복귀가 가능하다.
 
@@ -77,7 +80,7 @@ GitHub와 서버의 배포 잠금으로 동시 배포를 직렬화한다. GitHub
 2. GitHub production Variables에 `API_DOMAIN`, `TLS_EMAIL`을 추가한다.
 3. main에서 워크플로를 재실행한다.
 
-Certbot HTTP-01 검증으로 인증서를 발급한 뒤 Nginx가 HTTPS를 제공하고 HTTP를 리다이렉트한다. systemd timer가 하루 두 번 갱신 여부를 확인한다. 80 포트는 갱신 검증을 위해 유지한다. HTTPS 활성화는 업무 API의 인증·공개 승인과 별개이며 업무 API는 계속 503이다.
+Certbot HTTP-01 검증으로 인증서를 발급한 뒤 Nginx가 HTTPS를 제공하고 HTTP를 리다이렉트한다. systemd timer가 하루 두 번 갱신 여부를 확인한다. 80 포트는 갱신 검증을 위해 유지한다. 업무 API 활성화 여부는 `BUSINESS_API_ENABLED`로 관리한다.
 
 도메인이 없으면 인증서 발급은 실행하지 않는다. TLS 설정 실패는 배포 실패로 표시하되 이미 readiness를 통과한 백엔드는 유지한다. `enable_https.sh`를 통한 HTTPS 설정은 실제 DNS와 인증서 발급을 통해 별도로 확인해야 한다.
 
@@ -90,4 +93,4 @@ curl -f http://127.0.0.1:8000/ready
 curl -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/api/kiosks
 ```
 
-마지막 요청은 현재 503이 정상이다. 환경값이 출력되는 `docker compose config`, `docker inspect` 전체 출력이나 env 파일 내용을 Actions/공개 로그에 붙이지 않는다.
+마지막 요청은 업무 API를 활성화했으면 200, 비활성화했으면 503이 정상이다. 환경값이 출력되는 `docker compose config`, `docker inspect` 전체 출력이나 env 파일 내용을 Actions/공개 로그에 붙이지 않는다.

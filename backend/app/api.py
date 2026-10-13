@@ -15,12 +15,12 @@ from app.models import Category, Kiosk, Locker, Registration
 from app import services
 
 
-def require_local_development(settings: Annotated[Settings, Depends(get_settings)]) -> None:
-    if not settings.local_development:
+def require_business_api(settings: Annotated[Settings, Depends(get_settings)]) -> None:
+    if not (settings.local_development or settings.business_api_enabled):
         raise services.BusinessError("BUSINESS_API_DISABLED", 503)
 
 
-router = APIRouter(prefix="/api", dependencies=[Depends(require_local_development)])
+router = APIRouter(prefix="/api", dependencies=[Depends(require_business_api)])
 DB = Annotated[Session, Depends(get_session)]
 Config = Annotated[Settings, Depends(get_settings)]
 

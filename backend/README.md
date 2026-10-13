@@ -38,7 +38,7 @@ docker compose --env-file backend/.env up -d --build
 docker compose --env-file backend/.env exec backend alembic upgrade head
 ```
 
-업무 API는 `LOCAL_DEVELOPMENT=false`가 기본이며 503을 반환한다. 로컬 개발 시 `backend/.env`에서 `LOCAL_DEVELOPMENT=true`로 바꾼 뒤 `docker compose --env-file backend/.env up -d --force-recreate backend`를 실행한다. 인증이 아직 없으므로 Compose의 `127.0.0.1` 바인딩을 유지한다. 이 모드를 공개 배포에 사용하지 않는다.
+업무 API는 기본적으로 비활성화되어 503을 반환한다. 로컬 개발 시 `backend/.env`에서 `LOCAL_DEVELOPMENT=true`로 바꾼 뒤 `docker compose --env-file backend/.env up -d --force-recreate backend`를 실행한다. 로컬 Compose는 `127.0.0.1` 바인딩을 유지한다. EC2에서는 로컬 모드를 켜지 않고 `BUSINESS_API_ENABLED`로 업무 API를 활성화한다. 아직 인증은 구현되지 않았다.
 
 ```powershell
 docker compose --env-file backend/.env exec backend python -m app.seed_local

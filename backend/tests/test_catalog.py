@@ -32,7 +32,10 @@ def catalog(database_engine):
         app.dependency_overrides.clear()
 
 
-def test_catalog_and_optional_registration(catalog):
+@pytest.mark.parametrize("local_mode", [True, False])
+def test_catalog_and_optional_registration(catalog, local_mode):
+    catalog.settings.local_development = local_mode
+    catalog.settings.business_api_enabled = not local_mode
     assert catalog.client.get("/api/kiosks").json()[0]["id"] == catalog.kiosk_id
     assert catalog.client.get("/api/categories").json() == []
     response = catalog.client.post("/api/registrations", json={"kiosk_id": catalog.kiosk_id})
@@ -52,7 +55,7 @@ def test_registration_rejects_unknown_references(catalog):
     assert catalog.client.post("/api/registrations", json={"kiosk_id": "invalid"}).status_code == 422
 
 
-def test_business_api_requires_local_mode(catalog):
+def test_business_api_disabled_without_either_switch(catalog):
     catalog.settings.local_development = False
     assert catalog.client.get("/api/kiosks").status_code == 503
     assert catalog.client.post("/api/registrations", json={"kiosk_id": catalog.kiosk_id}).status_code == 503

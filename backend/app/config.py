@@ -19,8 +19,9 @@ class Settings(BaseSettings):
     postgres_password: SecretStr
     db_host: str = "db"
     db_port: int = Field(default=5432, ge=1, le=65535)
-    # Business APIs stay disabled until explicitly enabled for local development.
+    # Local fixtures remain separate from deployed API access.
     local_development: bool = False
+    business_api_enabled: bool = False
     s3_bucket: str | None = None
     s3_region: str | None = None
     preview_ttl_seconds: int | None = Field(default=None, gt=0)

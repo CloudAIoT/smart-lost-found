@@ -6,7 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
 
-class Settings(BaseSettings):
+class GeminiSettings(BaseSettings):
+    """Optional AI settings; experiments can load these without DB credentials."""
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[1] / ".env",
         env_file_encoding="utf-8",
@@ -14,6 +16,13 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+    gemini_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    gemini_max_output_tokens: int = Field(default=4096, ge=256, le=8192)
+
+
+class Settings(GeminiSettings):
     postgres_db: str
     postgres_user: str
     postgres_password: SecretStr

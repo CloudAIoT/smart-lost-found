@@ -2,7 +2,7 @@
 
 키오스크 현장의 하드웨어를 제어하는 라즈베리파이 파트. 라즈베리파이 두 대를 쓴다. 촬영 Pi는 촬영 상자의 카메라와 키오스크 화면을, 보관함 Pi는 보관함의 잠금장치와 문 센서를 맡는다. 두 Pi 모두 백엔드의 명령을 받아 하드웨어를 움직이고, 결과를 백엔드에 돌려준다.
 
-현재 두 Pi의 기본 설정과 카메라 첫 시험을 마쳤고, 백엔드 명령을 받는 Pi 컨트롤러를 만들 차례다. 백엔드와 주고받는 요청·응답은 [docs/device-protocol.md](../docs/device-protocol.md)에 정리했다.
+현재 두 Pi의 기본 설정과 카메라 첫 시험을 마쳤고, 백엔드 명령을 받는 Pi 컨트롤러 뼈대를 가짜 하드웨어 모드로 만들었다. 실제 장치와 백엔드 서버에 붙여 보는 것은 다음 단계다. 백엔드와 주고받는 요청·응답은 [docs/device-protocol.md](../docs/device-protocol.md)에 정리했다.
 
 ## 문서
 
@@ -48,17 +48,45 @@ flowchart LR
 
 부품과 배선은 확정되는 대로 `hardware/`에 정리한다.
 
-## 폴더 구성 (예정)
+## 폴더 구성
 
 ```text
 raspberry-pi/
 ├── app/        Pi 컨트롤러 (FastAPI, 설정으로 촬영/보관함 역할 선택)
-├── tests/      테스트
-├── deploy/     자동 실행 서비스, 키오스크 브라우저, Tailscale 설정
-├── hardware/   부품 목록, 배선도, 3D 모델
+│   └── hardware/   장치 기능 정의와 가짜 장치 (실제 장치는 추가 예정)
+├── tests/      통신 규약 테스트
+├── deploy/     설치·접속 안내 (자동 실행 서비스, 키오스크 브라우저, Tailscale 설정은 추가 예정)
+├── hardware/   부품 목록, 배선도, 3D 모델 (예정)
 ├── docs/       설계 결정, 실험, 문제 해결 기록
-└── media/      사진, 시연 영상
+└── media/      사진, 시연 영상 (예정)
 ```
+
+## 실행 방법 (개발용 가짜 하드웨어)
+
+```bash
+cd raspberry-pi
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env    # PI_ROLE과 PI_API_KEY를 정한다
+uvicorn --factory app.main:create_app --host 127.0.0.1 --port 8001
+pytest -q               # 테스트
+```
+
+`PI_FAKE_HARDWARE=true`이면 실제 장치 없이 동작한다. 촬영 요청에는 번호와 시각이 적힌 샘플 JPEG를 돌려주고, 보관함을 열면 문이 `PI_FAKE_DOOR_OPEN_SECONDS`초 동안 열려 있다가 닫힌 것으로 보인다. 같은 `command_id`가 다시 오면 만료 여부와 상관없이 처음 결과를 돌려주고, 새 명령만 만료 시각을 검사한다.
+
+## 백엔드 호출 코드로 확인
+
+가짜 모드로 촬영 Pi와 보관함 Pi를 각각 띄운다(키는 예시).
+
+```bash
+PI_ROLE=capture PI_API_KEY=capture-key-123 PI_FAKE_HARDWARE=true uvicorn --factory app.main:create_app --port 8001
+PI_ROLE=locker PI_API_KEY=locker-key-123 PI_FAKE_HARDWARE=true uvicorn --factory app.main:create_app --port 8002
+```
+
+2026-10-26 확인(2026-10-28 재확인): 백엔드가 Pi를 부를 때 쓰는 코드(`backend/app/integrations.py`의 `PiGateway`)로 두 서버를 불러 9가지를 확인했고 모두 기대한 결과가 나왔다. 확인한 것은 촬영 2회(백엔드 JPEG 검사 통과), 보관함 개방, 개방 직후와 잠시 뒤의 문 상태(open → closed), 오류 4가지(만료된 명령, 없는 보관함, 틀린 API 키, 촬영 주소에 보관함 Pi를 넣은 경우)이다.
+
+백엔드 서버를 띄워 등록 흐름 전체를 돌려 본 것은 아니다. 백엔드 서버로 촬영·분석·개방까지 가려면 S3와 AI 연결이 필요하다([백엔드 README](../backend/README.md) 참고).
 
 ## 진행 현황
 
@@ -70,8 +98,10 @@ raspberry-pi/
 - [x] 카메라 연결과 첫 시험 (초점·촬영 시간, 사진 크기)
 - [ ] 통신 규약 확정 (백엔드와 협의)
 - [ ] 하드웨어 부품 확정
-- [ ] Pi 컨트롤러 구현 (가짜 하드웨어 모드 포함)
-- [ ] 실물 하드웨어 연동
+- [x] Pi 컨트롤러 뼈대 (API, 인증·만료·중복 처리, 가짜 하드웨어 모드, 테스트)
+- [ ] 실제 카메라 연결 (촬영 Pi)
+- [ ] 실제 잠금장치·문 센서 연결 (보관함 Pi)
+- [ ] 백엔드 서버·실제 Pi와 연동 시험
 - [ ] 키오스크 화면 자동 실행과 고정 (브라우저 종료·주소 변경 방지)
 
 ## 진행 기록
@@ -84,3 +114,4 @@ raspberry-pi/
 | 2026-10-08 | 프론트 문서 리뷰로 촬영 상자 상시 개방, 웹→백엔드 단일 경로, 보관함 개방 후 번호 표시 순서를 맞춤 (#6), main 브랜치 강제 푸시·삭제 금지 설정 |
 | 2026-10-12~13 | (팀) 백엔드 등록·촬영·보관 API 병합 (#8) — Pi 컨트롤러를 붙일 대상이 준비됨 |
 | 2026-10-26 | 백엔드 Pi 호출 코드와 통신 규약 대조, 학교 SD 카드 점검 후 두 Pi에 Raspberry Pi OS(trixie 64비트) 새로 설치, 카메라 연결 문제 해결, 카메라 첫 시험 (실험 0001) |
+| 2026-10-26~28 | Pi 컨트롤러 뼈대(가짜 하드웨어 모드)와 통신 규약 테스트 15개, 백엔드 Pi 호출 코드(`PiGateway`)로 응답 형식 확인 |

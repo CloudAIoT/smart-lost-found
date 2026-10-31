@@ -57,13 +57,16 @@ def capture(session: Session, registration_id: UUID, shot: int, gateway: DeviceG
     if len(current) != shot - 1:
         session.rollback()
         raise BusinessError("SHOT_OUT_OF_ORDER")
+    # Send the value we persisted, not a reloaded one. Commands must stay timezone-aware
+    # for the device regardless of how the database returns timestamps.
+    expires_at = now() + timedelta(seconds=ttl)
     command = DeviceCommand(command_id=str(uuid4()), registration_id=registration_id, action="capture",
-                            shot_order=shot, expires_at=now() + timedelta(seconds=ttl))
+                            shot_order=shot, expires_at=expires_at)
     session.add(command)
     session.commit()
     # IDs and intent have been committed before the first external call.
     try:
-        jpeg = gateway.capture(reg.kiosk_id, command.command_id, registration_id, command.expires_at)
+        jpeg = gateway.capture(reg.kiosk_id, command.command_id, registration_id, expires_at)
         validate_jpeg(jpeg, max_bytes)
         received = now()
         key = f"registrations/{registration_id}/{command.command_id}.jpg"
@@ -152,15 +155,16 @@ def open_deposit(session: Session, registration_id: UUID, gateway: DeviceGateway
     session.add(assignment)
     try:
         session.flush()
+        expires_at = now() + timedelta(seconds=ttl)
         command = DeviceCommand(command_id=str(uuid4()), registration_id=registration_id, action="open",
-                                storage_assignment_id=assignment.id, expires_at=now() + timedelta(seconds=ttl))
+                                storage_assignment_id=assignment.id, expires_at=expires_at)
         session.add(command)
         session.commit()
     except IntegrityError:
         session.rollback()
         raise BusinessError("ALLOCATION_CONFLICT") from None
     try:
-        gateway.open(reg.kiosk_id, locker.locker_number, command.command_id, command.expires_at)
+        gateway.open(reg.kiosk_id, locker.locker_number, command.command_id, expires_at)
     except IntegrationError as error:
         command.status = "unknown" if error.uncertain else "failed"
         command.error_code = error.code

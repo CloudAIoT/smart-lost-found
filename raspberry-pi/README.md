@@ -12,6 +12,7 @@
 | [설치와 접속](deploy/setup.md) | 운영체제 설치, 카메라 연결, SSH 접속, 설치 확인 |
 | [문제 해결 기록](docs/troubleshooting.md) | 막혔던 문제와 원인·해결 |
 | [실험 0001](docs/experiments/0001-camera-first-test.md) | 카메라 초점·촬영 시간과 사진 크기 |
+| [하드웨어 설계](hardware/README.md) | 촬영 모듈·보관함 모듈 3D 배치, 배선, 설계 점검 |
 | [결정 기록 0001](docs/decisions/0001-single-camera-two-shots.md) | 카메라 1대로 물건 방향을 바꿔 2장 촬영 |
 
 ## 구성
@@ -46,7 +47,7 @@ flowchart LR
 - 보관함 2개: 칸마다 잠금장치와 문 센서
 - 모니터·키보드·마우스: 키오스크 화면 표시와 입력 (터치 화면이 아니다)
 
-부품과 배선은 확정되는 대로 `hardware/`에 정리한다.
+상자 크기, 장치 위치, 배선은 [하드웨어 설계](hardware/README.md)에 3D 모델로 정리했다.
 
 ## 폴더 구성
 
@@ -56,7 +57,7 @@ raspberry-pi/
 │   └── hardware/   장치 기능 정의와 가짜 장치 (실제 장치는 추가 예정)
 ├── tests/      통신 규약 테스트
 ├── deploy/     설치·접속 안내 (자동 실행 서비스, 키오스크 브라우저, Tailscale 설정은 추가 예정)
-├── hardware/   부품 목록, 배선도, 3D 모델 (예정)
+├── hardware/   3D 배치 모델과 배선 (OpenSCAD, STL)
 ├── docs/       설계 결정, 실험, 문제 해결 기록
 └── media/      사진, 시연 영상 (예정)
 ```
@@ -97,6 +98,7 @@ PI_ROLE=locker PI_API_KEY=locker-key-123 PI_FAKE_HARDWARE=true uvicorn --factory
 - [x] Pi 2대 기본 설정 (Raspberry Pi OS trixie 64비트, SSH 공개키 접속)
 - [x] 카메라 연결과 첫 시험 (초점·촬영 시간, 사진 크기)
 - [ ] 통신 규약 확정 (백엔드와 협의)
+- [x] 촬영 모듈·보관함 모듈 3D 배치 모델 초안
 - [ ] 하드웨어 부품 확정
 - [x] Pi 컨트롤러 뼈대 (API, 인증·만료·중복 처리, 가짜 하드웨어 모드, 테스트)
 - [ ] 실제 카메라 연결 (촬영 Pi)
@@ -115,3 +117,4 @@ PI_ROLE=locker PI_API_KEY=locker-key-123 PI_FAKE_HARDWARE=true uvicorn --factory
 | 2026-10-12~13 | (팀) 백엔드 등록·촬영·보관 API 병합 (#8) — Pi 컨트롤러를 붙일 대상이 준비됨 |
 | 2026-10-26 | 백엔드 Pi 호출 코드와 통신 규약 대조, 학교 SD 카드 점검 후 두 Pi에 Raspberry Pi OS(trixie 64비트) 새로 설치, 카메라 연결 문제 해결, 카메라 첫 시험 (실험 0001) |
 | 2026-10-26~28 | Pi 컨트롤러 뼈대(가짜 하드웨어 모드)와 통신 규약 테스트 15개, 백엔드 Pi 호출 코드(`PiGateway`)로 응답 형식 확인 |
+| 2026-11-07 | 촬영 모듈·보관함 모듈 3D 배치 모델 초안, 공식 도면 기준 Pi·카메라 배치, 카메라 시야·문 궤적 점검 |

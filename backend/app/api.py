@@ -49,6 +49,7 @@ class RegistrationInput(BaseModel):
     kiosk_id: UUID
     primary_category_id: UUID | None = None
     secondary_description: str | None = Field(default=None, max_length=2000)
+    found_location: str | None = Field(default=None, max_length=200)
 
 
 class RegistrationView(BaseModel):
@@ -56,6 +57,7 @@ class RegistrationView(BaseModel):
     kiosk_id: UUID
     primary_category_id: UUID | None
     secondary_description: str | None
+    found_location: str | None
     status: str
     analysis_status: str
     images: list[dict]
@@ -68,7 +70,7 @@ def registration_view(session: Session, reg: Registration) -> RegistrationView:
         assignment = services.assignment_for(session, reg.id)
         number = session.get(Locker, assignment.locker_id).locker_number
     return RegistrationView(id=reg.id, kiosk_id=reg.kiosk_id, primary_category_id=reg.primary_category_id,
-                            secondary_description=reg.secondary_description, status=reg.status,
+                            secondary_description=reg.secondary_description, found_location=reg.found_location, status=reg.status,
                             analysis_status=reg.analysis_status, locker_number=number,
                             images=[{"id": value.id, "shot_order": value.shot_order} for value in services.images(session, reg.id)])
 
@@ -88,7 +90,9 @@ def list_categories(session: DB):
 
 @router.post("/registrations", response_model=RegistrationView, status_code=201)
 def create_registration(body: RegistrationInput, session: DB):
-    return registration_view(session, services.create_registration(session, body.kiosk_id, body.primary_category_id, body.secondary_description))
+    return registration_view(session, services.create_registration(
+        session, body.kiosk_id, body.primary_category_id, body.secondary_description,
+        found_location=(body.found_location or "").strip() or None))
 
 
 @router.get("/registrations/{registration_id}", response_model=RegistrationView)

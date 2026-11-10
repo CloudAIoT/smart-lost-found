@@ -1,4 +1,4 @@
-"""Registration/storage schema; identity and ownership verification are deferred."""
+"""Registration, storage and ownership attempt persistence."""
 
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -53,6 +53,7 @@ class Registration(Entity, Base):
     kiosk_id: Mapped[UUID] = mapped_column(ForeignKey("kiosks.id"))
     primary_category_id: Mapped[UUID | None] = mapped_column(ForeignKey("categories.id"))
     secondary_description: Mapped[str | None]
+    found_location: Mapped[str | None] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(default="draft")
     analysis_status: Mapped[str] = mapped_column(default="pending")
     analysis_input_image_ids: Mapped[list | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
@@ -68,6 +69,13 @@ class FoundItem(Entity, Base):
     registration_id: Mapped[UUID] = mapped_column(ForeignKey("registrations.id"), unique=True)
     status: Mapped[str] = mapped_column(default="awaiting_deposit")
     __table_args__ = (CheckConstraint("status IN ('awaiting_deposit','stored')", name="item_status"),)
+
+
+class OwnershipAttempt(Entity, Base):
+    __tablename__ = "ownership_attempts"
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    version: Mapped[int]
+    state: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
 
 
 class StorageAssignment(Entity, Base):

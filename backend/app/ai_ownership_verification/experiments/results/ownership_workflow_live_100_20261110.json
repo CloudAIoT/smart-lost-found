@@ -1,0 +1,804 @@
+{
+  "created_at": "2026-11-10T10:45:45.629019+00:00",
+  "model": "gemini-3.5-flash-lite",
+  "data": {
+    "synthetic": true,
+    "item_count": 100,
+    "searchable_count": 90,
+    "distribution": {
+      "normal": 25,
+      "similar": 25,
+      "missing": 40,
+      "excluded": 10
+    }
+  },
+  "request_limit": 30,
+  "source_commit": "6f95089ea95f0a4abad401050156284d1f768fed",
+  "source_hashes": {
+    "search.py": "404d5dab4ca9057ee765d0a7bd12a7de9ebc188a420d4742538cccfafbd53ee1",
+    "workflow.py": "df5142531a9bca90f441e1e57396f56a8b9525f5dbb2b77c2dfbab455c138920",
+    "workflow_ai.py": "2d36d2229f5e1394c840dd878d23f1c0e041d65b01704ccd204cf77235b250c3",
+    "workflow_schemas.py": "e29a8c9f4f0d7c2efbdcded9996cad7d59895760d435a0c35810a5534316622a",
+    "experiments/ownership_live_corpus.py": "47ade4f3bdab0e2eb390371b273c3f25630f1806c9d346cc1ab8f4bf6e7b5dbf",
+    "experiments/run_ownership_live.py": "7724784a66affeff49bb4bf557d75a7669f9de115b925eaac9831cd24a685244"
+  },
+  "cases": [
+    {
+      "case": "brand_missing",
+      "description": "흰색 애플 이어폰을 잃어버렸어요.",
+      "expected": {
+        "status": "completed",
+        "decision": "insufficient_evidence",
+        "include": "M01",
+        "initial_matches": [
+          "category",
+          "color"
+        ],
+        "rounds": 0
+      },
+      "steps": [],
+      "checks": {
+        "status": false,
+        "decision": false,
+        "rounds": true,
+        "handoff_decision": false,
+        "missing_brand_candidate_kept": false,
+        "no_brand_point": false
+      },
+      "actual": {
+        "http": 502,
+        "error": "OWNERSHIP_AI_REQUEST_FAILED",
+        "initial_candidates": null
+      },
+      "passed": false
+    },
+    {
+      "case": "brand_only",
+      "description": "애플",
+      "expected": {
+        "status": "no_candidates",
+        "decision": null
+      },
+      "steps": [],
+      "checks": {
+        "status": false,
+        "decision": true
+      },
+      "actual": {
+        "status": "needs_clues",
+        "decision": null,
+        "initial_candidates": []
+      },
+      "passed": false
+    },
+    {
+      "case": "owner_five_questions",
+      "description": "도서관 근처에서 필통을 잃어버렸어요.",
+      "expected": {
+        "status": "completed",
+        "decision": "supported",
+        "item": "P01",
+        "initial_count": 5,
+        "rounds": 5,
+        "answers": {
+          "장식": "파란 원형 핀",
+          "문구": "MJ",
+          "재질": "fabric",
+          "브랜드": "Carhartt",
+          "색상": "navy"
+        }
+      },
+      "steps": [
+        {
+          "question": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
+          "options": [
+            "파란 원형 핀",
+            "빨간 사각 핀",
+            "초록 줄무늬 배지",
+            "모르겠어요"
+          ],
+          "selected": "파란 원형 핀",
+          "candidates_before": [
+            {
+              "item": "P05",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P04",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P02",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P03",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ]
+        },
+        {
+          "question": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
+          "options": [
+            "TM",
+            "AB",
+            "MJ",
+            "모르겠어요"
+          ],
+          "selected": "MJ",
+          "candidates_before": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ]
+        },
+        {
+          "question": "기억하는 물건의 재질을 골라 주세요.",
+          "options": [
+            "fabric",
+            "plastic",
+            "metal",
+            "모르겠어요"
+          ],
+          "selected": "fabric",
+          "candidates_before": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ]
+        },
+        {
+          "question": "기억하는 물건의 브랜드를 골라 주세요.",
+          "options": [
+            "Carhartt",
+            "Dickies",
+            "Levi's",
+            "모르겠어요"
+          ],
+          "selected": "Carhartt",
+          "candidates_before": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ]
+        },
+        {
+          "question": "기억하는 물건의 색상을 골라 주세요.",
+          "options": [
+            "navy",
+            "mustard",
+            "crimson",
+            "모르겠어요"
+          ],
+          "selected": "navy",
+          "candidates_before": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ]
+        }
+      ],
+      "checks": {
+        "status": true,
+        "decision": true,
+        "initial_count": true,
+        "rounds": true,
+        "handoff_item": true,
+        "handoff_decision": true
+      },
+      "actual": {
+        "status": "completed",
+        "decision": "supported",
+        "initial_candidates": [
+          {
+            "item": "P05",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": "P04",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": "P02",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": "P03",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": "P01",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          }
+        ],
+        "handoff": {
+          "item": "P01",
+          "decision": "supported",
+          "matched_evidence_groups": 5,
+          "answered_questions": 5,
+          "policy_version": "development_v1"
+        }
+      },
+      "passed": true
+    },
+    {
+      "case": "unknown_answers",
+      "description": "지갑을 잃어버렸어요.",
+      "expected": {
+        "status": "completed",
+        "decision": "insufficient_evidence",
+        "initial_count": 5,
+        "rounds": 2
+      },
+      "steps": [
+        {
+          "question": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
+          "options": [
+            "은색 나뭇잎",
+            "검은색 점",
+            "갈색 고리",
+            "모르겠어요"
+          ],
+          "selected": "모르겠어요",
+          "candidates_before": [
+            {
+              "item": "W05",
+              "initial_matches": [
+                "category"
+              ]
+            },
+            {
+              "item": "W03",
+              "initial_matches": [
+                "category"
+              ]
+            },
+            {
+              "item": "W01",
+              "initial_matches": [
+                "category"
+              ]
+            },
+            {
+              "item": "W02",
+              "initial_matches": [
+                "category"
+              ]
+            },
+            {
+              "item": "W04",
+              "initial_matches": [
+                "category"
+              ]
+            }
+          ]
+        },
+        {
+          "question": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
+          "options": [
+            "AB",
+            "EF",
+            "CD",
+            "모르겠어요"
+          ],
+          "selected": "모르겠어요",
+          "candidates_before": [
+            {
+              "item": "W05",
+              "initial_matches": [
+                "category"
+              ]
+            },
+            {
+              "item": "W03",
+              "initial_matches": [
+                "category"
+              ]
+            },
+            {
+              "item": "W01",
+              "initial_matches": [
+                "category"
+              ]
+            },
+            {
+              "item": "W02",
+              "initial_matches": [
+                "category"
+              ]
+            },
+            {
+              "item": "W04",
+              "initial_matches": [
+                "category"
+              ]
+            }
+          ]
+        }
+      ],
+      "checks": {
+        "status": true,
+        "decision": true,
+        "initial_count": true,
+        "rounds": true,
+        "handoff_decision": true
+      },
+      "actual": {
+        "status": "completed",
+        "decision": "insufficient_evidence",
+        "initial_candidates": [
+          {
+            "item": "W05",
+            "initial_matches": [
+              "category"
+            ]
+          },
+          {
+            "item": "W03",
+            "initial_matches": [
+              "category"
+            ]
+          },
+          {
+            "item": "W01",
+            "initial_matches": [
+              "category"
+            ]
+          },
+          {
+            "item": "W02",
+            "initial_matches": [
+              "category"
+            ]
+          },
+          {
+            "item": "W04",
+            "initial_matches": [
+              "category"
+            ]
+          }
+        ],
+        "handoff": {
+          "item": null,
+          "decision": "insufficient_evidence",
+          "matched_evidence_groups": 0,
+          "answered_questions": 2,
+          "policy_version": "development_v1"
+        }
+      },
+      "passed": true
+    },
+    {
+      "case": "explicit_conflict",
+      "description": "수첩을 찾고 있어요.",
+      "expected": {
+        "status": "completed",
+        "decision": "not_confirmed",
+        "rounds": 1,
+        "wrong": "물방울 배지"
+      },
+      "steps": [],
+      "checks": {
+        "status": false,
+        "decision": false,
+        "rounds": false,
+        "handoff_decision": false
+      },
+      "actual": {
+        "http": 502,
+        "error": "OWNERSHIP_AI_REQUEST_FAILED",
+        "initial_candidates": null
+      },
+      "passed": false
+    },
+    {
+      "case": "public_narrowing",
+      "description": "검은색 우산을 잃어버렸어요.",
+      "expected": {
+        "status": "completed",
+        "decision": "insufficient_evidence",
+        "item": "U01",
+        "initial_count": 5,
+        "rounds": 1,
+        "matches": 0,
+        "answers": {
+          "재질": "nylon"
+        }
+      },
+      "steps": [],
+      "checks": {
+        "status": false,
+        "decision": false,
+        "initial_count": false,
+        "rounds": false,
+        "handoff_item": false,
+        "handoff_decision": false,
+        "matched_groups": false
+      },
+      "actual": {
+        "http": 502,
+        "error": "OWNERSHIP_AI_REQUEST_FAILED",
+        "initial_candidates": null
+      },
+      "passed": false
+    },
+    {
+      "case": "no_candidate",
+      "description": "보라색 바이올린을 잃어버렸어요.",
+      "expected": {
+        "status": "no_candidates",
+        "decision": null
+      },
+      "steps": [],
+      "checks": {
+        "status": true,
+        "decision": true
+      },
+      "actual": {
+        "status": "no_candidates",
+        "decision": null,
+        "initial_candidates": []
+      },
+      "passed": true
+    },
+    {
+      "case": "not_enough_to_search",
+      "description": "잘 모르겠어요.",
+      "expected": {
+        "status": "needs_clues",
+        "decision": null
+      },
+      "steps": [],
+      "checks": {
+        "status": true,
+        "decision": true
+      },
+      "actual": {
+        "status": "needs_clues",
+        "decision": null,
+        "initial_candidates": []
+      },
+      "passed": true
+    },
+    {
+      "case": "missing_all_private",
+      "description": "보온병을 찾고 있어요.",
+      "expected": {
+        "status": "completed",
+        "decision": "insufficient_evidence",
+        "item": "M03",
+        "rounds": 0
+      },
+      "steps": [],
+      "checks": {
+        "status": true,
+        "decision": true,
+        "rounds": true,
+        "handoff_item": true,
+        "handoff_decision": true
+      },
+      "actual": {
+        "status": "completed",
+        "decision": "insufficient_evidence",
+        "initial_candidates": [
+          {
+            "item": "M03",
+            "initial_matches": [
+              "category"
+            ]
+          }
+        ],
+        "handoff": {
+          "item": "M03",
+          "decision": "insufficient_evidence",
+          "matched_evidence_groups": 0,
+          "answered_questions": 0,
+          "policy_version": "development_v1"
+        }
+      },
+      "passed": true
+    },
+    {
+      "case": "omitted_field",
+      "description": "빨간색 책갈피를 잃어버렸어요.",
+      "expected": {
+        "status": "completed",
+        "decision": "insufficient_evidence",
+        "item": "M04",
+        "rounds": 0
+      },
+      "steps": [],
+      "checks": {
+        "status": false,
+        "decision": false,
+        "rounds": true,
+        "handoff_item": false,
+        "handoff_decision": false
+      },
+      "actual": {
+        "http": 502,
+        "error": "OWNERSHIP_AI_RATE_LIMITED",
+        "initial_candidates": null
+      },
+      "passed": false
+    },
+    {
+      "case": "excluded_stock",
+      "not_run": "OWNERSHIP_AI_RATE_LIMITED"
+    },
+    {
+      "case": "too_many_candidates",
+      "not_run": "OWNERSHIP_AI_RATE_LIMITED"
+    }
+  ],
+  "requests": 17,
+  "api_events": [
+    {
+      "case": "brand_missing",
+      "stage": "extract",
+      "error": "OWNERSHIP_AI_REQUEST_FAILED",
+      "milliseconds": 5629
+    },
+    {
+      "case": "brand_only",
+      "stage": "extract",
+      "result": {
+        "category": null,
+        "color": null,
+        "material": null,
+        "brand": null,
+        "visible_text": null,
+        "distinctive_features": null,
+        "description": null,
+        "location": null
+      },
+      "milliseconds": 5974
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "extract",
+      "result": {
+        "category": "필통",
+        "color": null,
+        "material": null,
+        "brand": null,
+        "visible_text": null,
+        "distinctive_features": null,
+        "description": null,
+        "location": "도서관 근처"
+      },
+      "milliseconds": 2282
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "options:visible_text",
+      "result": [
+        "TM",
+        "AB",
+        "JR",
+        "KD",
+        "SM"
+      ],
+      "milliseconds": 1295
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "options:material",
+      "result": [
+        "plastic",
+        "metal",
+        "leather",
+        "glass",
+        "rubber"
+      ],
+      "milliseconds": 1085
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "options:brand",
+      "result": [
+        "Dickies",
+        "Levi's",
+        "Wrangler",
+        "Timberland",
+        "Patagonia"
+      ],
+      "milliseconds": 1369
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "options:color",
+      "result": [
+        "crimson",
+        "mustard",
+        "emerald",
+        "charcoal",
+        "turquoise"
+      ],
+      "milliseconds": 1270
+    },
+    {
+      "case": "unknown_answers",
+      "stage": "extract",
+      "result": {
+        "category": "지갑",
+        "color": null,
+        "material": null,
+        "brand": null,
+        "visible_text": null,
+        "distinctive_features": null,
+        "description": null,
+        "location": null
+      },
+      "milliseconds": 1601
+    },
+    {
+      "case": "unknown_answers",
+      "stage": "options:distinctive_features",
+      "result": [
+        "검은색 점",
+        "붉은 줄무늬",
+        "황금빛 테두리",
+        "푸른 별무늬",
+        "하얀 소용돌이"
+      ],
+      "milliseconds": 3779
+    },
+    {
+      "case": "unknown_answers",
+      "stage": "options:visible_text",
+      "result": [
+        "EF",
+        "GH",
+        "IJ",
+        "KL",
+        "MN"
+      ],
+      "milliseconds": 3930
+    },
+    {
+      "case": "explicit_conflict",
+      "stage": "extract",
+      "result": {
+        "category": "수첩",
+        "color": null,
+        "material": null,
+        "brand": null,
+        "visible_text": null,
+        "distinctive_features": null,
+        "description": null,
+        "location": null
+      },
+      "milliseconds": 1437
+    },
+    {
+      "case": "explicit_conflict",
+      "stage": "options:distinctive_features",
+      "error": "OWNERSHIP_AI_REQUEST_FAILED",
+      "milliseconds": 1298
+    },
+    {
+      "case": "public_narrowing",
+      "stage": "extract",
+      "error": "OWNERSHIP_AI_REQUEST_FAILED",
+      "milliseconds": 2796
+    },
+    {
+      "case": "no_candidate",
+      "stage": "extract",
+      "result": {
+        "category": "바이올린",
+        "color": "보라색",
+        "material": null,
+        "brand": null,
+        "visible_text": null,
+        "distinctive_features": null,
+        "description": null,
+        "location": null
+      },
+      "milliseconds": 1692
+    },
+    {
+      "case": "not_enough_to_search",
+      "stage": "extract",
+      "result": {
+        "category": null,
+        "color": null,
+        "material": null,
+        "brand": null,
+        "visible_text": null,
+        "distinctive_features": null,
+        "description": null,
+        "location": null
+      },
+      "milliseconds": 2297
+    },
+    {
+      "case": "missing_all_private",
+      "stage": "extract",
+      "result": {
+        "category": "보온병",
+        "color": null,
+        "material": null,
+        "brand": null,
+        "visible_text": null,
+        "distinctive_features": null,
+        "description": null,
+        "location": null
+      },
+      "milliseconds": 1786
+    },
+    {
+      "case": "omitted_field",
+      "stage": "extract",
+      "error": "OWNERSHIP_AI_RATE_LIMITED",
+      "milliseconds": 271
+    }
+  ],
+  "stop_code": "OWNERSHIP_AI_RATE_LIMITED",
+  "description_invariance": {
+    "status": "passed",
+    "before": "no_candidates",
+    "after": "no_candidates",
+    "clues": {
+      "category": "바이올린",
+      "color": "보라색",
+      "material": null,
+      "brand": null,
+      "visible_text": null,
+      "distinctive_features": null,
+      "description": null,
+      "location": null
+    }
+  }
+}

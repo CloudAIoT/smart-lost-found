@@ -1,0 +1,64 @@
+{
+  "mode": "isolated_sqlite_rules_without_gemini",
+  "checks": {
+    "brand_missing": {
+      "status": "question",
+      "items": [
+        {
+          "item": "M01",
+          "initial_matches": [
+            "category",
+            "color"
+          ]
+        },
+        {
+          "item": "M02",
+          "initial_matches": [
+            "category"
+          ]
+        }
+      ],
+      "passed": true
+    },
+    "brand_only": {
+      "status": "no_candidates",
+      "items": [],
+      "passed": true
+    },
+    "omitted_field": {
+      "status": "question",
+      "items": [
+        {
+          "item": "M04",
+          "initial_matches": [
+            "category",
+            "color"
+          ]
+        }
+      ],
+      "passed": true
+    },
+    "excluded_stock": {
+      "status": "no_candidates",
+      "items": [],
+      "passed": true
+    },
+    "too_many_candidates": {
+      "status": "refine_search",
+      "items": [],
+      "passed": true
+    },
+    "public_narrowing": {
+      "initial_count": 5,
+      "question": "기억하는 물건의 재질을 골라 주세요.",
+      "purpose": "narrowing",
+      "selected": "nylon",
+      "decision": "insufficient_evidence",
+      "remaining": [
+        "U01"
+      ],
+      "matched_groups": 0,
+      "passed": true
+    }
+  }
+}

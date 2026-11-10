@@ -1,5 +1,7 @@
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
+import json
+import sys
 from threading import Barrier
 from types import SimpleNamespace
 from uuid import uuid4
@@ -25,18 +27,21 @@ class FakeDevice:
         self.jpeg = jpeg
         self.captures = []
         self.opens = []
+        self.expiries = []
         self.door_state = "closed"
         self.error = None
         self.on_open = None
 
     def capture(self, kiosk_id, command_id, registration_id, expires_at):
         self.captures.append((kiosk_id, command_id, registration_id))
+        self.expiries.append(expires_at)
         if self.error:
             raise self.error
         return self.jpeg
 
     def open(self, kiosk_id, number, command_id, expires_at):
         self.opens.append((kiosk_id, number, command_id))
+        self.expiries.append(expires_at)
         if self.on_open:
             self.on_open()
         if self.error:
@@ -69,6 +74,7 @@ class FakeAnalyzer:
     def __init__(self):
         self.error = None
         self.wrong_images = False
+        self.features = {"test_only_private_mark": "secret-scratch"}
         self.calls = 0
 
     def analyze(self, registration_id, images):
@@ -77,7 +83,7 @@ class FakeAnalyzer:
             raise self.error
         ids = tuple(value.image_id for value in images)
         return AnalysisResult(image_ids=(uuid4(), uuid4()) if self.wrong_images else ids,
-                              features={"test_only_private_mark": "secret-scratch"})
+                              features=self.features)
 
 
 @pytest.fixture
@@ -96,7 +102,8 @@ def env(database_engine):
     Image.new("RGB", (8, 8)).save(buffer, format="JPEG")
     gateway, store, analyzer = FakeDevice(buffer.getvalue()), FakeStore(), FakeAnalyzer()
     settings = Settings(_env_file=None, postgres_db="test", postgres_user="test", postgres_password="test",
-                        local_development=True, command_ttl_seconds=30, max_image_bytes=1024 * 1024)
+                        local_development=True, command_ttl_seconds=30, max_image_bytes=1024 * 1024,
+                        return_code_ttl_seconds=300)
     def sessions():
         with Session(engine) as session:
             yield session
@@ -105,7 +112,8 @@ def env(database_engine):
     try:
         with TestClient(app) as client:
             yield SimpleNamespace(client=client, engine=engine, gateway=gateway, store=store,
-                                  analyzer=analyzer, settings=settings, kiosk_id=kiosk_id, category_id=category_id)
+                                  analyzer=analyzer, settings=settings,
+                                  kiosk_id=kiosk_id, category_id=category_id)
     finally:
         app.dependency_overrides.clear()
 
@@ -163,6 +171,17 @@ def test_full_deposit_and_duplicates(env):
     assert "object_key" not in env.client.get(base).text
 
 
+def test_commands_carry_a_timezone_so_devices_can_judge_expiry(env):
+    # A naive expires_at is rejected by the Pi as INVALID_COMMAND, and timestamp
+    # timezone handling differs per database, so the sent value must not be reloaded.
+    value = env.client.post(f"/api/registrations/{ready(env)}/deposit/open")
+    assert value.status_code == 200, value.text
+    assert len(env.gateway.expiries) == 3
+    for expires_at in env.gateway.expiries:
+        assert expires_at.tzinfo is not None and expires_at.utcoffset() is not None
+        assert expires_at.isoformat().endswith("+00:00")
+
+
 def test_optional_inputs_and_registration_isolation(env):
     first, second = start(env), start(env)
     photos(env, first)
@@ -188,6 +207,95 @@ def test_order_and_analysis_gates(env):
     assert env.gateway.opens == []
     env.analyzer.wrong_images = False
     assert env.client.post(base + "/analysis").status_code == 200
+
+
+def deeply_nested_features():
+    # The multiplier only builds a deliberately deep candidate; the real json.dumps
+    # preflight in the test is what proves it overflows the encoder, so no exact relation
+    # to sys.getrecursionlimit() is claimed. Build the chain with a loop, never by
+    # recursing here.
+    value = {"leaf": True}
+    for _ in range(sys.getrecursionlimit() * 10):
+        value = {"nested": value}
+    return value
+
+
+def self_referencing_features():
+    value = {}
+    value["self"] = value
+    return value
+
+
+UNSTORABLE_FEATURES = {
+    "empty": dict,
+    "not_a_dict": lambda: ["unexpected"],
+    "unsupported_value": lambda: {"handle": object()},
+    "nan": lambda: {"score": float("nan")},
+    "infinity": lambda: {"score": float("inf")},
+    "negative_infinity": lambda: {"score": -float("inf")},
+    "cycle": self_referencing_features,
+    "too_deep": deeply_nested_features,
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNSTORABLE_FEATURES))
+def test_unstorable_features_fail_closed_and_allow_a_normal_retry(env, case):
+    from uuid import UUID
+    features = UNSTORABLE_FEATURES[case]()
+    if case == "too_deep":
+        # Depth is a runtime property, so confirm this chain really overflows the encoder
+        # instead of trusting a fixed level count to reach the serialization boundary.
+        with pytest.raises(RecursionError):
+            json.dumps(features, allow_nan=False)
+    value = start(env)
+    photos(env, value)
+    base = f"/api/registrations/{value}"
+    with Session(env.engine) as session:
+        original = [(image.id, image.object_key) for image in
+                    session.scalars(select(ItemImage).order_by(ItemImage.shot_order))]
+    valid, env.analyzer.features = env.analyzer.features, features
+    response = env.client.post(base + "/analysis")
+    assert response.status_code == 502, response.text
+    assert response.json()["detail"]["code"] == "INVALID_ANALYSIS_RESULT"
+    with Session(env.engine) as session:
+        reg = session.get(Registration, UUID(value))
+        assert (reg.status, reg.analysis_status) == ("draft", "failed")
+        assert reg.analysis_features is None
+        assert reg.analysis_input_image_ids == [str(image_id) for image_id, _ in original]
+    assert env.client.post(base + "/deposit/open").status_code == 409
+    assert env.gateway.opens == []
+    with Session(env.engine) as session:
+        assert session.scalars(select(DeviceCommand).where(DeviceCommand.action == "open")).all() == []
+    env.analyzer.features = valid
+    retry = env.client.post(base + "/analysis")
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["status"] == "ready"
+    with Session(env.engine) as session:
+        reg = session.get(Registration, UUID(value))
+        assert (reg.status, reg.analysis_status) == ("ready", "succeeded")
+        assert [(image.id, image.object_key) for image in
+                session.scalars(select(ItemImage).order_by(ItemImage.shot_order))] == original
+    assert len(env.gateway.captures) == 2
+    assert len(env.store.objects) == 2
+
+
+def test_analyzer_recursion_error_is_not_reported_as_an_invalid_result(env):
+    # Only the result serialization check turns a RecursionError into INVALID_ANALYSIS_RESULT.
+    # Catching it around the analyzer call too would report an unknown analyzer failure as a
+    # handled validation failure, so this unrecovered case must keep leaking.
+    from uuid import UUID
+    value = start(env)
+    photos(env, value)
+    base = f"/api/registrations/{value}"
+    env.analyzer.error = RecursionError("test-only analyzer failure")
+    with pytest.raises(RecursionError):
+        env.client.post(base + "/analysis")
+    with Session(env.engine) as session:
+        reg = session.get(Registration, UUID(value))
+        assert (reg.status, reg.analysis_status) == ("analyzing", "running")
+        assert reg.analysis_features is None
+    assert env.client.post(base + "/deposit/open").status_code == 409
+    assert env.gateway.opens == []
 
 
 @pytest.mark.parametrize("failure", ["storage", "invalid_jpeg", "device"])

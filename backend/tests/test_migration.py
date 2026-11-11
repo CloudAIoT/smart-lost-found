@@ -11,15 +11,21 @@ from app import models
 
 
 def test_migration_upgrade_matches_models_and_downgrades(database_engine):
-    path = Path(__file__).parents[1] / "alembic/versions/0001_registration_storage.py"
-    spec = importlib.util.spec_from_file_location("initial_migration", path)
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
+    directory = Path(__file__).parents[1] / "alembic/versions"
+    migrations = []
+    for path in sorted(directory.glob("0*.py")):
+        spec = importlib.util.spec_from_file_location(path.stem, path)
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        assert migration.down_revision == (migrations[-1].revision if migrations else None)
+        migrations.append(migration)
     engine = database_engine
     with engine.begin() as connection:
         context = MigrationContext.configure(connection)
         with Operations.context(context):
-            migration.upgrade()
+            for migration in migrations:
+                migration.upgrade()
             assert compare_metadata(context, Base.metadata) == []
-            migration.downgrade()
+            for migration in reversed(migrations):
+                migration.downgrade()
             assert inspect(connection).get_table_names() == []

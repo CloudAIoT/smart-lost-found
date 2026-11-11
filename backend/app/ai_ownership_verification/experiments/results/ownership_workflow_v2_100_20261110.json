@@ -1,0 +1,1153 @@
+{
+  "full_run": {
+    "created_at": "2026-11-10T11:36:03.124928+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "data": {
+      "synthetic": true,
+      "item_count": 100,
+      "searchable_count": 90,
+      "distribution": {
+        "normal": 25,
+        "similar": 25,
+        "missing": 40,
+        "excluded": 10
+      }
+    },
+    "request_limit": 25,
+    "source_commit": "6f95089ea95f0a4abad401050156284d1f768fed",
+    "source_hashes": {
+      "search.py": "b63b0ae75209b77c9824ba87c9ba9362ae29c132db7ac4d8fff6272412a497db",
+      "workflow.py": "e3cc8f6915cebf5d89b46fb4d294fdfd720b5f21f75a3785781ac2c4d77924e0",
+      "workflow_ai.py": "190f113478c0ab7deb3dbf765b5e6cd2742adf621d7a6b43b3af33c2878f04c0",
+      "workflow_schemas.py": "03a8fcb68355bfd6d899cc3ddb12572ac6aaa76f51251a352ee60b8531c87a89",
+      "experiments/ownership_live_corpus.py": "47ade4f3bdab0e2eb390371b273c3f25630f1806c9d346cc1ab8f4bf6e7b5dbf",
+      "experiments/run_ownership_live.py": "d37fe44d6fea9ee07c5fbabd54e729fb62698a6e455028a3c515f50053ff52b6"
+    },
+    "cases": [
+      {
+        "case": "owner_five_questions",
+        "description": "도서관에서 필통을 찾고 있어요.",
+        "expected": {
+          "status": "completed",
+          "decision": "supported",
+          "item": "P01",
+          "initial_count": 5,
+          "rounds": 5,
+          "answers": {
+            "장식": "파란 원형 핀",
+            "문구": "MJ",
+            "재질": "fabric",
+            "브랜드": "Carhartt",
+            "색상": "navy"
+          }
+        },
+        "steps": [
+          {
+            "question": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
+            "options": [
+              "빨간 사각 핀",
+              "파란 원형 핀",
+              "노란 별 모양 배지",
+              "검은색 삼각형 핀",
+              "초록 줄무늬 배지"
+            ],
+            "selected": "파란 원형 핀",
+            "expected_wrong": false,
+            "candidates_before": [
+              {
+                "item": "P05",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              },
+              {
+                "item": "P04",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              },
+              {
+                "item": "P02",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              },
+              {
+                "item": "P03",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              },
+              {
+                "item": "P01",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              }
+            ]
+          },
+          {
+            "question": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
+            "options": [
+              "MJ",
+              "XY",
+              "KL",
+              "AB",
+              "PQ"
+            ],
+            "selected": "MJ",
+            "expected_wrong": false,
+            "candidates_before": [
+              {
+                "item": "P05",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              },
+              {
+                "item": "P04",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              },
+              {
+                "item": "P02",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              },
+              {
+                "item": "P03",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              },
+              {
+                "item": "P01",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              }
+            ]
+          },
+          {
+            "question": "기억하는 물건의 재질을 골라 주세요.",
+            "options": [
+              "wood",
+              "metal",
+              "fabric",
+              "plastic",
+              "leather"
+            ],
+            "selected": "fabric",
+            "expected_wrong": false,
+            "candidates_before": [
+              {
+                "item": "P01",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              }
+            ]
+          },
+          {
+            "question": "기억하는 물건의 브랜드를 골라 주세요.",
+            "options": [
+              "Dickies",
+              "Levi's",
+              "Timberland",
+              "Carhartt",
+              "Wrangler"
+            ],
+            "selected": "Carhartt",
+            "expected_wrong": false,
+            "candidates_before": [
+              {
+                "item": "P01",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              }
+            ]
+          },
+          {
+            "question": "기억하는 물건의 색상을 골라 주세요.",
+            "options": [
+              "olive",
+              "mustard",
+              "maroon",
+              "teal",
+              "navy"
+            ],
+            "selected": "navy",
+            "expected_wrong": false,
+            "candidates_before": [
+              {
+                "item": "P01",
+                "initial_matches": [
+                  "category",
+                  "location"
+                ]
+              }
+            ]
+          }
+        ],
+        "checks": {
+          "status": true,
+          "decision": true,
+          "initial_count": true,
+          "rounds": true,
+          "five_unique_options": true,
+          "handoff_item": true,
+          "handoff_decision": true
+        },
+        "actual": {
+          "status": "completed",
+          "decision": "supported",
+          "initial_candidates": [
+            {
+              "item": "P05",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P04",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P02",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P03",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "remaining_candidates": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "handoff": {
+            "item": "P01",
+            "decision": "supported",
+            "matched_evidence_groups": 5,
+            "answered_questions": 5,
+            "policy_version": "development_v2"
+          }
+        },
+        "passed": true
+      },
+      {
+        "case": "two_wrong",
+        "description": "수첩을 잃어버렸어요.",
+        "expected": {
+          "status": "completed",
+          "decision": "not_confirmed",
+          "initial_count": 1,
+          "rounds": 2,
+          "matches": 0,
+          "wrong_for": {
+            "장식": "물방울 배지",
+            "문구": "QX"
+          }
+        },
+        "steps": [
+          {
+            "question": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
+            "options": [
+              "물방울 배지",
+              "원형 엠블럼",
+              "하트 장식",
+              "다이아몬드 참",
+              "별모양 스티커"
+            ],
+            "selected": "원형 엠블럼",
+            "expected_wrong": true,
+            "candidates_before": [
+              {
+                "item": "N01",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ]
+          },
+          {
+            "question": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
+            "options": [
+              "7P",
+              "MK",
+              "W3",
+              "Z9",
+              "QX"
+            ],
+            "selected": "7P",
+            "expected_wrong": true,
+            "candidates_before": [
+              {
+                "item": "N01",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ]
+          }
+        ],
+        "checks": {
+          "status": true,
+          "decision": true,
+          "initial_count": true,
+          "rounds": true,
+          "five_unique_options": true,
+          "handoff_decision": true,
+          "matched_groups": true
+        },
+        "actual": {
+          "status": "completed",
+          "decision": "not_confirmed",
+          "initial_candidates": [
+            {
+              "item": "N01",
+              "initial_matches": [
+                "category"
+              ]
+            }
+          ],
+          "remaining_candidates": [],
+          "handoff": {
+            "item": null,
+            "decision": "not_confirmed",
+            "matched_evidence_groups": 0,
+            "answered_questions": 2,
+            "policy_version": "development_v2"
+          }
+        },
+        "passed": true
+      },
+      {
+        "case": "one_wrong",
+        "description": "수첩을 잃어버렸어요.",
+        "expected": {
+          "status": "completed",
+          "decision": "insufficient_evidence",
+          "item": "N01",
+          "initial_count": 1,
+          "rounds": 2,
+          "matches": 1,
+          "wrong_for": {
+            "장식": "물방울 배지"
+          },
+          "answers": {
+            "문구": "QX"
+          }
+        },
+        "steps": [],
+        "checks": {
+          "status": false,
+          "decision": false,
+          "initial_count": false,
+          "rounds": false,
+          "five_unique_options": true,
+          "handoff_item": false,
+          "handoff_decision": false,
+          "matched_groups": false
+        },
+        "actual": {
+          "http": 502,
+          "error": "OWNERSHIP_AI_REQUEST_FAILED",
+          "initial_candidates": null
+        },
+        "passed": false
+      },
+      {
+        "case": "similar_color",
+        "description": "진한 파란색 필통을 잃어버렸어요.",
+        "expected": {
+          "status": "question",
+          "search_only": true,
+          "items": [
+            "P01"
+          ],
+          "required_field": [
+            "P01",
+            "color"
+          ]
+        },
+        "actual": {
+          "status": "question",
+          "candidates": {
+            "P01": [
+              "category",
+              "color"
+            ]
+          },
+          "missed": [],
+          "unexpected": []
+        },
+        "checks": {
+          "status": true,
+          "candidate_set": true,
+          "required_field": true
+        },
+        "passed": true
+      },
+      {
+        "case": "all_bags",
+        "description": "가방을 잃어버렸어요.",
+        "expected": {
+          "status": "question",
+          "search_only": true,
+          "items": [
+            "B01",
+            "B02",
+            "B03",
+            "B04",
+            "B05",
+            "N02",
+            "N07",
+            "N12",
+            "N17",
+            "N22"
+          ]
+        },
+        "actual": {
+          "status": "question",
+          "candidates": {
+            "B01": [
+              "category"
+            ],
+            "B05": [
+              "category"
+            ],
+            "B03": [
+              "category"
+            ],
+            "N12": [
+              "category"
+            ],
+            "N17": [
+              "category"
+            ],
+            "B04": [
+              "category"
+            ],
+            "N02": [
+              "category"
+            ],
+            "N07": [
+              "category"
+            ],
+            "B02": [
+              "category"
+            ],
+            "N22": [
+              "category"
+            ]
+          },
+          "missed": [],
+          "unexpected": []
+        },
+        "checks": {
+          "status": true,
+          "candidate_set": true
+        },
+        "passed": true
+      },
+      {
+        "case": "brand_missing",
+        "description": "흰색 애플 이어폰을 잃어버렸어요.",
+        "expected": {
+          "status": "question",
+          "search_only": true,
+          "items": [
+            "M01"
+          ],
+          "required_field": [
+            "M01",
+            "color"
+          ],
+          "missing_brand": "M01"
+        },
+        "actual": {
+          "error": "OWNERSHIP_UNGROUNDED_CLUE"
+        },
+        "passed": false
+      },
+      {
+        "case": "no_candidate",
+        "description": "보라색 바이올린을 잃어버렸어요.",
+        "expected": {
+          "status": "no_candidates",
+          "search_only": true,
+          "items": []
+        },
+        "actual": {
+          "status": "no_candidates",
+          "candidates": {},
+          "missed": [],
+          "unexpected": []
+        },
+        "checks": {
+          "status": true,
+          "candidate_set": true
+        },
+        "passed": true
+      }
+    ],
+    "requests": 19,
+    "api_events": [
+      {
+        "case": "owner_five_questions",
+        "stage": "extract",
+        "provider_http_status": 200,
+        "result": {
+          "category": "필통",
+          "color": null,
+          "material": null,
+          "brand": null,
+          "visible_text": null,
+          "distinctive_features": null,
+          "description": null,
+          "location": "도서관"
+        },
+        "milliseconds": 1498
+      },
+      {
+        "case": "owner_five_questions",
+        "stage": "search",
+        "items_compared": 90,
+        "provider_http_status": 200,
+        "result": [
+          {
+            "item": 29,
+            "matched_fields": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": 40,
+            "matched_fields": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": 58,
+            "matched_fields": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": 72,
+            "matched_fields": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": 85,
+            "matched_fields": [
+              "category",
+              "location"
+            ]
+          }
+        ],
+        "milliseconds": 2377
+      },
+      {
+        "case": "owner_five_questions",
+        "stage": "options:distinctive_features",
+        "known": [
+          "초록 줄무늬 배지",
+          "빨간 사각 핀",
+          "파란 원형 핀"
+        ],
+        "required_count": 2,
+        "provider_http_status": 200,
+        "result": [
+          "노란 별 모양 배지",
+          "검은색 삼각형 핀"
+        ],
+        "milliseconds": 1331
+      },
+      {
+        "case": "owner_five_questions",
+        "stage": "options:visible_text",
+        "known": [
+          "AB",
+          "MJ"
+        ],
+        "required_count": 3,
+        "provider_http_status": 200,
+        "result": [
+          "XY",
+          "KL",
+          "PQ"
+        ],
+        "milliseconds": 1315
+      },
+      {
+        "case": "owner_five_questions",
+        "stage": "options:material",
+        "known": [
+          "fabric"
+        ],
+        "required_count": 4,
+        "provider_http_status": 200,
+        "result": [
+          "leather",
+          "plastic",
+          "metal",
+          "wood"
+        ],
+        "milliseconds": 1967
+      },
+      {
+        "case": "owner_five_questions",
+        "stage": "options:brand",
+        "known": [
+          "Carhartt"
+        ],
+        "required_count": 4,
+        "provider_http_status": 200,
+        "result": [
+          "Dickies",
+          "Levi's",
+          "Timberland",
+          "Wrangler"
+        ],
+        "milliseconds": 1431
+      },
+      {
+        "case": "owner_five_questions",
+        "stage": "options:color",
+        "known": [
+          "navy"
+        ],
+        "required_count": 4,
+        "provider_http_status": 200,
+        "result": [
+          "maroon",
+          "teal",
+          "olive",
+          "mustard"
+        ],
+        "milliseconds": 3965
+      },
+      {
+        "case": "two_wrong",
+        "stage": "extract",
+        "provider_http_status": 200,
+        "result": {
+          "category": "수첩",
+          "color": null,
+          "material": null,
+          "brand": null,
+          "visible_text": null,
+          "distinctive_features": null,
+          "description": null,
+          "location": null
+        },
+        "milliseconds": 1572
+      },
+      {
+        "case": "two_wrong",
+        "stage": "search",
+        "items_compared": 90,
+        "provider_http_status": 200,
+        "result": [
+          {
+            "item": 21,
+            "matched_fields": [
+              "category"
+            ]
+          }
+        ],
+        "milliseconds": 5930
+      },
+      {
+        "case": "two_wrong",
+        "stage": "options:distinctive_features",
+        "known": [
+          "물방울 배지"
+        ],
+        "required_count": 4,
+        "provider_http_status": 200,
+        "result": [
+          "하트 장식",
+          "별모양 스티커",
+          "원형 엠블럼",
+          "다이아몬드 참"
+        ],
+        "milliseconds": 4400
+      },
+      {
+        "case": "two_wrong",
+        "stage": "options:visible_text",
+        "known": [
+          "QX"
+        ],
+        "required_count": 4,
+        "provider_http_status": 200,
+        "result": [
+          "Z9",
+          "MK",
+          "7P",
+          "W3"
+        ],
+        "milliseconds": 2942
+      },
+      {
+        "case": "one_wrong",
+        "stage": "extract",
+        "provider_http_status": 503,
+        "error": "OWNERSHIP_AI_REQUEST_FAILED",
+        "milliseconds": 3857
+      },
+      {
+        "case": "similar_color",
+        "stage": "extract",
+        "provider_http_status": 200,
+        "result": {
+          "category": "필통",
+          "color": "진한 파란색",
+          "material": null,
+          "brand": null,
+          "visible_text": null,
+          "distinctive_features": null,
+          "description": null,
+          "location": null
+        },
+        "milliseconds": 2067
+      },
+      {
+        "case": "similar_color",
+        "stage": "search",
+        "items_compared": 90,
+        "provider_http_status": 200,
+        "result": [
+          {
+            "item": 85,
+            "matched_fields": [
+              "category",
+              "color"
+            ]
+          }
+        ],
+        "milliseconds": 1667
+      },
+      {
+        "case": "all_bags",
+        "stage": "extract",
+        "provider_http_status": 200,
+        "result": {
+          "category": "가방",
+          "color": null,
+          "material": null,
+          "brand": null,
+          "visible_text": null,
+          "distinctive_features": null,
+          "description": null,
+          "location": null
+        },
+        "milliseconds": 4906
+      },
+      {
+        "case": "all_bags",
+        "stage": "search",
+        "items_compared": 90,
+        "provider_http_status": 200,
+        "result": [
+          {
+            "item": 8,
+            "matched_fields": [
+              "category"
+            ]
+          },
+          {
+            "item": 20,
+            "matched_fields": [
+              "category"
+            ]
+          },
+          {
+            "item": 25,
+            "matched_fields": [
+              "category"
+            ]
+          },
+          {
+            "item": 48,
+            "matched_fields": [
+              "category"
+            ]
+          },
+          {
+            "item": 51,
+            "matched_fields": [
+              "category"
+            ]
+          },
+          {
+            "item": 61,
+            "matched_fields": [
+              "category"
+            ]
+          },
+          {
+            "item": 68,
+            "matched_fields": [
+              "category"
+            ]
+          },
+          {
+            "item": 69,
+            "matched_fields": [
+              "category"
+            ]
+          },
+          {
+            "item": 70,
+            "matched_fields": [
+              "category"
+            ]
+          },
+          {
+            "item": 71,
+            "matched_fields": [
+              "category"
+            ]
+          }
+        ],
+        "milliseconds": 6490
+      },
+      {
+        "case": "brand_missing",
+        "stage": "extract",
+        "provider_http_status": 200,
+        "error": "OWNERSHIP_UNGROUNDED_CLUE",
+        "milliseconds": 2203
+      },
+      {
+        "case": "no_candidate",
+        "stage": "extract",
+        "provider_http_status": 200,
+        "result": {
+          "category": "바이올린",
+          "color": "보라색",
+          "material": null,
+          "brand": null,
+          "visible_text": null,
+          "distinctive_features": null,
+          "description": null,
+          "location": null
+        },
+        "milliseconds": 3440
+      },
+      {
+        "case": "no_candidate",
+        "stage": "search",
+        "items_compared": 90,
+        "provider_http_status": 200,
+        "result": [],
+        "milliseconds": 1446
+      }
+    ],
+    "stop_code": null
+  },
+  "targeted_rerun": {
+    "created_at": "2026-11-10T11:37:24.621978+00:00",
+    "model": "gemini-3.5-flash-lite",
+    "data": {
+      "synthetic": true,
+      "item_count": 100,
+      "searchable_count": 90,
+      "distribution": {
+        "normal": 25,
+        "similar": 25,
+        "missing": 40,
+        "excluded": 10
+      }
+    },
+    "request_limit": 7,
+    "source_commit": "6f95089ea95f0a4abad401050156284d1f768fed",
+    "source_hashes": {
+      "search.py": "b63b0ae75209b77c9824ba87c9ba9362ae29c132db7ac4d8fff6272412a497db",
+      "workflow.py": "e3cc8f6915cebf5d89b46fb4d294fdfd720b5f21f75a3785781ac2c4d77924e0",
+      "workflow_ai.py": "190f113478c0ab7deb3dbf765b5e6cd2742adf621d7a6b43b3af33c2878f04c0",
+      "workflow_schemas.py": "03a8fcb68355bfd6d899cc3ddb12572ac6aaa76f51251a352ee60b8531c87a89",
+      "experiments/ownership_live_corpus.py": "47ade4f3bdab0e2eb390371b273c3f25630f1806c9d346cc1ab8f4bf6e7b5dbf",
+      "experiments/run_ownership_live.py": "d37fe44d6fea9ee07c5fbabd54e729fb62698a6e455028a3c515f50053ff52b6"
+    },
+    "cases": [
+      {
+        "case": "one_wrong",
+        "description": "수첩을 잃어버렸어요.",
+        "expected": {
+          "status": "completed",
+          "decision": "insufficient_evidence",
+          "item": "N01",
+          "initial_count": 1,
+          "rounds": 2,
+          "matches": 1,
+          "wrong_for": {
+            "장식": "물방울 배지"
+          },
+          "answers": {
+            "문구": "QX"
+          }
+        },
+        "steps": [
+          {
+            "question": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
+            "options": [
+              "물방울 배지",
+              "홀로그램 스티커",
+              "실리콘 팔찌",
+              "아크릴 키링",
+              "자석 병따개"
+            ],
+            "selected": "홀로그램 스티커",
+            "expected_wrong": true,
+            "candidates_before": [
+              {
+                "item": "N01",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ]
+          },
+          {
+            "question": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
+            "options": [
+              "ZP",
+              "QX",
+              "KV",
+              "LM",
+              "RT"
+            ],
+            "selected": "QX",
+            "expected_wrong": false,
+            "candidates_before": [
+              {
+                "item": "N01",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ]
+          }
+        ],
+        "checks": {
+          "status": true,
+          "decision": true,
+          "initial_count": true,
+          "rounds": true,
+          "five_unique_options": true,
+          "handoff_item": true,
+          "handoff_decision": true,
+          "matched_groups": true
+        },
+        "actual": {
+          "status": "completed",
+          "decision": "insufficient_evidence",
+          "initial_candidates": [
+            {
+              "item": "N01",
+              "initial_matches": [
+                "category"
+              ]
+            }
+          ],
+          "remaining_candidates": [
+            {
+              "item": "N01",
+              "initial_matches": [
+                "category"
+              ]
+            }
+          ],
+          "handoff": {
+            "item": "N01",
+            "decision": "insufficient_evidence",
+            "matched_evidence_groups": 1,
+            "answered_questions": 2,
+            "policy_version": "development_v2"
+          }
+        },
+        "passed": true
+      },
+      {
+        "case": "brand_missing",
+        "description": "흰색 애플 이어폰을 잃어버렸어요.",
+        "expected": {
+          "status": "question",
+          "search_only": true,
+          "items": [
+            "M01"
+          ],
+          "required_field": [
+            "M01",
+            "color"
+          ],
+          "missing_brand": "M01"
+        },
+        "actual": {
+          "status": "question",
+          "candidates": {
+            "M01": [
+              "category",
+              "color"
+            ]
+          },
+          "missed": [],
+          "unexpected": []
+        },
+        "checks": {
+          "status": true,
+          "candidate_set": true,
+          "required_field": true,
+          "missing_brand_not_matched": true
+        },
+        "passed": true
+      }
+    ],
+    "requests": 6,
+    "api_events": [
+      {
+        "case": "one_wrong",
+        "stage": "extract",
+        "provider_http_status": 200,
+        "result": {
+          "category": "수첩",
+          "color": null,
+          "material": null,
+          "brand": null,
+          "visible_text": null,
+          "distinctive_features": null,
+          "description": null,
+          "location": null
+        },
+        "milliseconds": 6910
+      },
+      {
+        "case": "one_wrong",
+        "stage": "search",
+        "items_compared": 90,
+        "provider_http_status": 200,
+        "result": [
+          {
+            "item": 21,
+            "matched_fields": [
+              "category"
+            ]
+          }
+        ],
+        "milliseconds": 10536
+      },
+      {
+        "case": "one_wrong",
+        "stage": "options:distinctive_features",
+        "known": [
+          "물방울 배지"
+        ],
+        "required_count": 4,
+        "provider_http_status": 200,
+        "result": [
+          "홀로그램 스티커",
+          "실리콘 팔찌",
+          "아크릴 키링",
+          "자석 병따개"
+        ],
+        "milliseconds": 3829
+      },
+      {
+        "case": "one_wrong",
+        "stage": "options:visible_text",
+        "known": [
+          "QX"
+        ],
+        "required_count": 4,
+        "provider_http_status": 200,
+        "result": [
+          "LM",
+          "ZP",
+          "KV",
+          "RT"
+        ],
+        "milliseconds": 1907
+      },
+      {
+        "case": "brand_missing",
+        "stage": "extract",
+        "provider_http_status": 200,
+        "result": {
+          "category": "이어폰",
+          "color": "흰색",
+          "material": null,
+          "brand": "애플",
+          "visible_text": null,
+          "distinctive_features": null,
+          "description": null,
+          "location": null
+        },
+        "milliseconds": 4536
+      },
+      {
+        "case": "brand_missing",
+        "stage": "search",
+        "items_compared": 90,
+        "provider_http_status": 200,
+        "result": [
+          {
+            "item": 62,
+            "matched_fields": [
+              "category",
+              "color"
+            ]
+          }
+        ],
+        "milliseconds": 2201
+      }
+    ],
+    "stop_code": null
+  }
+}

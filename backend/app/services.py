@@ -34,12 +34,14 @@ def claim(session: Session, registration_id: UUID, allowed: tuple[str, ...], tar
     return registration(session, registration_id)
 
 
-def create_registration(session: Session, kiosk_id: UUID, category_id: UUID | None, description: str | None) -> Registration:
+def create_registration(session: Session, kiosk_id: UUID, category_id: UUID | None, description: str | None,
+                        *, found_location: str | None = None) -> Registration:
     if session.get(Kiosk, kiosk_id) is None:
         raise BusinessError("KIOSK_NOT_FOUND", 404)
     if category_id is not None and session.get(Category, category_id) is None:
         raise BusinessError("CATEGORY_NOT_FOUND", 404)
-    value = Registration(kiosk_id=kiosk_id, primary_category_id=category_id, secondary_description=description)
+    value = Registration(kiosk_id=kiosk_id, primary_category_id=category_id, secondary_description=description,
+                         found_location=found_location)
     session.add(value)
     session.commit()
     return value

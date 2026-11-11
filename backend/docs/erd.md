@@ -1,261 +1,317 @@
 # 백엔드 ERD 명세
 
-기준: `back_pickup-return-code` 작업 트리
+> 2026-10-12: D10~D13에 따라 아래 제안 중 등록·촬영·보관에 필요한 8개 테이블을 구현했다. 현재 물리 스키마는 `app/models.py`와 최초 마이그레이션이며, 제안 대비 차이는 [구현 현황](implementation-status.md)에 정리했다. 이하 ‘구현 전’ 표기는 10월 8일 검토 당시 상태이다.
+>
+> 2026-10-14: S5 질문 생성 실험안을 바탕으로 특징 메타데이터와 검증 시도·질문·답변의 논리 구조를 보강했다. 소유 확인용 테이블과 컬럼은 아직 구현하지 않았다.
+>
+> 2026-11-11: P06~P08로 `return_codes`를 구현해 업무 테이블이 9개가 되었다(마이그레이션 `0002_pickup_return_code`). 아래 5.13 제안과 달리 코드는 검증 시도가 아닌 물건을 직접 참조하며, `device_commands`에는 `return_code_id`를 추가하지 않았다. 구현된 컬럼·상태 어휘는 각 절의 `구현 반영`에 적는다. `devices`, `item_features`, `verification_*`은 여전히 미구현 제안이다.
 
-[ORM 모델](../app/models.py)과 [마이그레이션 2개](../alembic/versions/)에 실제 존재하는 업무 테이블 9개를 정리한다. 소유 확인 실험의 Pydantic 모델은 DB 테이블이 아니며, 미구현 설계 후보는 6절에 따로 둔다.
+상태: 검토용 논리 설계 · 2026-10-08
 
-동작은 [기능 명세](functional-spec.md), 요청·응답은 [개발용 API 계약](../../docs/api.md), 남은 협의는 [연동 협의](integration-agreements.md)에 있다.
+현재 업무 ORM 모델·마이그레이션·확정 ERD는 없다. 사용자는 등록·사진·물건·보관 이력·반환 코드·명령을 검토용 테이블로 제안하도록 요청했다. 따라서 **아래 테이블명·컬럼명·타입·NULL·인덱스·상태값은 모두 설계 제안**이다. 근거가 있는 업무 관계와 사용자 결정은 별도로 표시한다. SQL DDL이나 Alembic 마이그레이션으로 확정하지 않는다.
 
-## 1. 구현 범위
+근거 문서는 [S1~S8](README.md), 질문·결정은 [검토 기록](spec-review.md), 처리 흐름은 [기능 명세](functional-spec.md)를 따른다.
 
-| 대상 | 현재 구현 |
-| --- | --- |
-| 등록·위치·카테고리 | `kiosks`, `categories`, `lockers`, `registrations` |
-| 사진·장치 명령 | `item_images`, `device_commands` |
-| 물건·보관 배정 | `found_items`, `storage_assignments` |
-| AI 분석 결과 | `registrations.analysis_features` JSONB와 입력 사진 ID 스냅샷 |
-| 장치 주소·키 | [Settings](../app/config.py)의 `PI_DEVICES` 설정. `devices` 테이블 없음 |
-| 반환 코드·수령 | `return_codes`. 코드 평문은 저장하지 않고 SHA-256 해시만 보관 |
-| 소유 확인 | 질문 생성 실험 코드만 존재. 질문·답변·판정 테이블 없음. **반환 코드 발급에 소유 확인 선행 조건이 없다** |
+## 1. 업무상 요구와 설계 경계
 
-Alembic revision은 `0001_registration_storage` → `0002_pickup_return_code` 두 개다. `0002`는 세 테이블의 CHECK를 바꾸고 `return_codes`를 추가한다. SQLite는 CHECK를 제자리 변경하지 못하므로 batch 모드로 해당 테이블을 재작성한다. Alembic이 사용하는 `alembic_version`은 업무 테이블 9개에 포함하지 않는다.
+| 구분 | 요구 또는 결정 | 근거 |
+| --- | --- | --- |
+| 원문 요구 | 키오스크에는 촬영 Pi와 보관함 Pi가 있고 시제품의 보관함은 2칸 | S2 1절, S3 |
+| 원문 요구 | 물건과 보관함 번호의 연결은 백엔드가 관리 | S2 1절 |
+| 원문 요구 | 하나의 등록 ID에 순서가 있는 사진 2장, 촬영마다 다른 명령 ID | S2 3.1·6.1, S4 |
+| 원문 요구 | 사전 정의한 1차 카테고리와 습득자가 입력하는 2차 특징 | S1 기능 세부 사항 |
+| 원문 요구 | 개방 성공 응답 후에만 번호 반환·반환 코드 사용 처리 | S2 6절 |
+| 사용자 결정 | 등록 사진의 이미지 분석 성공 후에만 등록용 보관함 개방 허용 | D04 |
+| 사용자 결정 | 완료 버튼 후 백엔드가 문 상태를 조회하는 안 사용 | D03 |
+| 사용자 결정 | 사용자 완료 확인과 `closed`를 함께 만족하면 업무 완료로 간주 | D06 |
+| 사용자 결정 | 원본 사진은 비공개 S3, DB에는 객체 키·메타데이터 저장 | D07 |
+| 사용자 결정 | 본인인증은 미정. 관련 DB·API 확정 보류 | D02 |
+| 실험 제안 | 질문 생성용 특징 선별 조건과 입력·출력 구조 | S5 질문 생성 설계 |
+| 미정 | 특징 표시 책임, 질문·답변 저장·보존, 평가·코드 발급 조건 | S5, Q05·Q06·Q11 |
 
-## 2. 물리 관계도
+관계도는 제안된 저장 구조이다. `devices`를 DB에서 관리할지는 Q09에서 결정한다. 장치 주소를 설정 파일로 관리하면 장치 참조 방식을 함께 수정한다. D08·D09에 따라 AI가 특징 기반 질문 생성과 답변 평가를 맡고, 백엔드는 대상 물건·질문·답변·평가 결과의 연결을 관리한다. 아래 소유 확인 테이블은 논리 구조를 검토하기 위한 후보이며 질문 ID·회차·재생성·보존 계약이 정해지기 전에는 물리 스키마로 확정하지 않는다.
+
+## 2. 개념 관계도
 
 ```mermaid
 erDiagram
-    KIOSKS ||--o{ LOCKERS : contains
-    KIOSKS ||--o{ REGISTRATIONS : receives
+    KIOSKS ||--o{ DEVICES : has
+    KIOSKS ||--o{ LOCKERS : has
+    KIOSKS ||--o{ REGISTRATIONS : starts
     CATEGORIES o|--o{ REGISTRATIONS : classifies
-    REGISTRATIONS ||--o{ ITEM_IMAGES : has
-    REGISTRATIONS ||--o{ DEVICE_COMMANDS : records
-    REGISTRATIONS ||--o| FOUND_ITEMS : creates
-    FOUND_ITEMS ||--o{ STORAGE_ASSIGNMENTS : assigned
-    LOCKERS ||--o{ STORAGE_ASSIGNMENTS : stores
-    STORAGE_ASSIGNMENTS o|--o{ DEVICE_COMMANDS : open_context
-    DEVICE_COMMANDS ||--o| ITEM_IMAGES : source_command
-    FOUND_ITEMS ||--o{ RETURN_CODES : issues
+    REGISTRATIONS ||--o{ ITEM_IMAGES : captures
+    REGISTRATIONS ||--o| FOUND_ITEMS : becomes
+    DEVICES ||--o{ DEVICE_COMMANDS : receives
+    REGISTRATIONS o|--o{ DEVICE_COMMANDS : capture_target
+    LOCKERS o|--o{ DEVICE_COMMANDS : open_target
+    DEVICE_COMMANDS ||--o| ITEM_IMAGES : produces
+    FOUND_ITEMS ||--o{ ITEM_FEATURES : describes
+    FOUND_ITEMS ||--o{ STORAGE_ASSIGNMENTS : stores
+    LOCKERS ||--o{ STORAGE_ASSIGNMENTS : allocated
+    STORAGE_ASSIGNMENTS o|--o{ DEVICE_COMMANDS : opening_context
+    FOUND_ITEMS ||--o{ VERIFICATION_ATTEMPTS : verifies
+    VERIFICATION_ATTEMPTS ||--o{ VERIFICATION_QUESTIONS : contains
+    VERIFICATION_QUESTIONS ||--o{ VERIFICATION_ANSWERS : receives
+    VERIFICATION_ATTEMPTS ||--o{ RETURN_CODES : authorizes
+    RETURN_CODES o|--o{ DEVICE_COMMANDS : redemption_context
 ```
 
-- 사진의 등록 FK와 촬영 명령 FK는 모두 필수다. 명령 하나에 사진은 최대 1개다.
-- 하나의 등록에서 물건은 최대 1개다. 등록만 있거나 촬영·분석 중인 동안은 물건이 없을 수 있다.
-- 물건과 보관함에는 배정 이력을 여러 개 연결할 수 있으나, 각각 `ended_at IS NULL`인 배정은 최대 1개다.
-- `storage_assignment_id`는 촬영 명령에서 NULL, 등록·수령 개방 명령에서 필수다. `registration_id`는 모든 명령에서 필수다. 수령 개방 명령도 해당 물건의 등록 ID를 사용한다.
-- 물건 하나에 반환 코드 이력을 여러 개 연결할 수 있으나, `active` 또는 `opening`인 코드는 최대 1개다.
-- 그림의 관계는 FK·UNIQUE를 표현한다. 사진과 명령의 등록 일치 같은 교차 조건은 5절의 서비스 책임과 구분한다.
+## 3. 관계 해석
 
-## 3. 타입·기본값·공통 컬럼
+- 키오스크당 여러 보관함과 등록 이력이 존재한다. 시제품의 2칸을 전체 DB 행 수 제한으로 만들지 않는다.
+- 등록 도중에는 이미지가 0장 또는 1장일 수 있다. 정상 완료할 때 사용하는 사진은 순서가 구분되는 2장이다. 재촬영 이력의 허용 여부는 별도 결정한다.
+- 등록 건에서 확정 물건은 최대 1개만 생성한다. 명령 재전송이나 등록 완료 재요청으로 물건이 늘어나지 않게 한다.
+- 촬영 명령은 사진을 최대 1장 생성한다. 개방 명령은 사진을 생성하지 않는다. 실패한 촬영은 이미지 행이 없을 수 있다.
+- 명령의 등록·보관함 참조는 동작별 조건부 관계이다. 촬영 명령은 등록을, 개방 명령은 보관함을 필수로 참조한다.
+- 보관함 하나는 과거에 여러 물건을 보관할 수 있지만, 동시에 유효한 배정은 최대 1개이다. 물건도 동시에 유효한 배정을 최대 1개만 가진다는 제안이다.
+- 물건의 현재 키오스크는 유효한 보관 배정→보관함→키오스크로 구한다. 최초 등록 키오스크와 혼동하지 않는다. 이동 기능 자체는 이번 요구에 없다.
+- 질문 생성에는 공개되지 않았고, 관찰 근거가 확인됐으며, 물건을 구별할 수 있다고 표시된 특징만 쓰는 안이다. 이 표시는 질문 생성 결과가 아니라 입력 특징의 속성이다.
+- 질문 생성의 `ready`는 질문 준비 완료를 뜻한다. 소유 확인 성공이나 반환 승인을 뜻하지 않으며 검증 시도의 최종 상태와 구분한다.
+- 검증 시도에 반환 코드 0개 이상을 연결하는 그림은 실패·미발급 이력과 향후 재발급을 표현하기 위한 제안이다. 여러 유효 코드를 허용한다는 결정이 아니다.
+- 하나의 반환 코드로 발생한 개방 시도와 명령의 관계를 보존한다. 동시 사용 제한·재시도·이력 보존은 Q06·Q10의 결정에 따라 구체화한다.
 
-타입은 PostgreSQL dialect 기준이다. `varchar`는 길이 제한 없는 `String()`, `float`는 `Float()`, `timestamptz`는 `DateTime(timezone=True)`를 뜻한다. 테스트용 SQLite에서는 UUID·JSON·시각 표현이 다르다.
+## 4. 공통 컬럼 규칙 제안
 
-`device_commands`를 제외한 7개 테이블은 아래 컬럼을 공통으로 가진다.
-
-| 컬럼 | PostgreSQL 타입 | NULL | 제약·값 생성 |
-| --- | --- | --- | --- |
-| id | uuid | 불가 | PK. ORM 기본값 `uuid4()` |
-| created_at | timestamptz | 불가 | ORM 기본값 UTC `now()` |
-
-모든 테이블에 DB 서버 기본값(`server_default`)은 없다. 표의 기본값은 SQLAlchemy를 거치는 INSERT에만 적용되는 Python 기본값이므로, 직접 SQL로 삽입할 때 UUID·시각·상태가 자동 생성된다고 가정하면 안 된다.
-
-FK에 `ON DELETE CASCADE`나 `ON UPDATE` 정책을 별도로 선언하지 않았다. 공통 `updated_at`, 삭제 시각, 사용자 FK는 없다. API의 입력 길이 제한과 DB 제약은 별도이며 아래 표에서 구분한다.
-
-## 4. 테이블 정의
-
-### 4.1 kiosks
-
-| 컬럼 | 타입 | NULL | 제약·의미 |
-| --- | --- | --- | --- |
-| name | varchar(200) | 불가 | 표시 이름 |
-| location_description | varchar | 허용 | 설치 장소 설명 |
-| latitude | float | 허용 | 위도 |
-| longitude | float | 허용 | 경도 |
-
-공통 `id`, `created_at` 포함. CHECK는 `coordinates_pair`: 두 좌표가 함께 NULL이거나 함께 값이 존재, `latitude_range`: -90~90, `longitude_range`: -180~180이다. 위치·이름 관리 API는 없다.
-
-### 4.2 categories
-
-| 컬럼 | 타입 | NULL | 제약·의미 |
-| --- | --- | --- | --- |
-| code | varchar(100) | 불가 | UNIQUE, 카테고리 코드 |
-| name | varchar(200) | 불가 | 표시 이름 |
-
-공통 `id`, `created_at` 포함. 확정 카테고리 목록·계층·부모 FK는 없다. 로컬 시드도 카테고리를 생성하지 않는다.
-
-### 4.3 lockers
-
-| 컬럼 | 타입 | NULL | 제약·의미 |
-| --- | --- | --- | --- |
-| kiosk_id | uuid | 불가 | FK → `kiosks.id` |
-| locker_number | integer | 불가 | 키오스크 안의 칸 번호 |
-
-공통 `id`, `created_at` 포함. `UNIQUE(kiosk_id, locker_number)`, CHECK `positive_locker_number`: `locker_number > 0`이다. 칸 수를 2개로 제한하는 DB 제약은 없다. 로컬 시드가 개발용 1·2번 칸을 생성한다.
-
-Pi 경로에는 내부 UUID가 아닌 `locker_number`를 전달한다. 문 상태나 점유 상태 컬럼은 없으며, 점유는 유효 배정으로 판단한다.
-
-### 4.4 registrations
-
-| 컬럼 | 타입 | NULL | 제약·의미 |
-| --- | --- | --- | --- |
-| kiosk_id | uuid | 불가 | FK → `kiosks.id` |
-| primary_category_id | uuid | 허용 | FK → `categories.id`, 현재 API 선택 입력 |
-| secondary_description | varchar | 허용 | 사용자 자유 특징. API 최대 2,000자, DB 길이 CHECK 없음 |
-| status | varchar | 불가 | ORM 기본값 `draft` |
-| analysis_status | varchar | 불가 | ORM 기본값 `pending` |
-| analysis_input_image_ids | jsonb | 허용 | 분석 시작 시 저장하는 순서 있는 사진 UUID 문자열 목록 |
-| analysis_features | jsonb | 허용 | 분석 성공 시 저장하는 특징 딕셔너리 |
-
-공통 `id`, `created_at` 포함.
-
-- CHECK `registration_status`: `draft / capturing / analyzing / ready / opening / awaiting_deposit / stored / blocked`.
-- CHECK `analysis_status`: `pending / running / succeeded / failed`.
-- JSONB 내부 키·타입·사진 FK·목록 길이에 대한 DB CHECK는 없다. 성공 조건은 서비스에서 검사한다.
-- `analysis_features`는 `secondary_description`과 별도로 저장한다. 색상·브랜드·신뢰도 등을 필수 DB 필드로 고정하지 않는다.
-- 분석 실패 시 서비스는 `analysis_features=None`으로 비우고 사진 ID 스냅샷은 유지한다. JSON 컬럼의 SQL NULL과 JSON null을 구분하는 별도 정책은 없다.
-
-### 4.5 found_items
-
-| 컬럼 | 타입 | NULL | 제약·의미 |
-| --- | --- | --- | --- |
-| registration_id | uuid | 불가 | FK → `registrations.id`, UNIQUE |
-| status | varchar | 불가 | ORM 기본값 `awaiting_deposit` |
-
-공통 `id`, `created_at` 포함. CHECK `item_status`는 `awaiting_deposit / stored / retrieved`를 허용한다.
-
-개방 서비스가 빈 칸을 확보한 뒤, 외부 개방 요청을 보내기 전에 물건·배정·명령을 저장한다. 따라서 행이 존재하거나 `awaiting_deposit`라고 해서 실제 문이 열렸거나 물건이 투입됐다는 뜻은 아니다. 개방 실패 시에도 행을 유지한다.
-
-수령 개방 중에도 물건은 `stored`를 유지한다. 물건은 아직 보관함 안에 있고, 검색에서 제외하는 일은 배정 상태가 담당한다. `retrieved`는 사용자 확인과 문 `closed`를 모두 확인한 뒤에 기록하며, 물건을 실제로 꺼냈는지를 뜻하지 않는다. 문 센서는 개폐만 알리므로 물건을 두고 문만 닫아도 같은 결과가 된다.
-
-### 4.6 storage_assignments
-
-| 컬럼 | 타입 | NULL | 제약·의미 |
-| --- | --- | --- | --- |
-| found_item_id | uuid | 불가 | FK → `found_items.id` |
-| locker_id | uuid | 불가 | FK → `lockers.id` |
-| status | varchar | 불가 | ORM 기본값 `reserved` |
-| deposited_at | timestamptz | 허용 | 최초 투입 완료 확정 시각 |
-| ended_at | timestamptz | 허용 | NULL이면 유효 배정 |
-
-공통 `id`, `created_at` 포함.
-
-| 제약 | 구현 |
+| 항목 | 제안 |
 | --- | --- |
-| `assignment_status` CHECK | `reserved / awaiting_deposit / stored / awaiting_pickup / retrieved / cancelled` |
-| `assignment_end` CHECK | `(status IN ('cancelled','retrieved')) = (ended_at IS NOT NULL)` |
-| `uq_active_locker` | `locker_id` UNIQUE, 조건 `ended_at IS NULL` |
-| `uq_active_item` | `found_item_id` UNIQUE, 조건 `ended_at IS NULL` |
+| 내부 PK | `id: uuid NOT NULL`. 단, `device_commands.command_id`는 외부 규약을 따르는 text PK |
+| 등록 ID | 내부 UUID 사용을 제안하지만 Pi에는 string으로 직렬화. UUID 형식 강제는 팀 API 합의 후 결정 |
+| 시각 | `timestamptz`. API 표기는 시간대가 포함된 ISO 8601. 예시 시각·명령 TTL을 고정값으로 옮기지 않음 |
+| 생성 이력 | 각 테이블에 `created_at: timestamptz NOT NULL` 제안. 변경 가능한 업무 엔티티에 `updated_at` 추가 검토 |
+| 상태 | 초기에는 text와 검증 제약을 제안. 아래 상태 어휘와 전이는 승인 후 확정 |
+| 삭제 | 업무 관계의 무조건 CASCADE 삭제를 전제하지 않음. 개인정보·사진·명령·코드의 보존 기간 결정 후 FK 삭제 정책 확정 |
+| 조건부 NULL | 표의 조건에 따라 허용. NULL을 실패·거절·완료의 대체 표현으로 사용하지 않음 |
 
-두 부분 UNIQUE 인덱스는 PostgreSQL·SQLite 모두 선언돼 있다. DB는 `cancelled`·`retrieved`이면 종료 시각이 있고 다른 상태면 종료 시각이 없도록 강제한다.
+아래 표에서는 공통 PK·생성 시각을 생략한다. `필수`는 이 제안 내의 NOT NULL이며 승인된 요구사항이라는 뜻이 아니다.
 
-수령 완료가 배정을 종료하는 유일한 경로다. `ended_at`을 채우면 두 부분 UNIQUE 인덱스의 조건에서 빠지므로 해당 칸과 물건이 즉시 재배정 가능해진다. 보관 완료(`stored`) 상태에서는 `ended_at=NULL`로 점유를 유지한다. `cancelled`는 DB 허용값만 있고 실행 경로가 없다. `retrieved_at` 전용 컬럼, 시각 선후 관계 CHECK, 배정 종료를 되돌리는 복구 경로는 없다.
+## 5. 테이블별 정의 제안
 
-### 4.7 device_commands
+### 5.1 kiosks
 
-이 테이블은 공통 `id`를 사용하지 않는다.
+키오스크 위치 조회와 현장 장치 구분을 위한 엔티티(S1, S2).
 
-| 컬럼 | 타입 | NULL | 제약·의미 |
-| --- | --- | --- | --- |
-| command_id | varchar | 불가 | PK. ORM 기본값 UUID 문자열, 서비스에서도 UUID 문자열 발급 |
-| registration_id | uuid | 불가 | FK → `registrations.id` |
-| action | varchar | 불가 | `capture`, `open`(등록) 또는 `pickup_open`(수령), 아래 CHECK로 제한 |
-| shot_order | integer | 허용 | 촬영 순서 1 또는 2 |
-| storage_assignment_id | uuid | 허용 | FK → `storage_assignments.id` |
-| expires_at | timestamptz | 불가 | 명령 유효 기한, 서비스가 설정 TTL로 계산 |
-| created_at | timestamptz | 불가 | ORM 기본값 UTC `now()` |
-| status | varchar | 불가 | ORM 기본값 `sent` |
-| error_code | varchar | 허용 | 처리한 연동 오류 코드 |
-
-- CHECK `command_status`: `sent / succeeded / failed / unknown`.
-- CHECK `command_target`: 촬영이면 `shot_order IN (1,2)` 및 NOT NULL, 배정 FK는 NULL. `open`·`pickup_open`이면 촬영 순서는 NULL, 배정 FK는 NOT NULL.
-- `UNIQUE(registration_id, shot_order)`: 등록의 각 촬영 순서에 명령은 최대 1개다. 실패한 촬영을 새 명령으로 재시도하는 구조는 없다.
-- 개방 명령의 `shot_order`는 NULL이므로 이 UNIQUE가 등록당 개방 명령을 1개로 제한하지는 않는다. 같은 등록에 `open` 1건과 `pickup_open` 1건 이상이 공존한다. 중복 개방 억제는 서비스의 상태 전이·기존 결과 재사용 책임이다.
-- 장치 FK·직접 보관함 FK·반환 코드 FK·응답 본문·완료 시각 컬럼은 없다. 대상 칸은 배정을 통해 찾는다. 문 조회는 명령 행을 만들지 않는다.
-
-### 4.8 item_images
-
-| 컬럼 | 타입 | NULL | 제약·의미 |
-| --- | --- | --- | --- |
-| registration_id | uuid | 불가 | FK → `registrations.id` |
-| capture_command_id | varchar | 불가 | FK → `device_commands.command_id`, UNIQUE |
-| shot_order | integer | 불가 | 촬영 순서 |
-| object_key | varchar | 불가 | UNIQUE, S3 객체 키 |
-| content_type | varchar | 불가 | ORM 기본값 `image/jpeg` |
-| byte_size | integer | 불가 | 저장하는 JPEG 바이트 수 |
-| received_at | timestamptz | 불가 | ORM 기본값 UTC `now()`; 촬영 서비스는 JPEG 수신·검증 후 시각을 전달 |
-
-공통 `id`, `created_at` 포함.
-
-- `UNIQUE(registration_id, shot_order)`.
-- CHECK `image_order`: `shot_order IN (1,2)`.
-- CHECK `image_size`: `byte_size > 0`.
-- CHECK `image_type`: `content_type = 'image/jpeg'`.
-- 사진 행은 JPEG 검증과 객체 저장이 성공한 뒤 INSERT한다. `storage_status`나 저장 대기 행은 없으며 `object_key`·`byte_size`·`received_at`은 모두 NOT NULL이다.
-- 객체 키 형식은 `registrations/{registration_id}/{command_id}.jpg`. 버킷은 설정에서 관리한다. 사진 바이트·서명 URL·실제 카메라 촬영 시각은 DB에 저장하지 않는다.
-
-### 4.9 return_codes
-
-| 컬럼 | 타입 | NULL | 제약·의미 |
-| --- | --- | --- | --- |
-| found_item_id | uuid | 불가 | FK → `found_items.id` |
-| code_hash | varchar(64) | 불가 | UNIQUE, 정규화한 코드의 SHA-256 16진 문자열 |
-| status | varchar | 불가 | ORM 기본값 `active` |
-| expires_at | timestamptz | 불가 | 서비스가 `RETURN_CODE_TTL_SECONDS`로 계산 |
-| used_at | timestamptz | 허용 | 개방 성공으로 사용 처리한 시각 |
-| failed_attempts | integer | 불가 | ORM 기본값 0. 명확한 개방 실패 횟수 |
-
-공통 `id`, `created_at` 포함.
-
-| 제약 | 구현 |
-| --- | --- |
-| `return_code_status` CHECK | `active / opening / used / locked / revoked` |
-| `return_code_use` CHECK | `(status = 'used') = (used_at IS NOT NULL)` |
-| `return_code_attempts` CHECK | `failed_attempts >= 0` |
-| `uq_open_return_code` | `found_item_id` UNIQUE, 조건 `status IN ('active','opening')` |
-
-- 코드 평문을 저장하는 컬럼이 없다. 발급 응답에서 한 번만 전달하며 DB·로그 어디에도 남기지 않는다. 조회는 입력값을 같은 방식으로 정규화·해싱해 `code_hash`로 찾는다. 정규화는 공백·하이픈 제거와 대문자 변환이다.
-- 코드는 `secrets`의 5바이트를 패딩 없는 base32 8자로 표현한다. 길이·문자 집합·TTL은 현재 구현 선택이며 합의된 정책이 아니다.
-- `opening`은 개방 명령을 보내기 전에 조건부 UPDATE로 선점한 상태다. 부분 UNIQUE 인덱스가 `active`와 함께 이 상태도 덮으므로, 재발급이 진행 중인 코드를 덮어쓰지 못한다.
-- `locked`는 개방 결과를 알 수 없을 때(`unknown`) 기록한다. 문이 이미 열렸을 수 있어 같은 코드의 재개방을 막으며, 해소하는 서비스·API는 없다.
-- `revoked`는 재발급이 이전 코드를 무효화한 상태다. 만료는 상태를 바꾸지 않고 `expires_at` 비교로 판단하므로, 만료된 코드도 `active`로 남아 있을 수 있다.
-- 대상 키오스크 컬럼은 없다. 코드 → 물건 → 유효 배정 → 칸 → 키오스크로 찾아 요청의 키오스크와 대조한다.
-- 발급 요청자·승인 근거·질문/답변 FK·시도 제한 상한·재발급 횟수 컬럼은 없다. `failed_attempts`는 기록용이며 이 값으로 코드를 차단하지 않는다.
-
-## 5. DB 제약과 서비스 보장의 경계
-
-| 규칙 | 실제 보장 위치 | 제한 |
+| 컬럼 | 타입 | NULL 정책·의미 |
 | --- | --- | --- |
-| 사진 순서당 1장, 촬영 명령당 1장 | DB UNIQUE·CHECK | 1장→2장 순서 및 두 장 준비 여부는 서비스 검사 |
-| 사진과 명령이 같은 등록을 가리킴 | 촬영 서비스가 동일 등록 ID로 작성 | 두 독립 FK만으로 교차 일치를 강제하지 않음 |
-| 분석이 현재 사진 두 장에 대응 | 분석 결과 ID·순서 검사, 개방 전 스냅샷 재검사 | JSON 내부 FK·특징 의미 검증 없음 |
-| 같은 칸·물건에 유효 배정 최대 1개 | 부분 UNIQUE 인덱스 | 등록 키오스크와 배정 칸 키오스크 일치는 서비스가 선택으로 보장 |
-| 동시 배정 | 등록 상태 조건부 UPDATE, 키오스크 행 잠금, 칸 `FOR UPDATE SKIP LOCKED`, UNIQUE | 잠금은 PostgreSQL에서만 동작한다 |
-| 개방 성공 전 번호 숨김 | API가 `awaiting_deposit / stored`에서만 번호 반환 | DB에는 개방 전부터 배정·명령이 존재 |
-| 명확한 오류와 결과 불명 구분 | `IntegrationError.uncertain`에 따라 명령 `failed / unknown` | 예기치 않은 예외·DB 장애는 진행 상태와 `sent`가 남을 수 있음 |
-| 보관 완료 상태 일치 | 서비스가 등록·물건·배정 갱신을 같은 트랜잭션으로 커밋 | 세 테이블의 상태 일치를 강제하는 DB 트리거·CHECK 없음 |
-| 첫 완료 시각 보존 | 문 확인 후 등록 행 재잠금·재조회, 기존 시각 재사용 | 두 번째 완료 요청이 시각을 덮어쓰지 않음 |
-| 물건당 사용 가능한 코드 1개 | `uq_open_return_code` 부분 UNIQUE | 만료된 `active` 코드도 인덱스를 점유하므로 재발급이 먼저 무효화함 |
-| 같은 코드의 동시 제출 | 코드 행의 조건부 UPDATE(`active → opening`) 선점 | 두 번째 요청은 409로 막히고 장치에 닿지 않음 |
-| 코드 평문 비저장 | 스키마에 평문 컬럼이 없음 | 해시는 솔트 없는 SHA-256이며, 짧은 코드의 전수 대입을 막는 호출 빈도 제한은 없음 |
-| 수령 완료 시 칸 반납 | `ended_at` 설정으로 두 부분 UNIQUE 조건에서 제외 | 물건을 실제로 꺼냈는지 확인하는 수단 없음. 되돌리는 복구 경로 없음 |
+| name | text | 필수, 사용자에게 표시할 식별 이름 |
+| location_description | text | 허용, 설치 장소 설명 |
+| latitude / longitude | numeric | 함께 존재하거나 함께 NULL. 지도 조회에 필요한 필수 여부·정밀도는 Q08에서 결정 |
 
-상태 전이는 [기능 명세 5절](functional-spec.md#5-상태-전이)에 있다. DB 트랜잭션과 Pi·S3 작업은 하나의 원자적 작업이 아니다. 외부 호출 전에 진행 상태·명령을 커밋하므로, S3 업로드 후 DB 기록이 실패하면 객체가 남고 물리 개방 후 결과 커밋이 실패하면 `opening/sent`와 예약이 남는다. 자동 정리·재개 기능은 없다.
+좌표 범위 검증과 식별용 코드 추가 여부는 API 입력 계약과 함께 정한다. 운영 시간·거리 계산·GPS 수집 기능은 원문에 없는 추가 요구로 두지 않는다.
 
-## 6. 미구현 설계
+### 5.2 devices
 
-### 질문 생성 실험과의 연결 상태
+장치 DB 관리 선택 시 사용하는 후보(S2 7절).
 
-[질문 생성 스키마](../app/ai_ownership_verification/schemas.py)의 `ItemEvidence`·`Feature`·`Question`·`QuestionBatch`는 메모리상의 입력·출력만 검증한다. 이 객체를 저장하는 테이블도, `analysis_features`에서 변환하는 어댑터도 없다. 필드와 선별 조건은 [기능 명세 F09](functional-spec.md#f09-소유-확인-질문-생성-실험)에 있다.
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| kiosk_id | uuid FK → kiosks | 필수 |
+| role | text | 필수, `capture` 또는 `locker` |
+| base_url | text | 필수, Tailscale 장치 API 주소 |
 
-### 물리 ERD에 포함하지 않는 항목
+초기 `UNIQUE(kiosk_id, role)` 제안. 장치 교체·퇴역 이력이 필요해지면 별도로 수정한다. 비밀 API 키의 DB 평문 저장은 제안하지 않으며 키 저장·회전 수단은 미정이다. `/health` 응답의 역할이 등록된 역할과 일치하는지 확인한다.
 
-| 기존 설계 후보 | 현재 상태·확정 전 필요한 내용 |
-| --- | --- |
-| `devices` | 미구현. 현재 설정으로 장치를 라우팅 |
-| `item_features` | 미구현. 현재 JSONB 사용, 특징 ID·출처·공개·검증 표시 규격 협의 필요 |
-| `verification_attempts` | 미구현. 질문 생성/평가 상태, 스냅샷, 회차·유효기간·판정 기록 미정 |
-| `verification_questions` | 미구현. 영구 ID·버전·공개 응답·저장 방식 미정 |
-| `verification_answers` | 미구현. 제출·수정·재시도·평가 결과 저장 방식 미정 |
-| 발급 승인 근거 | 미구현. `return_codes`에 질문·답변·판정 FK가 없고 발급에 소유 확인 선행 조건도 없다 |
-| 복구·보존 | `locked` 코드 해소, 배정 취소, 재촬영, 만료 코드 정리, 보존 기간 미구현 |
-| 본인인증·권한 | 사용자·검증 세션 테이블과 요청 권한 검사 미구현 |
+### 5.3 lockers
 
-위 후보의 컬럼명·타입은 구현된 규격이 아니다. 후속 설계는 A03~A08의 해당 계약과 실제 마이그레이션으로 확정한다.
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| kiosk_id | uuid FK → kiosks | 필수 |
+| locker_number | integer | 필수, 해당 키오스크/Pi에서 사용하는 양의 칸 번호 |
+
+`UNIQUE(kiosk_id, locker_number)` 제안. Pi API의 `{locker_id}` 예시는 정수 2이지만 그 번호의 범위는 명시되지 않았다. **내부 UUID를 Pi 경로에 그대로 넣지 않는다.** Q09에서 Pi에 전달할 번호와 장치별 유일성을 합의한다. 빈 칸 여부는 유효한 배정으로 판단하며 문이 닫혀 있다는 이유로 빈 칸이라 판단하지 않는다.
+
+### 5.4 categories
+
+사전 정의된 1차 카테고리 후보(S1).
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| code | text UNIQUE | 필수, API에서 사용할 식별 코드 제안 |
+| name | text | 필수, 물건 종류 표시명 |
+
+목록·코드·운영 중 변경 방법은 Q08에서 결정한다. 2차 카테고리는 자유 입력 특징이므로 이 테이블에 부모·자식 계층을 임의로 추가하지 않는다.
+
+### 5.5 registrations
+
+첫 촬영부터 등록 확정까지 묶는 엔티티(S2 3.1·6.1).
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| kiosk_id | uuid FK → kiosks | 필수 |
+| primary_category_id | uuid FK → categories | 임시 등록 중 허용. 최종 필수 여부·사용자/AI 결정 우선순위는 Q08 |
+| secondary_description | text | 허용, 습득자가 입력한 2차 특징. 입력 형식은 Q08 |
+| status | text | 필수, 촬영·분석·등록 진행 상태 |
+| analysis_status | text | 필수, `pending / running / succeeded / failed` 제안 |
+| analysis_input_image_ids | jsonb | 분석 전 NULL. 성공 분석에 사용한 이미지 ID 목록의 스냅샷 제안 |
+
+분석 입력 사진과 완료 시 사용할 사진 두 장이 일치해야 한다(D04). JSON 내부 ID는 FK로 보호되지 않으므로 서비스 검증 또는 별도 분석 실행·입력 연결 테이블이 필요하다. AI 계약 확정 시 최종 저장 방식을 정한다. `succeeded`의 의미도 Q04에서 결정한다. 본인인증용 사용자 FK·실명·전화번호는 미정이므로 추가하지 않는다.
+
+### 5.6 item_images
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| registration_id | uuid FK → registrations | 필수 |
+| capture_command_id | text FK → device_commands.command_id, UNIQUE | 필수, 사진을 만든 촬영 명령 |
+| shot_order | smallint | 필수, 최초 흐름의 1 또는 2 |
+| object_key | text | S3 저장 완료 전 NULL, 완료 시 필수. 비공개 S3 객체 키(D07) |
+| content_type | text | 필수, 현재 규약 `image/jpeg` |
+| byte_size | bigint | 수신 전 NULL, 완료 시 양수 |
+| received_at | timestamptz | 수신 전 NULL. 백엔드 수신 시각 |
+| storage_status | text | 필수, `pending / ready / failed` 제안 |
+
+최초 제안은 `UNIQUE(registration_id, shot_order)`이며 재촬영 이력은 아직 설계에 포함하지 않는다. 재촬영을 채택하면 이미지 버전·현재 채택 사진과 고유 제약을 함께 재검토한다(Q07). 같은 촬영 명령의 재전송으로 이미지 행이 늘어나면 안 된다.
+
+버킷을 설정으로 하나만 관리할지 DB에 함께 저장할지, 미리보기 접근 방식·객체 정리·보존 기간은 미정이다. 만료되는 서명 URL을 영구 객체 식별자로 저장하지 않는 안을 제안한다. S3 업로드와 DB 갱신의 부분 실패를 처리한 뒤에만 `ready`로 표시한다.
+
+현재 JPEG 응답에는 촬영 시각 메타데이터가 명시되어 있지 않다. `received_at`을 실제 촬영 시각으로 표기하거나 JSON의 `captured_at`을 요구하지 않는다. 이미지의 명령과 등록 ID 일치는 별도 관계 검증이 필요하다.
+
+### 5.7 found_items
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| registration_id | uuid FK → registrations, UNIQUE | 필수, 출처 등록 |
+| status | text | 필수, `awaiting_deposit / stored / awaiting_pickup / returned` 제안 |
+
+구현 반영(2026-11-11): 상태 CHECK는 `awaiting_deposit / stored / retrieved` 3개다. 수령 대기는 물건이 아니라 배정 상태로만 두고, 반환 완료는 `returned` 대신 `retrieved`로 적는다.
+
+이미지 두 장과 분석이 준비된 등록 완료 요청에서 물건을 만들고 `awaiting_deposit`로 두는 안이다. 이 행의 생성이 실제 투입 완료를 뜻하지 않는다. 실패·취소된 배정과 물건의 정리 정책은 Q03에서 결정한다. 등록 정보는 위 등록 FK로 참조하며 동일 카테고리를 양쪽에 독립 수정하는 중복 필드는 제안하지 않는다.
+
+### 5.8 storage_assignments
+
+현재 점유와 과거 보관 이력을 분리하기 위한 제안이다. 원문이 이 테이블 이름·이력 보존 기간까지 정한 것은 아니다.
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| found_item_id | uuid FK → found_items | 필수 |
+| locker_id | uuid FK → lockers | 필수 |
+| status | text | 필수, `reserved / awaiting_deposit / stored / awaiting_pickup / completed / cancelled` 제안 |
+| deposited_at | timestamptz | 투입 완료 확인 전 NULL |
+| retrieved_at | timestamptz | 수령 완료 확인 전 NULL |
+| ended_at | timestamptz | 유효 배정 중 NULL. 완료·취소로 해제된 시점 |
+
+구현 반영(2026-11-11): 상태 CHECK는 `reserved / awaiting_deposit / stored / awaiting_pickup / retrieved / cancelled`이고, `ended_at` 일치 제약은 `cancelled`와 `retrieved` 두 상태를 묶는다. `retrieved_at`과 `completed` 상태는 두지 않았다. 수령 완료 시 `status = 'retrieved'`와 `ended_at`을 같은 트랜잭션에서 기록해 칸을 해제한다.
+
+`ended_at IS NULL`인 행에 대해 `locker_id`, `found_item_id` 각각 부분 UNIQUE 인덱스를 제안한다. 예약·개방 중·결과 불명·수령 대기에서도 배정을 유지한다. `completed/cancelled`와 `ended_at`의 일치 제약, `retrieved_at >= deposited_at` 등 시각 검증은 상태 계약과 함께 확정한다. 개방 성공만으로 배정을 종료하지 않는다.
+
+### 5.9 item_features
+
+등록의 `analysis_features`를 질문 생성에 사용하려면 특징별 식별자와 공개·검증 상태가 필요하다. 다음은 논리 구조 후보이며, 현재 JSONB를 유지하고 같은 구조를 검증하는 대안도 가능하다.
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| found_item_id | uuid FK → found_items | 필수 |
+| feature_id | text | 물건 안에서 유일한 특징 식별자 제안 |
+| name | text | 특징 종류의 표시명 |
+| value | jsonb | 관찰된 값. 확인하지 못한 값은 질문 근거로 사용하지 않음 |
+| source | text | 사용자 입력·이미지 분석 등 정보 출처 |
+| visibility | text | `public / private` 제안. 결정 주체는 미정 |
+| verified | boolean | 관찰 근거가 확인됐는지 표시. 모델 신뢰도 점수가 아님 |
+| distinguishing | boolean | 소유 확인에 구별력이 있는지 표시. 결정 주체는 미정 |
+
+`UNIQUE(found_item_id, feature_id)`를 제안한다. 어떤 주체가 `visibility`, `verified`, `distinguishing`을 정하는지, 사진별·통합 분석을 어떻게 표현할지, 모델·분석 이력을 보존할지는 Q04·Q05에서 정한다. 색상·브랜드·흠집을 필수 컬럼으로 고정하지 않는다. 구조 없는 AI 원문을 그대로 검색이나 질문 생성 계약으로 사용하지 않는다.
+
+### 5.10 verification_attempts
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| found_item_id | uuid FK → found_items | 필수 |
+| status | text | 검증 시도 전체 상태. 실제 값과 판정 의미는 Q05에서 결정 |
+| generation_status | text | 질문 생성의 `ready / insufficient_information`을 기록하는 안. 운영 중·실패 상태는 API 계약에서 추가 결정 |
+| feature_snapshot | jsonb | 질문 생성에 사용한 특징과 버전의 스냅샷 제안 |
+| prompt_version | text | 질문 재현을 위한 프롬프트 버전 제안 |
+
+`generation_status=ready`는 질문 생성 완료일 뿐 검증 성공이 아니다. `insufficient_information`도 소유자 거절로 처리하지 않는다. 시도 회차·만료·재생성, 사용 모델과 생성 설정, 평가 결과 저장 방식은 Q05에서 정한다. 유사도·합격 점수·승인자 컬럼은 임의로 넣지 않는다.
+
+### 5.11 verification_questions
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| verification_attempt_id | uuid FK → verification_attempts | 필수 |
+| item_feature_id | uuid FK → item_features | 질문 근거가 된 특징. 내부 참조이며 공개 응답에서 제외 |
+| text | text | 사용자에게 표시할 질문 문구 |
+| display_order | smallint | 시도 안의 질문 순서 |
+
+질문 ID는 이 행의 UUID를 사용하는 안이다. 한 시도 안에서 같은 특징을 중복 참조하지 않고 표시 순서도 중복되지 않게 하는 제약을 검토한다. 질문 생성 결과는 최대 3개를 사용하는 실험안이지만 물리 제약으로 고정하지 않는다. 질문 문구에 원본 특징값이 노출되지 않았다는 검증을 통과한 뒤에만 FE에 제공한다.
+
+### 5.12 verification_answers
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| verification_question_id | uuid FK → verification_questions | 필수 |
+| answer_text | text | 사용자가 제출한 답변 |
+| submitted_at | timestamptz | 필수 |
+
+답변 수정·재제출을 허용할지, 한 번에 여러 답변을 제출할지, 빈 답변과 “모름”을 어떻게 구분할지는 Q05에서 정한다. 답변 평가 결과를 이 테이블에 둘지 검증 시도에 묶을지도 평가 계약과 함께 결정한다.
+
+### 5.13 return_codes
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| verification_attempt_id | uuid FK → verification_attempts | 필수 제안, 코드 발급 근거. 승인 조건 미정 |
+| token_digest | text UNIQUE | 필수 제안, 코드 검증용 보호 값. 생성·보호 방식 미정 |
+| status | text | 필수, `issued / processing / used / expired / revoked` 제안 |
+| expires_at | timestamptz | 유효기간 정책 확정 후 NULL 여부 결정 |
+| used_at | timestamptz | 개방 성공 확인 전 NULL |
+
+물건은 검증 시도 FK로 구한다. 코드에 별도 물건 FK를 중복 저장해 검증 대상과 불일치하는 구조는 피한다. 코드 원문을 저장하지 않는 방안을 제안하되 짧은 코드의 생성·보호·시도 제한을 함께 설계한다. QR·OTP·숫자 길이·TTL은 정하지 않는다.
+
+구현 반영(2026-11-11): 검증 시도 테이블이 없으므로 `verification_attempt_id` 대신 `found_item_id`를 직접 참조한다. 소유 확인 평가(A04)가 생기면 그 근거 FK를 추가하고 발급의 선행 조건으로 둔다. 현재 발급에는 소유 확인이 없다.
+
+| 컬럼 | 타입 | NULL | 구현된 제약·의미 |
+| --- | --- | --- | --- |
+| found_item_id | uuid FK → found_items | 불가 | 코드가 가리키는 물건 |
+| code_hash | varchar(64) UNIQUE | 불가 | 정규화한 코드의 SHA-256 16진 문자열. 평문은 저장하지 않음 |
+| status | varchar | 불가 | `active / opening / used / locked / revoked`. 기본값 `active` |
+| expires_at | timestamptz | 불가 | 발급 시각 + `RETURN_CODE_TTL_SECONDS` |
+| used_at | timestamptz | 개방 성공 전 허용 | `(status = 'used') = (used_at IS NOT NULL)` CHECK |
+| failed_attempts | integer | 불가 | 명확한 장치 실패 횟수. `>= 0` CHECK. 상한은 미구현 |
+
+`status IN ('active','opening')`에 부분 UNIQUE 인덱스를 두어 물건당 사용 가능한 코드를 1개로 제한한다. 재발급은 이전 코드를 `revoked`로 만든다. 발급 응답에서 평문을 한 번만 전달하므로 재조회 경로가 없다. 코드는 8자리 Base32이며 입력의 공백·하이픈·소문자는 해시 전에 정규화한다. 시도 횟수 상한·잠긴 코드의 해소는 아직 구현하지 않았다.
+
+### 5.14 device_commands
+
+| 컬럼 | 타입 | NULL 정책·의미 |
+| --- | --- | --- |
+| command_id | text PK | 필수, 백엔드 발급. S2의 string 규약 |
+| device_id | uuid FK → devices | 필수 제안. DB 장치 관리 선택 전제 |
+| action | text | 필수, `capture / open` 제안 |
+| registration_id | uuid FK → registrations | 촬영 시 필수, 개방 시 NULL 제안 |
+| locker_id | uuid FK → lockers | 개방 시 필수, 촬영 시 NULL |
+| storage_assignment_id | uuid FK → storage_assignments | 업무 개방 시 필수 제안, 촬영 시 NULL |
+| return_code_id | uuid FK → return_codes | 수령 개방 시 필수, 등록 개방·촬영 시 NULL |
+| expires_at | timestamptz | 필수 |
+| status | text | 필수, `created / sent / succeeded / failed / unknown` 제안 |
+| result_code / error_code | text | 결과를 알기 전 NULL. 결과 종류에 따라 기록 |
+
+구현 반영(2026-11-11): 수령 개방은 `action = 'pickup_open'`으로 구분한다. `return_code_id`는 추가하지 않았고, `registration_id`는 수령 개방에서도 해당 물건의 등록 ID로 필수다. 따라서 명령 행만으로는 어떤 반환 코드가 그 개방을 일으켰는지 역추적할 수 없다. 대상 검증은 코드→물건→유효 배정 경로를 서비스에서 확인한다.
+
+GET 상태 조회에 명령 ID가 필요하다는 요구는 없으므로 이를 하드웨어 실행 명령 행으로 반드시 저장하지 않는다. 별도 진단 기록 필요성은 운영 설계에서 정한다. 사진 바이트나 반환 코드 원문을 명령 결과에 중복 저장하지 않는다.
+
+## 6. 관계 무결성과 상태 전이 제안
+
+1. 촬영 명령의 장치·등록이 같은 키오스크인지, 장치 역할이 capture인지 확인한다. 개방은 locker 역할·해당 키오스크의 보관함만 허용한다.
+2. 이미지의 등록과 원본 촬영 명령의 등록이 같아야 한다. 단순 FK 두 개만으로 이 교차 조건이 보장되지는 않는다.
+3. 개방 명령의 배정·보관함이 일치해야 한다. 수령 명령은 코드→검증→물건과 배정의 물건까지 일치해야 한다.
+4. 정상 등록 완료 조건은 준비된 사진 2장과 그 사진에 대한 분석 성공이다(D04). 촬영·분석 실패는 개방을 허용하는 성공 상태로 바꾸지 않는다.
+5. 질문이 참조하는 특징은 같은 물건에 속하고 해당 시도의 특징 스냅샷에 포함돼야 한다. 질문 ID만으로 다른 물건의 답변이나 평가에 연결되지 않게 한다.
+6. 질문 생성의 `ready`와 답변 평가의 승인 상태를 분리한다. 질문 생성 결과만으로 반환 코드를 발급하지 않는다.
+7. 빈 보관함 배정은 DB의 원자적 처리와 고유 제약으로 직렬화한다. 동시에 반환 코드를 처리하는 요청도 중복 개방을 만들지 않게 한다.
+8. DB 트랜잭션과 물리 개방·외부 이미지 저장은 하나의 원자적 작업이 아니다. 명령 기록→외부 호출→결과 기록 사이의 장애 복구 정책을 Q10에서 정한다.
+9. `opened` 확인 후 코드 사용 처리와 명령 성공을 기록한다. 수령 완료는 별도의 완료 확인 뒤 배정을 종료한다. 결과 불명일 때 배정이나 코드 처리 잠금을 무조건 해제하지 않는 방안을 제안한다.
+10. 물건·배정 양쪽의 상태를 저장한다면 같은 트랜잭션에서 전이시킨다. 상태 중복을 없애고 배정에서 파생하는 대안도 구현 전에 검토한다.
+
+| 업무 구간 | 전이 제안 | 확정 조건 |
+| --- | --- | --- |
+| 등록 준비 | 촬영 중 → 사진 준비 → 분석 중 → 분석 성공 | 사진 두 장은 S2·S4, 분석 성공 선행은 D04, 실패 재시도 정책은 Q04·Q07 |
+| 등록 개방 | 빈 칸 예약 → 개방 중 → 투입 대기 | opened 전 번호 표시 금지는 S2 |
+| 투입 완료 | 투입 대기 → 보관 중 | 성공한 개방 이후 사용자 완료 확인 + 센서 closed(D03·D06) |
+| 질문 생성 | 대상 물건 선택 → 특징 선별 → 질문 준비 또는 정보 부족 | 선별 규칙과 결과 구조는 S5 실험안, 공개 API·재생성 정책은 Q05 |
+| 답변 평가 | 답변 제출 → 평가 중 → 판정 기록 | 평가 결과와 승인 기준은 Q05·Q06 |
+| 수령 개방 | 코드 발급 → 처리 중 → 개방 성공·코드 사용 | S2 6.2; 결과 불명은 별도 보류 제안 |
+| 수령 완료 | 수령 대기 → 반환 완료·배정 종료 | 성공한 개방 이후 사용자 완료 확인 + 센서 closed(D03·D06) |
+| 장치 실패 | sent → failed 또는 unknown | 명확한 실패와 응답 유실 구분 제안, Q10 |
+
+부분 UNIQUE·CHECK·복합 FK·서비스 검증 중 어떤 수단으로 각 제약을 보장할지는 물리 ERD 작성 시 결정한다. 새로 제안한 제약을 이미 구현된 보장으로 해석하지 않는다.
+
+## 7. 물리 설계 전 확인 항목
+
+Q03 취소·예약 해제 등 완료 예외, Q04 분석 계약, Q05 질문 생성·답변 평가와 특징 표시 책임, Q06 코드 정책, Q07 이미지 저장·재촬영, Q08 카테고리·공개 검색, Q09 장치 식별·인증, Q10 장애 복구, Q11 질문·답변을 포함한 보존·삭제를 검토한다. 승인된 항목부터 컬럼·인덱스·상태 전이와 마이그레이션을 확정한다.

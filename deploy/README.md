@@ -8,7 +8,8 @@ GitHub `production` Environment를 환경설정의 관리 원본으로 사용한
 - 인스턴스: `i-09572eeeedf30263e`, Ubuntu 24.04, x86_64, t3.micro
 - 사진 버킷: `smart-lost-found-images-s3` (기존 비공개 S3)
 - 배포 경로: `/opt/smart-lost-found`
-- API 도메인·FE 주소·인증: 미정
+- 프론트엔드: 같은 서버의 `/`에서 nginx가 정적 파일로 서비스한다. 주소 `http://52.78.12.168/`
+- API 도메인·인증: 미정
 
 Swagger 주소는 `http://52.78.12.168/docs`다. 업무 API는 GitHub production Variable `BUSINESS_API_ENABLED`를 `true`로 설정하고 재배포하면 사용할 수 있다. 값이 없거나 `false`면 503을 반환한다. `LOCAL_DEVELOPMENT=false`는 유지한다.
 
@@ -72,13 +73,13 @@ Ubuntu 24.04의 현재 저장소에서는 `apt install awscli` 설치 후보가 
 
 ## 배포 동작
 
-1. PostgreSQL 17 테스트, 배포 설정 테스트, 운영 이미지 빌드와 readiness 확인.
+1. PostgreSQL 17 테스트, 배포 설정 테스트, 운영 이미지 빌드와 readiness 확인. 이미지 빌드 첫 단계에서 `frontend/`를 `npm ci && npm run build`로 빌드해 `dist/`를 `/opt/deploy/frontend`에 넣는다(최종 이미지에 Node는 없다).
 2. GitHub OIDC 임시 인증으로 ECR에 `커밋SHA-runID-attempt` 태그를 push. EC2에는 태그 대신 digest를 전달.
 3. GitHub 설정을 검증해 SSM SecureString에 동기화. SSM 명령 본문에는 비밀번호 없이 Parameter 경로만 전달.
 4. EC2가 이미지를 pull하고 이미지에 포함된 배포 스크립트를 해당 릴리스 디렉터리로 복사. EC2에서 소스를 빌드하지 않음.
 5. EC2 역할로 설정을 읽어 권한 0600의 env 파일 생성. Compose raw env 형식으로 `$`·따옴표를 그대로 보존.
 6. 고정 PostgreSQL 볼륨 유지, 마이그레이션 전 pg_dump, `alembic upgrade head`.
-7. 백엔드 교체 후 `/ready`와 `/api/kiosks` 확인. 활성화 상태면 200, 비활성화 상태면 503이어야 한다. 실패 시 가능한 경우 이전 이미지로 복귀하고 실패로 보고.
+7. 백엔드 교체 후 `/ready`, nginx의 `/`(프론트), `/api/kiosks` 확인. 활성화 상태면 200, 비활성화 상태면 503이어야 한다. 실패 시 가능한 경우 이전 이미지로 복귀하고 실패로 보고.
 
 GitHub와 서버의 배포 잠금으로 동시 배포를 직렬화한다. GitHub 실행을 강제 취소해도 이미 전송된 SSM 명령은 계속 실행될 수 있으므로 SSM 명령 상태를 확인한 뒤 재실행한다. 이 구성은 단일 서버이며 컨테이너 교체 중 잠깐의 중단이 있을 수 있다. DB 스키마는 자동 downgrade하지 않는다. 마이그레이션은 이전 앱과 호환되도록 작성해야 이미지 복귀가 가능하다.
 
@@ -106,3 +107,14 @@ curl -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/api/kiosks
 ```
 
 마지막 요청은 업무 API를 활성화했으면 200, 비활성화했으면 503이 정상이다. 환경값이 출력되는 `docker compose config`, `docker inspect` 전체 출력이나 env 파일 내용을 Actions/공개 로그에 붙이지 않는다.
+
+## 프론트엔드 서비스
+
+nginx는 릴리스 디렉터리의 `frontend/`(이미지에서 복사된 빌드 결과물)를 `/usr/share/nginx/html`로 읽기 전용 마운트한다.
+`/api/`, `/docs`, `/openapi.json`, `/health`, `/ready`는 지금처럼 백엔드로 넘기고, 나머지 경로는 `index.html`로 보낸다.
+`/assets/`의 해시 파일은 1년 캐시, `index.html`은 `no-cache`다. 프론트와 API가 같은 출처이므로 CORS 설정이 필요 없다.
+
+배포 실패로 이전 릴리스로 되돌릴 때는 nginx 컨테이너를 다시 만들어 이전 릴리스의 `frontend/`를 마운트한다.
+이 변경 이전 릴리스에는 `frontend/`가 없으므로, 그 릴리스로 되돌리면 `/`에는 nginx 기본 페이지가 보이고 API는 정상 동작한다.
+
+현재 위치 기반 거리 계산은 브라우저 정책상 HTTPS에서만 동작한다. 도메인과 HTTPS를 설정하기 전에는 지도에 키오스크 목록만 표시된다.

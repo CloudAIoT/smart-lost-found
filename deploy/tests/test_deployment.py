@@ -99,3 +99,21 @@ def test_invalid_deployment_identifier_reports_name_only(monkeypatch):
     with pytest.raises(ValueError) as caught:
         required("EC2_INSTANCE_ID", r"i-[0-9a-f]{17}")
     assert "secret-invalid-value" not in str(caught.value)
+
+
+@pytest.mark.parametrize("name", ["nginx.http.conf", "nginx.https.conf.template"])
+def test_nginx_serves_frontend_and_keeps_api_routes(name):
+    conf = (ROOT / "runtime" / name).read_text()
+    assert "location /api/ { proxy_pass http://backend:8000; }" in conf
+    assert "root /usr/share/nginx/html;" in conf
+    assert "try_files $uri $uri/ /index.html;" in conf
+    assert "return 503" not in conf
+
+
+def test_frontend_build_is_shipped_and_mounted_read_only():
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    assert "COPY --from=frontend /frontend/dist /opt/deploy/frontend" in dockerfile
+    compose = (ROOT / "runtime" / "compose.yaml").read_text()
+    assert "./frontend:/usr/share/nginx/html:ro" in compose
+    deploy = (ROOT / "runtime" / "deploy.sh").read_text()
+    assert '[[ -f "$release/frontend/index.html" ]]' in deploy

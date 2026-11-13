@@ -21,6 +21,9 @@ if [[ -n "$domain" ]]; then
   [[ "$domain" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$ ]]
   [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
 fi
+# The image ships the built frontend; nginx serves it read-only from this release.
+[[ -f "$release/frontend/index.html" ]]
+chmod -R a+rX "$release/frontend"
 
 docker run --rm --user 0 --memory 128m -v "$release:/config" "$image" \
   python /opt/deploy/render_config.py --parameter "$parameter" --region "$region" --output /config
@@ -51,11 +54,12 @@ mkdir -p "$root/backups"
 
 rollback() {
   echo 'Deployment failed. Database schema is retained; inspect migrations before retrying.' >&2
+  # nginx is recreated (not just restarted) so it mounts the previous release's frontend again.
   if [[ -n "$previous" && -f "$previous/compose.env" ]]; then
     docker compose --project-name smart-lost-found-prod --env-file "$previous/compose.env" -f "$previous/compose.yaml" \
       up -d --no-deps --wait --wait-timeout 120 backend || true
     docker compose --project-name smart-lost-found-prod --env-file "$previous/compose.env" -f "$previous/compose.yaml" \
-      restart nginx || true
+      up -d --no-deps nginx || true
   fi
 }
 trap rollback ERR
@@ -64,6 +68,8 @@ trap rollback ERR
 "${compose[@]}" exec -T nginx nginx -t
 "${compose[@]}" exec -T nginx nginx -s reload
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8000/ready >/dev/null
+# The frontend is served by nginx on port 80 (with a domain, port 80 answers with an HTTPS redirect).
+curl --fail --silent --show-error --max-time 10 --output /dev/null http://127.0.0.1/
 code="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8000/api/kiosks)"
 expected=503
 if grep -qx 'BUSINESS_API_ENABLED=true' "$release/backend.env"; then

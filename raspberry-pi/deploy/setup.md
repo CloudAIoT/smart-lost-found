@@ -74,5 +74,49 @@ rpicam-hello --list-cameras                   # 촬영 Pi: imx708이 보여야 �
 ## 6. 네트워크
 
 - 개발: PC와 같은 공유기의 와이파이에 연결한다. 공인 주소를 바로 받는 유선 회선에는 Pi를 연결하지 않는다. Pi가 인터넷에 그대로 노출될 수 있다.
-- 시연(학교): 학교 와이파이는 로그인 방식과 기기 간 통신 차단 때문에 쓰지 않고 휴대폰 핫스팟을 쓴다. 와이파이는 나중에 `nmcli`로 추가할 수 있다.
-- 백엔드(EC2)와의 연결은 Tailscale을 쓸 예정이다. 계정과 기기 등록은 백엔드와 정한 뒤 이 문서에 추가한다.
+- 학교·시연: 학교 와이파이는 로그인 방식과 기기 간 통신 차단 때문에 쓰지 않고 휴대폰 핫스팟을 쓴다.
+  - Pi에는 설치할 때 넣은 와이파이만 저장돼 있다. 처음 한 번은 핫스팟 이름과 비밀번호를 그 와이파이와 같게 바꿔 Pi를 붙이고, 접속한 뒤 핫스팟을 추가한다.
+  - 아이폰 핫스팟에서는 맥이 IPv6 주소만 받을 수 있다. 이때도 `ssh pi@slf-capture.local`로 접속된다.
+
+```bash
+sudo nmcli connection add type wifi con-name hotspot ifname wlan0 ssid "<핫스팟 이름>" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "<핫스팟 비밀번호>"
+```
+
+- 백엔드(EC2)와의 연결: Tailscale. 2026-11-13에 두 Pi와 EC2를 백엔드 담당의 같은 Tailscale 네트워크에 넣고, 기기 키 만료를 껐다. 백엔드 `PI_DEVICES`에는 Pi의 Tailscale 주소(`tailscale ip -4`)를 넣는다. 백엔드가 Docker 안에서 돌면 기기 이름을 못 찾을 수 있어서 이름보다 주소를 쓴다.
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up      # 나오는 주소를 브라우저로 열어 팀 계정으로 로그인
+tailscale status       # 두 Pi와 EC2가 보이면 연결된 것
+```
+
+## 7. 컨트롤러 설치와 자동 실행
+
+두 Pi에 같은 프로그램을 설치하고 `.env`로 역할을 나눈다.
+
+```bash
+cd ~
+git clone https://github.com/CloudAIoT/smart-lost-found.git
+cd smart-lost-found/raspberry-pi
+python3 -m venv --system-site-packages .venv   # Picamera2는 시스템 패키지라 가상환경에서도 보이게 한다
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env && chmod 600 .env          # 아래 표대로 고친다
+```
+
+| 설정 | 촬영 Pi | 보관함 Pi |
+| --- | --- | --- |
+| `PI_ROLE` | `capture` | `locker` |
+| `PI_FAKE_HARDWARE` | `false` (실제 카메라) | `true` (잠금장치를 달기 전) |
+| `PI_API_KEY` | 백엔드 `PI_DEVICES`의 `capture_api_key`와 같은 값 | `locker_api_key`와 같은 값 |
+
+전원을 켜면 저절로 실행되도록 서비스로 등록한다. 프로그램이 오류로 꺼지면 5초 뒤 다시 실행된다.
+
+```bash
+sudo cp deploy/slf-pi.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now slf-pi
+systemctl status slf-pi       # active (running)이면 정상
+journalctl -u slf-pi -f       # 로그 보기
+```
+
+코드를 고친 뒤에는 `git pull` 후 `sudo systemctl restart slf-pi`로 다시 띄운다.

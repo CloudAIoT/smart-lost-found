@@ -31,6 +31,18 @@ Swagger 주소는 `http://52.78.12.168/docs`다. 업무 API는 GitHub production
 | Secret | POSTGRES_PASSWORD | 생성된 32자 이상 임의 비밀번호 |
 | Variable | API_DOMAIN | DNS 연결 후 입력. 현재 생략 |
 | Variable | TLS_EMAIL | 도메인 설정 시 함께 입력할 인증서 연락 이메일 |
+| Secret | PI_DEVICES | 키오스크 ID별 Pi 주소·API 키 JSON. Pi API 키가 들어 있어 Variable이 아닌 Secret으로 둔다 |
+| Variable | COMMAND_TTL_SECONDS | 장치 명령 만료 시간(초). 비우면 Pi 기능이 미설정 오류를 낸다 |
+| Variable | PI_TIMEOUT_SECONDS | 백엔드가 Pi 응답을 기다리는 시간(초) |
+| Variable | MAX_IMAGE_BYTES | 백엔드가 받는 촬영 사진 크기 상한 |
+| Variable | PREVIEW_TTL_SECONDS | 미리보기 서명 URL 유효 시간(초) |
+| Variable | RETURN_CODE_TTL_SECONDS | 반환 코드 유효 시간(초) |
+
+Pi 설정 6종은 모두 선택값이다. 전부 비우면 지금처럼 Pi·수령 기능이 미설정 오류를 낸다. 하나라도
+빈 문자열로 두면 그 키 자체를 보내지 않는다(`deploy/publish.py`). `PI_DEVICES`는 EC2가 두 Pi와
+같은 tailnet에 있어야 닿는다. 값은 `backend/.env.example`의 `PI_DEVICES` 예시와 같은 JSON 한 줄이고,
+키오스크 ID마다 `capture_url`·`capture_api_key`·`locker_url`·`locker_api_key` 네 개가 모두 있어야
+한다. EC2의 Tailscale 설치·인증은 이 문서 범위 밖이며 이미 되어 있다고 가정한다.
 
 Variables/Secrets 변경만으로 배포 이벤트가 발생하지 않는다. 저장소 Actions → Backend CI and EC2 deployment → Run workflow → **main**으로 재배포한다. `.env`나 장기 AWS 액세스 키를 Git에 올리지 않는다. 이미지 안에도 비밀값을 넣지 않는다.
 

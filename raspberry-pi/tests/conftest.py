@@ -13,7 +13,8 @@ HEADERS = {"X-API-Key": API_KEY}
 
 def make_settings(role: str, **values) -> Settings:
     # _env_file=None: 개발자의 .env가 테스트에 섞이지 않게 한다
-    return Settings(_env_file=None, role=role, api_key=API_KEY, fake_hardware=True, **values)
+    values.setdefault("fake_hardware", True)
+    return Settings(_env_file=None, role=role, api_key=API_KEY, **values)
 
 
 def later(seconds: float = 30) -> str:

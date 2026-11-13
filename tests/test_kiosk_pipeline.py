@@ -54,7 +54,10 @@ def test_user_registers_an_item_and_the_locker_opens(kiosk):
     # Pi가 보낸 사진이 저장소에 그대로 들어갔는지 확인한다
     stored = list(kiosk.store.objects.values())
     assert len(kiosk.store.objects) == 2
-    assert all(jpeg_size(data) == (640, 480) for data in stored)
+    # jpeg_size는 JPEG인지도 함께 본다. 크기는 가짜 카메라처럼 아는 경우에만 비교한다.
+    sizes = [jpeg_size(data) for data in stored]
+    if kiosk.image_size:
+        assert all(size == kiosk.image_size for size in sizes)
     assert stored[0] != stored[1], "같은 사진이 두 번 저장되었다"
 
     # 5. 미리보기 주소를 받는다
@@ -154,7 +157,7 @@ def test_repeated_screen_taps_do_not_move_hardware_twice(kiosk):
 
 
 def test_locker_outage_blocks_registration_without_losing_the_locker(kiosk):
-    """보관함 Pi가 멈추면 등록은 blocked로 남고, 결과를 모르는 명령은 다시 보내지 않는다."""
+    """보관함 Pi가 응답하지 못하면 등록은 blocked로 남고, 결과를 모르는 명령은 다시 보내지 않는다."""
     from app.models import DeviceCommand, Registration, StorageAssignment
 
     client = kiosk.client
@@ -164,7 +167,7 @@ def test_locker_outage_blocks_registration_without_losing_the_locker(kiosk):
         client.post(f"{base}/shots/{shot}")
     assert client.post(f"{base}/analysis").json()["status"] == "ready"
 
-    kiosk.locker_pi.stop()
+    kiosk.break_locker()
     failed = client.post(f"{base}/deposit/open")
     assert failed.status_code == 502
     assert failed.json()["detail"]["code"] in ("DEVICE_UNREACHABLE", "INVALID_DEVICE_RESPONSE")

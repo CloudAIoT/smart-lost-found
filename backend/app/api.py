@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.integrations import IntegrationError, PiGateway, UnconfiguredAnalyzer, make_store
-from app.models import Category, Kiosk, Locker, Registration
+from app.models import Category, FoundItem, Kiosk, Locker, Registration
 from app import services
 
 
@@ -136,3 +137,54 @@ class CompletionInput(BaseModel):
 def complete_deposit(registration_id: UUID, body: CompletionInput, session: DB, gateway: Gateway):
     services.complete_deposit(session, registration_id, gateway)
     return registration_view(session, services.registration(session, registration_id))
+
+
+class ReturnCodeView(BaseModel):
+    found_item_id: UUID
+    code: str
+    expires_at: datetime
+
+
+class PickupInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(min_length=4, max_length=64)
+    kiosk_id: UUID
+
+
+class PickupView(BaseModel):
+    found_item_id: UUID
+    kiosk_id: UUID
+    locker_number: int
+    item_status: str
+    assignment_status: str
+
+
+def pickup_view(session: Session, assignment) -> PickupView:
+    locker = session.get(Locker, assignment.locker_id)
+    item = session.get(FoundItem, assignment.found_item_id)
+    return PickupView(found_item_id=item.id, kiosk_id=locker.kiosk_id, locker_number=locker.locker_number,
+                      item_status=item.status, assignment_status=assignment.status)
+
+
+@router.post("/found-items/{found_item_id}/return-code", response_model=ReturnCodeView, status_code=201)
+def create_return_code(found_item_id: UUID, session: DB, settings: Config):
+    if not settings.return_code_ttl_seconds:
+        raise IntegrationError("RETURN_CODE_NOT_CONFIGURED")
+    code, record = services.issue_return_code(session, found_item_id,
+                                              ttl=settings.return_code_ttl_seconds)
+    # The plaintext code is delivered once here and never stored or returned again.
+    return ReturnCodeView(found_item_id=found_item_id, code=code, expires_at=services.as_utc(record.expires_at))
+
+
+@router.post("/pickup/open", response_model=PickupView)
+def open_pickup(body: PickupInput, session: DB, gateway: Gateway, settings: Config):
+    if not settings.command_ttl_seconds:
+        raise IntegrationError("DEVICE_NOT_CONFIGURED")
+    assignment = services.open_pickup(session, body.code, body.kiosk_id, gateway,
+                                      ttl=settings.command_ttl_seconds)
+    return pickup_view(session, assignment)
+
+
+@router.post("/pickup/{found_item_id}/complete", response_model=PickupView)
+def complete_pickup(found_item_id: UUID, body: CompletionInput, session: DB, gateway: Gateway):
+    return pickup_view(session, services.complete_pickup(session, found_item_id, gateway))

@@ -1,16 +1,23 @@
 """Persist intent before external effects; never retry an uncertain device command."""
 
-from datetime import timedelta
+from base64 import b32encode
+from datetime import datetime, timedelta, timezone
+import hashlib
 import json
+import secrets
 from uuid import UUID, uuid4
 
 from sqlalchemy import exists, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.integrations import AnalysisInput, AnalysisResult, DeviceGateway, FeatureAnalyzer, ImageStore, IntegrationError, validate_jpeg
-from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, StorageAssignment, now
+from app.integrations import (AnalysisInput, AnalysisResult, DeviceGateway, FeatureAnalyzer, ImageStore,
+                              IntegrationError, validate_jpeg)
+from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, ReturnCode, StorageAssignment, now
 from app.errors import BusinessError
+
+# 40 bits of entropy rendered as 8 unpadded base32 characters, typed on a kiosk keyboard.
+RETURN_CODE_BYTES = 5
 
 
 def registration(session: Session, registration_id: UUID) -> Registration:
@@ -106,8 +113,11 @@ def analyze(session: Session, registration_id: UUID, analyzer: FeatureAnalyzer, 
         if not isinstance(result, AnalysisResult) or result.image_ids != ids or not isinstance(result.features, dict) or not result.features:
             raise IntegrationError("INVALID_ANALYSIS_RESULT")
         try:
+            # Only this serialization check normalizes its failures. Nesting deeper than the
+            # encoder can walk raises RecursionError instead of ValueError/TypeError, and an
+            # unstored result must not leave the registration stuck in analyzing/running.
             json.dumps(result.features, allow_nan=False)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             raise IntegrationError("INVALID_ANALYSIS_RESULT") from None
     except IntegrationError:
         reg.analysis_status = "failed"
@@ -206,6 +216,145 @@ def complete_deposit(session: Session, registration_id: UUID, gateway: DeviceGat
     assignment.status = "stored"
     assignment.deposited_at = assignment.deposited_at or now()
     session.get(FoundItem, assignment.found_item_id).status = "stored"
+    session.commit()
+    return assignment
+
+
+def as_utc(value: datetime) -> datetime:
+    """SQLite hands back naive datetimes even for timezone-aware columns."""
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def normalize_return_code(code: str) -> str:
+    """Kiosk keyboards produce spacing and case noise; the stored hash sees one canonical form."""
+    return "".join(code.split()).replace("-", "").upper()
+
+
+def hash_return_code(code: str) -> str:
+    return hashlib.sha256(normalize_return_code(code).encode()).hexdigest()
+
+
+def found_item(session: Session, found_item_id: UUID) -> FoundItem:
+    value = session.get(FoundItem, found_item_id)
+    if value is None:
+        raise BusinessError("ITEM_NOT_FOUND", 404)
+    return value
+
+
+def latest_assignment(session: Session, found_item_id: UUID) -> StorageAssignment | None:
+    """The active assignment, falling back to the most recent ended one so pickups can be replayed."""
+    return session.scalar(select(StorageAssignment).where(StorageAssignment.found_item_id == found_item_id)
+                          .order_by(StorageAssignment.ended_at.is_(None).desc(), StorageAssignment.created_at.desc())
+                          .limit(1))
+
+
+def issue_return_code(session: Session, found_item_id: UUID, *, ttl: int) -> tuple[str, ReturnCode]:
+    """Mint a code for a stored item. The plaintext is returned once and never stored.
+
+    Ownership is NOT checked here. Once the question/answer evaluation (A04) exists it
+    becomes the precondition of this call; until then any caller can mint a code.
+    """
+    item = found_item(session, found_item_id)
+    if item.status != "stored":
+        raise BusinessError("ITEM_NOT_STORED")
+    # Reissuing invalidates any earlier code so only one can open the locker.
+    session.execute(update(ReturnCode).where(ReturnCode.found_item_id == found_item_id,
+                    ReturnCode.status.in_(("active", "opening"))).values(status="revoked"))
+    code = b32encode(secrets.token_bytes(RETURN_CODE_BYTES)).decode().rstrip("=")
+    record = ReturnCode(found_item_id=found_item_id, code_hash=hash_return_code(code),
+                        expires_at=now() + timedelta(seconds=ttl))
+    session.add(record)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise BusinessError("RETURN_CODE_CONFLICT") from None
+    return code, record
+
+
+def open_pickup(session: Session, code: str, kiosk_id: UUID, gateway: DeviceGateway, *, ttl: int) -> StorageAssignment:
+    record = session.scalar(select(ReturnCode).where(ReturnCode.code_hash == hash_return_code(code)))
+    if record is None:
+        raise BusinessError("RETURN_CODE_NOT_FOUND", 404)
+    item = found_item(session, record.found_item_id)
+    assignment = latest_assignment(session, item.id)
+    if assignment is None:
+        raise BusinessError("ITEM_NOT_STORED")
+    locker = session.get(Locker, assignment.locker_id)
+    # The code names one locker in one kiosk. This is a target check, not caller authentication.
+    if locker.kiosk_id != kiosk_id:
+        raise BusinessError("RETURN_CODE_WRONG_KIOSK")
+    # A completed open is replayed rather than opening the door a second time.
+    if assignment.status == "awaiting_pickup":
+        return assignment
+    if record.status == "used":
+        raise BusinessError("RETURN_CODE_ALREADY_USED")
+    if record.status in ("locked", "revoked"):
+        raise BusinessError("RETURN_CODE_UNUSABLE")
+    if as_utc(record.expires_at) <= now():
+        raise BusinessError("RETURN_CODE_EXPIRED")
+    if item.status != "stored" or assignment.status != "stored":
+        raise BusinessError("ITEM_NOT_STORED")
+    # Claim the code conditionally so two concurrent submissions cannot both reach the device.
+    claimed = session.execute(update(ReturnCode).where(ReturnCode.id == record.id, ReturnCode.status == "active")
+                              .values(status="opening"))
+    if claimed.rowcount != 1:
+        session.rollback()
+        raise BusinessError("RETURN_CODE_IN_PROGRESS")
+    expires_at = now() + timedelta(seconds=ttl)
+    command = DeviceCommand(command_id=str(uuid4()), registration_id=item.registration_id, action="pickup_open",
+                            storage_assignment_id=assignment.id, expires_at=expires_at)
+    session.add(command)
+    session.commit()
+    # The claim and the command are committed before the first external call.
+    try:
+        gateway.open(locker.kiosk_id, locker.locker_number, command.command_id, expires_at)
+    except IntegrationError as error:
+        command.status = "unknown" if error.uncertain else "failed"
+        command.error_code = error.code
+        # 규약: 명확한 실패는 코드를 그대로 두어 다시 시도할 수 있게 한다.
+        # 결과 불명은 문이 이미 열렸을 수 있으므로 같은 코드로 재개방하지 않는다.
+        if error.uncertain:
+            record.status = "locked"
+        else:
+            record.status = "active"
+            record.failed_attempts += 1
+        session.commit()
+        raise
+    command.status = "succeeded"
+    record.status = "used"
+    record.used_at = now()
+    assignment.status = "awaiting_pickup"
+    session.commit()
+    return assignment
+
+
+def complete_pickup(session: Session, found_item_id: UUID, gateway: DeviceGateway) -> StorageAssignment:
+    item = found_item(session, found_item_id)
+    assignment = latest_assignment(session, found_item_id)
+    if item.status == "retrieved":
+        return assignment
+    if assignment is None or assignment.status != "awaiting_pickup":
+        raise BusinessError("PICKUP_NOT_OPENED")
+    locker = session.get(Locker, assignment.locker_id)
+    door = gateway.door(locker.kiosk_id, locker.locker_number)
+    if door != "closed":
+        raise BusinessError("DOOR_NOT_CLOSED")
+    # The API call itself is the explicit user confirmation. Reload under a row lock
+    # after the sensor call so two completions cannot both end the assignment.
+    item = session.scalar(select(FoundItem).where(FoundItem.id == found_item_id)
+                          .with_for_update().execution_options(populate_existing=True))
+    if item.status == "retrieved":
+        session.rollback()
+        return latest_assignment(session, found_item_id)
+    session.refresh(assignment)
+    if assignment.status != "awaiting_pickup":
+        session.rollback()
+        raise BusinessError("PICKUP_NOT_OPENED")
+    item.status = "retrieved"
+    assignment.status = "retrieved"
+    # Ending the assignment releases the locker through the partial UNIQUE indexes.
+    assignment.ended_at = assignment.ended_at or now()
     session.commit()
     return assignment
 

@@ -169,6 +169,8 @@ erDiagram
 | registration_id | uuid FK → registrations, UNIQUE | 필수, 출처 등록 |
 | status | text | 필수, `awaiting_deposit / stored / awaiting_pickup / returned` 제안 |
 
+구현 반영(2026-11-11): 상태 CHECK는 `awaiting_deposit / stored / retrieved` 3개다. 수령 대기는 물건이 아니라 배정 상태로만 두고, 반환 완료는 `returned` 대신 `retrieved`로 적는다.
+
 이미지 두 장과 분석이 준비된 등록 완료 요청에서 물건을 만들고 `awaiting_deposit`로 두는 안이다. 이 행의 생성이 실제 투입 완료를 뜻하지 않는다. 실패·취소된 배정과 물건의 정리 정책은 Q03에서 결정한다. 등록 정보는 위 등록 FK로 참조하며 동일 카테고리를 양쪽에 독립 수정하는 중복 필드는 제안하지 않는다.
 
 ### 5.8 storage_assignments
@@ -183,6 +185,8 @@ erDiagram
 | deposited_at | timestamptz | 투입 완료 확인 전 NULL |
 | retrieved_at | timestamptz | 수령 완료 확인 전 NULL |
 | ended_at | timestamptz | 유효 배정 중 NULL. 완료·취소로 해제된 시점 |
+
+구현 반영(2026-11-11): 상태 CHECK는 `reserved / awaiting_deposit / stored / awaiting_pickup / retrieved / cancelled`이고, `ended_at` 일치 제약은 `cancelled`와 `retrieved` 두 상태를 묶는다. `retrieved_at`과 `completed` 상태는 두지 않았다. 수령 완료 시 `status = 'retrieved'`와 `ended_at`을 같은 트랜잭션에서 기록해 칸을 해제한다.
 
 `ended_at IS NULL`인 행에 대해 `locker_id`, `found_item_id` 각각 부분 UNIQUE 인덱스를 제안한다. 예약·개방 중·결과 불명·수령 대기에서도 배정을 유지한다. `completed/cancelled`와 `ended_at`의 일치 제약, `retrieved_at >= deposited_at` 등 시각 검증은 상태 계약과 함께 확정한다. 개방 성공만으로 배정을 종료하지 않는다.
 
@@ -248,6 +252,19 @@ erDiagram
 
 물건은 검증 시도 FK로 구한다. 코드에 별도 물건 FK를 중복 저장해 검증 대상과 불일치하는 구조는 피한다. 코드 원문을 저장하지 않는 방안을 제안하되 짧은 코드의 생성·보호·시도 제한을 함께 설계한다. QR·OTP·숫자 길이·TTL은 정하지 않는다.
 
+구현 반영(2026-11-11): 검증 시도 테이블이 없으므로 `verification_attempt_id` 대신 `found_item_id`를 직접 참조한다. 소유 확인 평가(A04)가 생기면 그 근거 FK를 추가하고 발급의 선행 조건으로 둔다. 현재 발급에는 소유 확인이 없다.
+
+| 컬럼 | 타입 | NULL | 구현된 제약·의미 |
+| --- | --- | --- | --- |
+| found_item_id | uuid FK → found_items | 불가 | 코드가 가리키는 물건 |
+| code_hash | varchar(64) UNIQUE | 불가 | 정규화한 코드의 SHA-256 16진 문자열. 평문은 저장하지 않음 |
+| status | varchar | 불가 | `active / opening / used / locked / revoked`. 기본값 `active` |
+| expires_at | timestamptz | 불가 | 발급 시각 + `RETURN_CODE_TTL_SECONDS` |
+| used_at | timestamptz | 개방 성공 전 허용 | `(status = 'used') = (used_at IS NOT NULL)` CHECK |
+| failed_attempts | integer | 불가 | 명확한 장치 실패 횟수. `>= 0` CHECK. 상한은 미구현 |
+
+`status IN ('active','opening')`에 부분 UNIQUE 인덱스를 두어 물건당 사용 가능한 코드를 1개로 제한한다. 재발급은 이전 코드를 `revoked`로 만든다. 발급 응답에서 평문을 한 번만 전달하므로 재조회 경로가 없다. 코드는 8자리 Base32이며 입력의 공백·하이픈·소문자는 해시 전에 정규화한다. 시도 횟수 상한·잠긴 코드의 해소는 아직 구현하지 않았다.
+
 ### 5.14 device_commands
 
 | 컬럼 | 타입 | NULL 정책·의미 |
@@ -262,6 +279,8 @@ erDiagram
 | expires_at | timestamptz | 필수 |
 | status | text | 필수, `created / sent / succeeded / failed / unknown` 제안 |
 | result_code / error_code | text | 결과를 알기 전 NULL. 결과 종류에 따라 기록 |
+
+구현 반영(2026-11-11): 수령 개방은 `action = 'pickup_open'`으로 구분한다. `return_code_id`는 추가하지 않았고, `registration_id`는 수령 개방에서도 해당 물건의 등록 ID로 필수다. 따라서 명령 행만으로는 어떤 반환 코드가 그 개방을 일으켰는지 역추적할 수 없다. 대상 검증은 코드→물건→유효 배정 경로를 서비스에서 확인한다.
 
 GET 상태 조회에 명령 ID가 필요하다는 요구는 없으므로 이를 하드웨어 실행 명령 행으로 반드시 저장하지 않는다. 별도 진단 기록 필요성은 운영 설계에서 정한다. 사진 바이트나 반환 코드 원문을 명령 결과에 중복 저장하지 않는다.
 

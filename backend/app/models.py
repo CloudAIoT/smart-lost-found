@@ -67,7 +67,7 @@ class FoundItem(Entity, Base):
     __tablename__ = "found_items"
     registration_id: Mapped[UUID] = mapped_column(ForeignKey("registrations.id"), unique=True)
     status: Mapped[str] = mapped_column(default="awaiting_deposit")
-    __table_args__ = (CheckConstraint("status IN ('awaiting_deposit','stored')", name="item_status"),)
+    __table_args__ = (CheckConstraint("status IN ('awaiting_deposit','stored','retrieved')", name="item_status"),)
 
 
 class StorageAssignment(Entity, Base):
@@ -78,8 +78,8 @@ class StorageAssignment(Entity, Base):
     deposited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (
-        CheckConstraint("status IN ('reserved','awaiting_deposit','stored','cancelled')", name="assignment_status"),
-        CheckConstraint("(status = 'cancelled') = (ended_at IS NOT NULL)", name="assignment_end"),
+        CheckConstraint("status IN ('reserved','awaiting_deposit','stored','awaiting_pickup','retrieved','cancelled')", name="assignment_status"),
+        CheckConstraint("(status IN ('cancelled','retrieved')) = (ended_at IS NOT NULL)", name="assignment_end"),
         Index("uq_active_locker", "locker_id", unique=True, postgresql_where=text("ended_at IS NULL"), sqlite_where=text("ended_at IS NULL")),
         Index("uq_active_item", "found_item_id", unique=True, postgresql_where=text("ended_at IS NULL"), sqlite_where=text("ended_at IS NULL")),
     )
@@ -99,7 +99,27 @@ class DeviceCommand(Base):
     __table_args__ = (
         UniqueConstraint("registration_id", "shot_order"),
         CheckConstraint("status IN ('sent','succeeded','failed','unknown')", name="command_status"),
-        CheckConstraint("(action = 'capture' AND shot_order IN (1,2) AND shot_order IS NOT NULL AND storage_assignment_id IS NULL) OR (action = 'open' AND shot_order IS NULL AND storage_assignment_id IS NOT NULL)", name="command_target"),
+        CheckConstraint("(action = 'capture' AND shot_order IN (1,2) AND shot_order IS NOT NULL AND storage_assignment_id IS NULL) OR (action IN ('open','pickup_open') AND shot_order IS NULL AND storage_assignment_id IS NOT NULL)", name="command_target"),
+    )
+
+
+class ReturnCode(Entity, Base):
+    """One-time pickup code. Only the hash is stored; the plaintext is returned once at issue time."""
+
+    __tablename__ = "return_codes"
+    found_item_id: Mapped[UUID] = mapped_column(ForeignKey("found_items.id"))
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(default="active")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_attempts: Mapped[int] = mapped_column(default=0)
+    __table_args__ = (
+        CheckConstraint("status IN ('active','opening','used','locked','revoked')", name="return_code_status"),
+        CheckConstraint("(status = 'used') = (used_at IS NOT NULL)", name="return_code_use"),
+        CheckConstraint("failed_attempts >= 0", name="return_code_attempts"),
+        # At most one usable code per item; reissuing revokes the previous one.
+        Index("uq_open_return_code", "found_item_id", unique=True,
+              postgresql_where=text("status IN ('active','opening')"), sqlite_where=text("status IN ('active','opening')")),
     )
 
 

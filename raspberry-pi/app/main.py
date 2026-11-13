@@ -33,11 +33,22 @@ class CaptureCommand(Command):
     registration_id: str = Field(min_length=1, max_length=100)
 
 
+def make_camera(settings: Settings) -> Camera:
+    if settings.fake_hardware:
+        return FakeCamera(settings.fake_capture_seconds)
+    from app.hardware.camera import PiCamera  # Picamera2가 있는 촬영 Pi에서만 불러온다
+    return PiCamera((settings.capture_width, settings.capture_height), settings.focus_timeout_seconds)
+
+
+def make_lockers(settings: Settings) -> Lockers:
+    if settings.fake_hardware:
+        return FakeLockers(settings.locker_count, settings.fake_door_open_seconds)
+    raise RuntimeError("보관함 실제 장치 연결은 아직 없습니다. PI_FAKE_HARDWARE=true로 실행하세요.")
+
+
 def create_app(settings: Settings | None = None, camera: Camera | None = None,
                lockers: Lockers | None = None) -> FastAPI:
     settings = settings or get_settings()
-    if not settings.fake_hardware and camera is None and lockers is None:
-        raise RuntimeError("실제 장치 연결은 아직 없습니다. PI_FAKE_HARDWARE=true로 실행하세요.")
 
     app = FastAPI(title=f"smart-lost-found Pi ({settings.role})")
     app.add_exception_handler(DeviceError, handle_device_error)
@@ -57,7 +68,7 @@ def create_app(settings: Settings | None = None, camera: Camera | None = None,
         return {"status": "ok", "role": settings.role}
 
     if settings.role == "capture":
-        camera = camera or FakeCamera(settings.fake_capture_seconds)
+        camera = camera or make_camera(settings)
         app.state.camera = camera
 
         @app.post("/capture", dependencies=auth)
@@ -73,7 +84,7 @@ def create_app(settings: Settings | None = None, camera: Camera | None = None,
             return book.run(command.command_id, key, command.expires_at, action).response()
 
     else:
-        lockers = lockers or FakeLockers(settings.locker_count, settings.fake_door_open_seconds)
+        lockers = lockers or make_lockers(settings)
         app.state.lockers = lockers
 
         def check_locker(locker_id: int) -> None:

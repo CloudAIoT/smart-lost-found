@@ -52,6 +52,33 @@ def test_runtime_api_switch_and_legacy_config(tmp_path, enabled):
     assert "BUSINESS_API_ENABLED" not in (tmp_path / "db.env").read_text()
 
 
+def test_pi_settings_are_optional_and_render_when_given(tmp_path):
+    config = payload()
+    config["COMMAND_TTL_SECONDS"] = "30"
+    config["PI_TIMEOUT_SECONDS"] = "20"
+    config["PI_DEVICES"] = '{"kiosk-1":{"capture_url":"http://100.1.1.1:8000","capture_api_key":"ck",' \
+                            '"locker_url":"http://100.1.1.2:8000","locker_api_key":"lk"}}'
+    render(config, tmp_path)
+    backend = (tmp_path / "backend.env").read_text()
+    assert "COMMAND_TTL_SECONDS=30\n" in backend
+    assert "PI_TIMEOUT_SECONDS=20\n" in backend
+    assert f'PI_DEVICES={config["PI_DEVICES"]}\n' in backend
+    assert "PI_DEVICES" not in (tmp_path / "db.env").read_text()
+
+
+@pytest.mark.parametrize("key,value", [
+    ("COMMAND_TTL_SECONDS", "0"), ("COMMAND_TTL_SECONDS", "-5"), ("COMMAND_TTL_SECONDS", "thirty"),
+    ("PI_DEVICES", "not json"), ("PI_DEVICES", "[]"), ("PI_DEVICES", "{}"),
+    ("PI_DEVICES", '{"kiosk-1":{"capture_url":"http://x:8000"}}'),
+])
+def test_bad_pi_settings_are_rejected(tmp_path, key, value):
+    config = payload()
+    config[key] = value
+    with pytest.raises(ValueError):
+        render(config, tmp_path)
+    assert not (tmp_path / "backend.env").exists()
+
+
 def test_ssm_command_contains_no_secret_values():
     image = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/backend@sha256:" + "a" * 64
     commands = build_commands(image, "ap-northeast-2", "/smart-lost-found/production/config", "a" * 40 + "-1-1", "", "")

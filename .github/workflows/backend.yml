@@ -91,6 +91,11 @@ jobs:
       BUSINESS_API_ENABLED: ${{ vars.BUSINESS_API_ENABLED || 'false' }}
       API_DOMAIN: ${{ vars.API_DOMAIN }}
       TLS_EMAIL: ${{ vars.TLS_EMAIL }}
+      COMMAND_TTL_SECONDS: ${{ vars.COMMAND_TTL_SECONDS }}
+      PI_TIMEOUT_SECONDS: ${{ vars.PI_TIMEOUT_SECONDS }}
+      MAX_IMAGE_BYTES: ${{ vars.MAX_IMAGE_BYTES }}
+      PREVIEW_TTL_SECONDS: ${{ vars.PREVIEW_TTL_SECONDS }}
+      RETURN_CODE_TTL_SECONDS: ${{ vars.RETURN_CODE_TTL_SECONDS }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,4 +126,5 @@ jobs:
       - name: Synchronize configuration and deploy through SSM
         env:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          PI_DEVICES: ${{ secrets.PI_DEVICES }}
         run: python deploy/publish.py

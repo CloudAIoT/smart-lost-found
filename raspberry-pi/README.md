@@ -15,6 +15,7 @@
 | [하드웨어 설계](hardware/README.md) | 촬영 모듈·보관함 모듈 3D 배치, 배선, 설계 점검 |
 | [결정 기록 0001](docs/decisions/0001-single-camera-two-shots.md) | 카메라 1대로 물건 방향을 바꿔 2장 촬영 |
 | [결정 기록 0002](docs/decisions/0002-locker-led-button.md) | 시제품 보관함은 잠금장치 대신 LED와 버튼 |
+| [결정 기록 0003](docs/decisions/0003-mqtt-device-status.md) | 물건 유무와 장치 상태를 MQTT로 알리기 (제안) |
 
 ## 구성
 
@@ -120,6 +121,7 @@ PI_ROLE=locker PI_API_KEY=locker-key-123 PI_FAKE_HARDWARE=true uvicorn --factory
 - [ ] 잠금장치·문 센서 (향후 과제)
 - [x] 백엔드 서버·실제 Pi와 연동 시험 (백엔드 담당, #21)
 - [ ] 키오스크 화면 자동 실행과 고정 (브라우저 종료·주소 변경 방지)
+- [ ] MQTT로 물건 유무·장치 상태 알리기 (제안, 결정 기록 0003)
 
 ## 진행 기록
 
@@ -137,3 +139,4 @@ PI_ROLE=locker PI_API_KEY=locker-key-123 PI_FAKE_HARDWARE=true uvicorn --factory
 | 2026-11-13 | #20 병합 후 두 Pi에 자동 실행 서비스 등록(촬영 Pi는 실제 카메라, 보관함 Pi는 가짜 모드), 서비스 상태에서 실제 촬영·개방·Tailscale 응답 확인 |
 | 2026-11-13 | (팀) 백엔드가 Tailscale 너머 실제 Pi로 종단 테스트와 실제 Pi·S3 수동 확인 절차 추가 (#21), 웹 포털·키오스크 프론트엔드 추가 |
 | 2026-11-15 | 3D 프린터를 빌리기 어려워 상자를 직접 만들기로 하고, 팀 협의와 교수님 조언에 따라 보관함은 잠금장치 대신 칸마다 LED와 버튼으로 보여 주기로 결정 (결정 기록 0002) |
+| 2026-11-15 | SAD 발표 때 교수님 피드백(10/28)에 따라 MQTT를 쓸 곳과 물건 감지 센서를 조사하고 적용 계획을 제안 (결정 기록 0003) |

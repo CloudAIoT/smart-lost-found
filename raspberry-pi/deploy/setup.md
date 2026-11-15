@@ -120,3 +120,5 @@ journalctl -u slf-pi -f       # 로그 보기
 ```
 
 코드를 고친 뒤에는 `git pull` 후 `sudo systemctl restart slf-pi`로 다시 띄운다.
+
+2026-11-13에 두 Pi에 등록했다. 촬영 Pi는 실제 카메라 모드, 보관함 Pi는 가짜 모드로 돈다.

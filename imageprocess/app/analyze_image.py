@@ -72,6 +72,7 @@ def analyze_file(path: Path, settings: Settings, service=None, *, category: str 
         'data': features.model_dump(),
         'warnings': flags,
         'comparison_metadata': {
+            'feature_schema': 'fixed_common_v2',
             'image_sha256': hashlib.sha256(content).hexdigest(),
             'prepared_image_sha256': hashlib.sha256(prepared.image.tobytes()).hexdigest(),
             'prepared_size': list(prepared.image.size),

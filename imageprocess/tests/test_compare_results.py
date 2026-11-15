@@ -38,3 +38,17 @@ def test_failed_results_are_not_compared_as_valid_features(tmp_path, capsys):
     assert main([str(path), str(path), '--output', str(tmp_path/'report.md')]) == 1
     assert json.loads(capsys.readouterr().out)['error']['code'] == 'COMPARISON_FAILED'
     assert not (tmp_path/'report.md').exists()
+
+
+def test_old_and_new_schemas_can_be_compared_without_inventing_missing_fields(tmp_path):
+    from app.models.schemas import Features
+    old, new = result(), result()
+    new['data'] = dict.fromkeys(Features.model_fields)
+    a, b, output = tmp_path/'old.json', tmp_path/'new.json', tmp_path/'comparison.md'
+    a.write_text(json.dumps(old))
+    b.write_text(json.dumps(new))
+    assert main([str(a), str(b), '--output', str(output)]) == 0
+    text = output.read_text()
+    assert '| material |' in text and '| surface_texture |' in text
+    assert '해당 규격에 없는 필드' in text and '| color |' in text
+    assert old['data']['material'] == 'unknown' and new['data']['surface_texture'] is None

@@ -65,12 +65,7 @@ def test_mock_mode_explicitly_returns_unknown_semantics():
     service = VisionService(Settings(_env_file=None, inference_backend='mock'))
     service.load()
     features = parse_features(service.infer(Image.new('RGB', (10, 10))))
-    assert features.category == 'unknown'
-    assert features.material == 'unknown'
-    assert features.brand is None
-    assert features.color == []
-    assert features.visible_text == []
-    assert 'Mock mode' in features.description
+    assert all(value is None for value in features.model_dump().values())
 
 
 def test_unloaded_service_refuses_inference():
@@ -82,29 +77,29 @@ def test_unloaded_service_refuses_inference():
 
 
 def _valid_features_payload():
-    return {'category': 'unknown', 'color': ['black'], 'material': 'unknown',
-            'brand': None, 'visible_text': [], 'distinctive_features': [],
-            'description': 'A black item.'}
+    return {'category': None, 'color': ['black'], 'shape': None,
+            'surface_texture': None, 'brand': None, 'visible_text': None,
+            'structure': None, 'distinctive_features': None}
 
 
-def test_single_material_array_is_normalized_without_changing_meaning():
+def test_empty_observation_lists_are_serialized_as_null():
     import json
     payload = _valid_features_payload()
-    payload['material'] = ['unknown']
+    for name in ('color', 'visible_text', 'structure', 'distinctive_features'):
+        payload[name] = []
     features = parse_features(json.dumps(payload))
-    assert features.material == 'unknown'
-    assert features.model_dump() == {**payload, 'material': 'unknown'}
+    assert all(features.model_dump()[name] is None for name in ('color', 'visible_text', 'structure', 'distinctive_features'))
 
 
-@pytest.mark.parametrize('material', [[], ['canvas', 'polyester'], [12], ['']])
-def test_ambiguous_or_invalid_material_arrays_still_fail(material):
+@pytest.mark.parametrize('texture', [[], ['canvas', 'polyester'], 12, ''])
+def test_invalid_surface_texture_is_not_silently_reinterpreted(texture):
     import json
     payload = _valid_features_payload()
-    payload['material'] = material
+    payload['surface_texture'] = texture
     with pytest.raises(ServiceError) as failure:
         parse_features(json.dumps(payload))
     assert failure.value.code == 'INVALID_MODEL_OUTPUT'
-    assert 'material' in failure.value.message
+    assert 'surface_texture' in failure.value.message
 
 
 def test_validation_error_identifies_field_without_exposing_model_content():
@@ -142,3 +137,32 @@ def test_korean_category_uses_english_model_hint_without_changing_input_label():
     assert 'category hint (JSON string): "pencil_case"' in build_prompt('필통')
     assert 'category hint (JSON string): "wallet"' in build_prompt('지갑')
     assert 'category hint (JSON string): "headphones"' in build_prompt('headphones')
+    assert 'category hint (JSON string): "plush_toy"' in build_prompt('인형')
+
+
+def test_all_seven_common_fields_and_details_are_required_but_nullable():
+    import json
+    from app.models.schemas import COMMON_FEATURE_FIELDS, Features
+    payload = dict.fromkeys([*COMMON_FEATURE_FIELDS, 'distinctive_features'])
+    assert len(COMMON_FEATURE_FIELDS) == 7
+    assert parse_features(json.dumps(payload)).model_dump() == payload
+    assert set(Features.model_json_schema()['required']) == set(payload)
+    del payload['brand']
+    with pytest.raises(ServiceError):
+        parse_features(json.dumps(payload))
+
+
+def test_visual_recognition_is_allowed_without_embedding_known_test_answers():
+    assert 'learned visual knowledge to recognize brands' in PROMPT
+    assert 'even when no readable label exists' in PROMPT
+    assert 'visible identifying cues' in PROMPT.replace('\n', ' ')
+    # The user's known answers are not inference inputs.
+    assert '주댕치' not in PROMPT and '우사기' not in PROMPT
+
+
+def test_recognized_character_details_are_preserved_without_a_character_whitelist():
+    import json
+    payload = _valid_features_payload()
+    payload['category'] = 'plush_toy'
+    payload['distinctive_features'] = ['캐릭터 식별: 우사기. 긴 귀와 분홍색 귀 안쪽, 뺨의 세 줄 자수가 보인다.']
+    assert parse_features(json.dumps(payload)).distinctive_features == payload['distinctive_features']

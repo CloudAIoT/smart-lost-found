@@ -1,0 +1,16 @@
+# Pi 컨트롤러 자동 실행 (두 Pi 공통). 역할과 키는 raspberry-pi/.env에서 읽는다
+# 설치: deploy/setup.md의 '7. 컨트롤러 설치와 자동 실행'
+[Unit]
+Description=smart-lost-found Pi controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/smart-lost-found/raspberry-pi
+ExecStart=/home/pi/smart-lost-found/raspberry-pi/.venv/bin/uvicorn --factory app.main:create_app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -14,7 +14,7 @@ Gemini에 보내는 검색 데이터는 요청 안에서만 쓰는 번호와 등
 
 ## 2. DB 데이터와 검토 메타데이터
 
-기존 `registrations.analysis_features`에 이미지 분석 시제품의 7개 필드를 직접 저장하거나, 결과의 `data`에 넣은 형태를 읽을 수 있다. 등록 분석 상태가 성공일 때만 해당 특징을 읽는다. 등록 API에 선택 필드 `found_location`을 추가했다. 마이그레이션 `0002_ownership_attempts`가 이 컬럼과 `ownership_attempts` 테이블을 추가한다.
+기존 `registrations.analysis_features`에 이미지 분석 시제품의 7개 필드를 직접 저장하거나, 결과의 `data`에 넣은 형태를 읽을 수 있다. 등록 분석 상태가 성공일 때만 해당 특징을 읽는다. 등록 API에 선택 필드 `found_location`을 추가했다. 반환 코드 마이그레이션 다음에 실행되는 `0003_ownership_attempts`가 이 컬럼과 `ownership_attempts` 테이블을 추가한다.
 
 소유 확인에 쓸 특징에는 등록된 값과 일치하는 **별도의 서버 검토 메타데이터**가 필요하다. 아래 구조는 합성 필통 예시이고, 이미지 분석기가 이 값을 자동으로 제공한다고 가정하지 않는다.
 

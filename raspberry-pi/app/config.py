@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     fake_door_open_seconds: float = Field(default=5.0, ge=0)
     # 중복 처리를 위해 기억해 두는 최근 명령 수
     command_memory: int = Field(default=200, ge=1)
+    # 실제 카메라 사진 크기. 이미지 분석이 긴 변을 1280px로 줄여 쓰므로 절반 해상도로 충분하다
+    capture_width: int = Field(default=2304, ge=640, le=4608)
+    capture_height: int = Field(default=1296, ge=480, le=2592)
+    # 초점 맞추기 시간 제한(초). 넘으면 초점이 덜 맞은 채로 찍는다
+    focus_timeout_seconds: float = Field(default=3.0, gt=0, le=10)
 
 
 @lru_cache

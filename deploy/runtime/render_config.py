@@ -8,9 +8,14 @@ import re
 import boto3
 
 
+# Pi 설정은 전부 선택값이다. 값이 없으면 백엔드가 기존처럼 PI_NOT_CONFIGURED류 오류를 낸다.
+REQUIRED = {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "S3_BUCKET", "S3_REGION"}
+OPTIONAL = {"BUSINESS_API_ENABLED", "COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES",
+            "PREVIEW_TTL_SECONDS", "RETURN_CODE_TTL_SECONDS", "PI_DEVICES"}
+
+
 def render(payload: dict, output: Path) -> None:
-    allowed = {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "S3_BUCKET", "S3_REGION"}
-    if not isinstance(payload, dict) or not allowed <= set(payload) or set(payload) - allowed - {"BUSINESS_API_ENABLED"}:
+    if not isinstance(payload, dict) or not REQUIRED <= set(payload) or set(payload) - REQUIRED - OPTIONAL:
         raise ValueError("Invalid deployment configuration keys")
     payload = {"BUSINESS_API_ENABLED": "false", **payload}
     if payload["BUSINESS_API_ENABLED"] not in ("true", "false"):
@@ -23,6 +28,21 @@ def render(payload: dict, output: Path) -> None:
             raise ValueError(f"Invalid PostgreSQL identifier: {key}")
     if len(payload["POSTGRES_PASSWORD"]) < 32:
         raise ValueError("POSTGRES_PASSWORD must contain at least 32 characters")
+    for key in ("COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES", "PREVIEW_TTL_SECONDS",
+               "RETURN_CODE_TTL_SECONDS"):
+        if key in payload and not re.fullmatch(r"[1-9][0-9]{0,9}", payload[key]):
+            raise ValueError(f"{key} must be a positive integer")
+    if "PI_DEVICES" in payload:
+        try:
+            devices = json.loads(payload["PI_DEVICES"])
+        except json.JSONDecodeError:
+            raise ValueError("PI_DEVICES must be valid JSON") from None
+        if not isinstance(devices, dict) or not devices:
+            raise ValueError("PI_DEVICES must be a non-empty JSON object keyed by kiosk id")
+        required_device_keys = {"capture_url", "capture_api_key", "locker_url", "locker_api_key"}
+        for kiosk_id, device in devices.items():
+            if not isinstance(device, dict) or set(device) != required_device_keys:
+                raise ValueError(f"PI_DEVICES entry for {kiosk_id!r} must contain exactly {sorted(required_device_keys)}")
     output.mkdir(parents=True, exist_ok=True)
     os.umask(0o077)
     for name, values in (("backend.env", payload), ("db.env", {k: v for k, v in payload.items() if k.startswith("POSTGRES_")})):

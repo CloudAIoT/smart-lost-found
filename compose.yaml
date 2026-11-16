@@ -20,6 +20,9 @@ services:
         condition: service_healthy
   db:
     image: postgres:17-bookworm
+    # 이 PC에서 백엔드를 직접 띄워 실제 Pi를 부를 때 쓴다. 루프백에만 연다.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in backend/.env}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in backend/.env}

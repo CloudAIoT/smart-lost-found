@@ -37,6 +37,7 @@ class Settings(GeminiSettings):
     max_image_bytes: int | None = Field(default=None, gt=0)
     pi_timeout_seconds: float | None = Field(default=None, gt=0)
     command_ttl_seconds: int | None = Field(default=None, gt=0)
+    return_code_ttl_seconds: int | None = Field(default=None, gt=0)
     # Per-kiosk device routing stays in server configuration, never FE input.
     pi_devices: dict[str, dict[str, str]] = Field(default_factory=dict)
 

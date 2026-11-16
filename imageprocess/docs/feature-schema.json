@@ -1,0 +1,142 @@
+{
+  "additionalProperties": false,
+  "description": "Seven required, nullable common fields plus one nullable list of item details.",
+  "properties": {
+    "category": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Category"
+    },
+    "color": {
+      "anyOf": [
+        {
+          "items": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Color"
+    },
+    "shape": {
+      "anyOf": [
+        {
+          "maxLength": 300,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Shape"
+    },
+    "surface_texture": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Surface Texture"
+    },
+    "brand": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Brand"
+    },
+    "visible_text": {
+      "anyOf": [
+        {
+          "items": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Visible Text"
+    },
+    "structure": {
+      "anyOf": [
+        {
+          "items": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Structure"
+    },
+    "distinctive_features": {
+      "anyOf": [
+        {
+          "items": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 30,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Distinctive Features"
+    }
+  },
+  "required": [
+    "category",
+    "color",
+    "shape",
+    "surface_texture",
+    "brand",
+    "visible_text",
+    "structure",
+    "distinctive_features"
+  ],
+  "title": "Features",
+  "type": "object"
+}

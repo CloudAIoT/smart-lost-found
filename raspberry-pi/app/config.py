@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     capture_height: int = Field(default=1296, ge=480, le=2592)
     # 초점 맞추기 시간 제한(초). 넘으면 초점이 덜 맞은 채로 찍는다
     focus_timeout_seconds: float = Field(default=3.0, gt=0, le=10)
+    # 보관함 Pi: 잠금장치 대신 칸마다 LED, 문 센서 대신 버튼의 GPIO 번호. 1번 칸, 2번 칸 순서
+    locker_led_pins: list[int] = Field(default=[17, 27], min_length=1)
+    locker_button_pins: list[int] = Field(default=[22, 23], min_length=1)
 
 
 @lru_cache

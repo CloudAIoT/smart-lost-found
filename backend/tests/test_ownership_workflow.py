@@ -88,7 +88,7 @@ def ownership(database_engine):
 
     ai = FakeAI()
     settings = Settings(_env_file=None, postgres_db="test", postgres_user="test",
-                        postgres_password="test", local_development=True)
+                        postgres_password="test", local_development=True, return_code_ttl_seconds=300)
 
     def sessions():
         with Session(database_engine) as session:
@@ -154,6 +154,26 @@ def test_hands_off_only_after_every_private_feature_matches(ownership):
     assert result.policy_version == "development_v2"
 
 
+def test_verified_attempt_issues_one_otp_for_the_matched_item(ownership):
+    ownership.settings.local_development = False
+    ownership.settings.business_api_enabled = True
+    first = begin(ownership)
+    path = f"/api/found-items/{ownership.first}/return-code"
+    body = {"attempt_id": first["attempt_id"]}
+    assert ownership.client.post(path).status_code == 422
+    assert ownership.client.post(path, json=body).status_code == 403
+    second = submit(ownership, first, "파란 원형 핀").json()
+    last = submit(ownership, second, "MJ").json()
+    assert last["found_item_id"] == str(ownership.first)
+    assert ownership.client.post(f"/api/found-items/{ownership.second}/return-code", json=body).status_code == 403
+    issued = ownership.client.post(path, json=body)
+    assert issued.status_code == 201
+    assert issued.headers["cache-control"] == "no-store"
+    assert len(issued.json()["code"]) == 8
+    assert issued.json()["kiosk_name"] == "보관 키오스크"
+    assert ownership.client.post(path, json=body).json()["detail"]["code"] == "OWNERSHIP_RETURN_CODE_ALREADY_ISSUED"
+
+
 def test_two_photo_features_are_searchable_without_becoming_ownership_proof(ownership):
     ownership.ai.clues = SearchClues(shape="직사각형", surface_texture="직조 표면", structure="측면 지퍼")
     with Session(ownership.engine) as session:
@@ -168,6 +188,8 @@ def test_two_photo_features_are_searchable_without_becoming_ownership_proof(owne
     result = begin(ownership)
     assert result["initial_candidate_count"] == 1
     assert result["decision"] == "insufficient_evidence"
+    path = f"/api/found-items/{ownership.first}/return-code"
+    assert ownership.client.post(path, json={"attempt_id": result["attempt_id"]}).status_code == 403
 
 
 def test_no_match_and_missing_clues_do_not_create_a_judgment(ownership):
@@ -329,6 +351,8 @@ def test_invalid_option_expired_attempt_and_production_gate(ownership):
     assert ownership.client.get(url).status_code == 410
     ownership.settings.local_development = False
     ownership.settings.business_api_enabled = True
+    assert ownership.client.post(BASE, json={"description": "필통"}).status_code == 200
+    ownership.settings.business_api_enabled = False
     assert ownership.client.post(BASE, json={"description": "필통"}).status_code == 503
 
 

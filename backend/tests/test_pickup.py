@@ -1,13 +1,16 @@
 """Return code issuance and kiosk pickup, from a stored item to a released locker."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+import pytest
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.errors import BusinessError
 from app.integrations import IntegrationError
 from app.models import DeviceCommand, FoundItem, ReturnCode, StorageAssignment
-from app.services import hash_return_code, search_stored_items
+from app.services import hash_return_code, issue_return_code, search_stored_items
 
 from test_registration import env, ready  # noqa: F401  (shared harness)
 
@@ -24,9 +27,9 @@ def stored(env):
 
 
 def issue(env, found_item_id):
-    response = env.client.post(f"/api/found-items/{found_item_id}/return-code")
-    assert response.status_code == 201, response.text
-    return response.json()["code"]
+    with Session(env.engine) as session:
+        code, _ = issue_return_code(session, UUID(found_item_id), ttl=env.settings.return_code_ttl_seconds)
+        return code
 
 
 def test_full_pickup_releases_the_locker(env):
@@ -165,8 +168,8 @@ def test_code_is_refused_before_the_item_is_stored(env):
     assert env.client.post(f"/api/registrations/{registration_id}/deposit/open").status_code == 200
     with Session(env.engine) as session:
         item_id = str(session.scalar(select(FoundItem)).id)
-    early = env.client.post(f"/api/found-items/{item_id}/return-code")
-    assert early.status_code == 409
-    assert early.json()["detail"]["code"] == "ITEM_NOT_STORED"
-    assert env.client.post(f"/api/found-items/{uuid4()}/return-code").status_code == 404
+    with pytest.raises(BusinessError, match="ITEM_NOT_STORED"):
+        issue(env, item_id)
+    with pytest.raises(BusinessError, match="ITEM_NOT_FOUND"):
+        issue(env, str(uuid4()))
     assert env.client.post(f"/api/pickup/{uuid4()}/complete", json={"confirmed": True}).status_code == 404

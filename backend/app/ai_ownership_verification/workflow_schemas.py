@@ -99,6 +99,7 @@ class AttemptState(Contract):
     answers: list[RecordedAnswer] = Field(default_factory=list)
     current: Question | None = None
     decision: Decision | None = None
+    return_code_issued: bool = False
 
 
 class AnswerRequest(Contract):
@@ -123,6 +124,7 @@ class AttemptView(Contract):
     initial_candidate_count: int | None = None
     question: QuestionView | None = None
     decision: Decision | None = None
+    found_item_id: UUID | None = None
 
 
 class OwnershipResult(Contract):

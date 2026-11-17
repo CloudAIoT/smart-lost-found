@@ -1,4 +1,4 @@
-"""Local development routes for the lost-item ownership flow."""
+"""Routes for the lost-item ownership flow."""
 
 from collections.abc import Iterator
 from typing import Annotated
@@ -8,9 +8,9 @@ import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.api import require_business_api
 from app.config import Settings, get_settings
 from app.db import get_session
-from app.errors import BusinessError
 from . import workflow
 from .workflow_ai import GeminiWorkflowAI, WorkflowAI
 from .workflow_schemas import AnswerRequest, AttemptView, SearchRequest
@@ -20,19 +20,14 @@ Config = Annotated[Settings, Depends(get_settings)]
 DB = Annotated[Session, Depends(get_session)]
 
 
-def require_local_ownership(settings: Config) -> None:
-    if not settings.local_development:
-        raise BusinessError("OWNERSHIP_DEV_ONLY", 503)
-
-
 def get_ownership_ai(settings: Config) -> Iterator[WorkflowAI]:
     with httpx.Client(trust_env=False) as client:
         yield GeminiWorkflowAI(settings, client)
 
 
 AI = Annotated[WorkflowAI, Depends(get_ownership_ai)]
-router = APIRouter(prefix="/api/ownership", tags=["Ownership (development)"],
-                   dependencies=[Depends(require_local_ownership)])
+router = APIRouter(prefix="/api/ownership", tags=["Ownership"],
+                   dependencies=[Depends(require_business_api)])
 
 
 @router.post("/attempts", response_model=AttemptView)

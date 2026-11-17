@@ -120,6 +120,7 @@ def test_api_errors_hide_credentials_and_are_not_retried(gemini, status, code):
 
 
 @pytest.mark.parametrize('reason, code', [('MAX_TOKENS', 'GEMINI_OUTPUT_TRUNCATED'),
+                                        (None, 'GEMINI_RESPONSE_BLOCKED'),
                                         ('SAFETY', 'GEMINI_RESPONSE_BLOCKED')])
 def test_incomplete_answers_are_not_treated_as_features(gemini, reason, code):
     config, _, client = gemini
@@ -129,6 +130,22 @@ def test_incomplete_answers_are_not_treated_as_features(gemini, reason, code):
     with pytest.raises(ServiceError) as failure:
         service.infer(Image.new('RGB', (32, 32)))
     assert failure.value.code == code
+
+
+def test_timeout_is_classified_and_multiple_candidates_are_rejected(gemini):
+    import httpx
+    config, _, client = gemini
+    service = VisionService(config)
+    service.load()
+    client.models.generate_content.side_effect = httpx.ReadTimeout('private-request')
+    with pytest.raises(ServiceError) as failure:
+        service.infer(Image.new('RGB', (32, 32)))
+    assert failure.value.code == 'GEMINI_TIMEOUT'
+    client.models.generate_content.side_effect = None
+    client.models.generate_content.return_value.candidates.append(SimpleNamespace(finish_reason='STOP'))
+    with pytest.raises(ServiceError) as failure:
+        service.infer(Image.new('RGB', (32, 32)))
+    assert failure.value.code == 'GEMINI_RESPONSE_BLOCKED'
 
 
 def test_gemini_file_result_has_model_usage_fingerprints_and_closes_client(gemini, tmp_path):

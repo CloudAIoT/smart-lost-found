@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
-from typing import Literal, Protocol
+from typing import ContextManager, Literal, Protocol
 from uuid import UUID
 import warnings
 
@@ -36,21 +36,17 @@ class AnalysisInput:
 
 @dataclass(frozen=True)
 class AnalysisResult:
-    # Internal BE boundary only; AI's external response contract is still pending.
     image_ids: tuple[UUID, UUID]
     features: dict
+    metadata: dict
 
 
 class FeatureAnalyzer(Protocol):
-    def analyze(self, registration_id: UUID, images: tuple[AnalysisInput, AnalysisInput]) -> AnalysisResult: ...
+    def slot(self) -> ContextManager: ...
+    def analyze(self, registration_id: UUID, images: tuple[AnalysisInput, AnalysisInput], *, category: str | None = None) -> AnalysisResult: ...
 
 
-class UnconfiguredAnalyzer:
-    def analyze(self, registration_id: UUID, images: tuple[AnalysisInput, AnalysisInput]) -> AnalysisResult:
-        raise IntegrationError("AI_NOT_CONFIGURED")
-
-
-def validate_jpeg(data: bytes, max_bytes: int) -> None:
+def validate_jpeg(data: bytes, max_bytes: int, max_pixels: int | None = None) -> None:
     if not data or len(data) > max_bytes:
         raise IntegrationError("INVALID_IMAGE")
     try:
@@ -59,6 +55,8 @@ def validate_jpeg(data: bytes, max_bytes: int) -> None:
             with Image.open(BytesIO(data)) as img:
                 if img.format != "JPEG":
                     raise IntegrationError("INVALID_IMAGE")
+                if max_pixels and img.width * img.height > max_pixels:
+                    raise IntegrationError("IMAGE_TOO_LARGE")
                 img.verify()
             # verify() alone does not decode JPEG scan data.
             with Image.open(BytesIO(data)) as img:
@@ -152,11 +150,12 @@ class PiGateway:
 
 
 class S3ImageStore:
-    def __init__(self, client, bucket: str, preview_ttl_seconds: int, max_image_bytes: int):
+    def __init__(self, client, bucket: str, preview_ttl_seconds: int, max_image_bytes: int, max_pixels: int = 4000000):
         self.client = client
         self.bucket = bucket
         self.preview_ttl = preview_ttl_seconds
         self.max_image_bytes = max_image_bytes
+        self.max_pixels = max_pixels
 
     def put(self, key: str, jpeg: bytes) -> None:
         try:
@@ -170,7 +169,7 @@ class S3ImageStore:
             response = self.client.get_object(Bucket=self.bucket, Key=key)
             with response["Body"] as body:
                 data = body.read(self.max_image_bytes + 1)
-            validate_jpeg(data, self.max_image_bytes)
+            validate_jpeg(data, self.max_image_bytes, self.max_pixels)
             return data
         except (BotoCoreError, ClientError, OSError):
             raise IntegrationError("IMAGE_STORAGE_FAILED") from None
@@ -187,4 +186,5 @@ def make_store(settings: Settings) -> S3ImageStore:
     if not all((settings.s3_bucket, settings.s3_region, settings.preview_ttl_seconds, settings.max_image_bytes)):
         raise IntegrationError("IMAGE_STORAGE_NOT_CONFIGURED")
     return S3ImageStore(boto3.client("s3", region_name=settings.s3_region), settings.s3_bucket,
-                        settings.preview_ttl_seconds, settings.max_image_bytes)
+                        settings.preview_ttl_seconds, min(settings.max_image_bytes, settings.image_analysis_max_bytes),
+                        settings.image_analysis_max_pixels)

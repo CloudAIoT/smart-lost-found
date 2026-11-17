@@ -63,15 +63,20 @@ def prepare_item(registration_id: UUID, images: tuple[ImageInput, ImageInput], *
     category = normalize_category(category)
     settings = settings if settings is not None else Settings()
     prepared, warnings, hashes = [], [], []
-    for index, item in enumerate(images, 1):
-        if not isinstance(item.jpeg, bytes):
-            raise ServiceError('INVALID_IMAGE', 'Image content must be bytes.')
-        if len(item.jpeg) > settings.max_upload_bytes:
-            raise ServiceError('IMAGE_TOO_LARGE', 'Image exceeds the per-photo byte limit.', 413)
-        result = preprocess(item.jpeg, settings)
-        prepared.append(result.image)
-        warnings.extend(f'shot_{index}:{warning}' for warning in result.warnings)
-        hashes.append(hashlib.sha256(item.jpeg).hexdigest())
+    try:
+        for index, item in enumerate(images, 1):
+            if not isinstance(item.jpeg, bytes):
+                raise ServiceError('INVALID_IMAGE', 'Image content must be bytes.')
+            if len(item.jpeg) > settings.max_upload_bytes:
+                raise ServiceError('IMAGE_TOO_LARGE', 'Image exceeds the per-photo byte limit.', 413)
+            result = preprocess(item.jpeg, settings)
+            prepared.append(result.image)
+            warnings.extend(f'shot_{index}:{warning}' for warning in result.warnings)
+            hashes.append(hashlib.sha256(item.jpeg).hexdigest())
+    except Exception:
+        for image in prepared:
+            image.close()
+        raise
     return PreparedItem(registration_id, ids, category, tuple(prepared),
                         build_prompt(category, image_count=2), tuple(warnings), tuple(hashes))
 

@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -74,16 +75,19 @@ class FakeAnalyzer:
     def __init__(self):
         self.error = None
         self.wrong_images = False
-        self.features = {"test_only_private_mark": "secret-scratch"}
+        self.features = {"category": "pencil_case", "color": ["black"], "shape": None, "surface_texture": None, "brand": None, "visible_text": None, "structure": None, "distinctive_features": ["secret-scratch"]}
         self.calls = 0
 
-    def analyze(self, registration_id, images):
+    def slot(self):
+        return nullcontext()
+
+    def analyze(self, registration_id, images, *, category=None):
         self.calls += 1
         if self.error:
             raise self.error
         ids = tuple(value.image_id for value in images)
         return AnalysisResult(image_ids=(uuid4(), uuid4()) if self.wrong_images else ids,
-                              features=self.features)
+                              features=self.features, metadata={"analysis_id": str(uuid4()), "schema_version": "fixed_common_v2", "warnings": []})
 
 
 @pytest.fixture

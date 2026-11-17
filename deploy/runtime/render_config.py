@@ -12,17 +12,36 @@ import boto3
 REQUIRED = {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "S3_BUCKET", "S3_REGION"}
 OPTIONAL = {"BUSINESS_API_ENABLED", "COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES",
             "PREVIEW_TTL_SECONDS", "RETURN_CODE_TTL_SECONDS", "PI_DEVICES"}
+AI_DEFAULTS = {
+    "GEMINI_API_KEY": "", "GEMINI_MODEL": "gemini-3.5-flash-lite",
+    "GEMINI_TIMEOUT_SECONDS": "30", "GEMINI_MAX_OUTPUT_TOKENS": "4096",
+    "IMAGE_ANALYSIS_MODEL": "gemini-3.6-flash", "IMAGE_ANALYSIS_TIMEOUT_SECONDS": "90",
+    "IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS": "8192", "IMAGE_ANALYSIS_MAX_BYTES": "10485760",
+    "IMAGE_ANALYSIS_MAX_PIXELS": "4000000", "IMAGE_ANALYSIS_MAX_SIDE": "1280",
+    "IMAGE_ANALYSIS_MAX_CONCURRENCY": "1",
+}
+OPTIONAL |= AI_DEFAULTS.keys()
 
 
 def render(payload: dict, output: Path) -> None:
     if not isinstance(payload, dict) or not REQUIRED <= set(payload) or set(payload) - REQUIRED - OPTIONAL:
         raise ValueError("Invalid deployment configuration keys")
-    payload = {"BUSINESS_API_ENABLED": "false", **payload}
+    payload = {"BUSINESS_API_ENABLED": "false", **AI_DEFAULTS, **payload}
     if payload["BUSINESS_API_ENABLED"] not in ("true", "false"):
         raise ValueError("BUSINESS_API_ENABLED must be true or false")
     for key, value in payload.items():
-        if not isinstance(value, str) or not value or any(c in value for c in "\r\n\0"):
+        if not isinstance(value, str) or (not value and key != "GEMINI_API_KEY") or any(c in value for c in "\r\n\0"):
             raise ValueError(f"Invalid deployment setting: {key}")
+    for key in ("GEMINI_MODEL", "IMAGE_ANALYSIS_MODEL"):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", payload[key]):
+            raise ValueError(f"Invalid model setting: {key}")
+    bounds = {"GEMINI_TIMEOUT_SECONDS": (1, 120), "GEMINI_MAX_OUTPUT_TOKENS": (256, 8192),
+              "IMAGE_ANALYSIS_TIMEOUT_SECONDS": (5, 90), "IMAGE_ANALYSIS_MAX_OUTPUT_TOKENS": (128, 32768),
+              "IMAGE_ANALYSIS_MAX_BYTES": (1, 10485760), "IMAGE_ANALYSIS_MAX_PIXELS": (1, 4000000),
+              "IMAGE_ANALYSIS_MAX_SIDE": (64, 1280), "IMAGE_ANALYSIS_MAX_CONCURRENCY": (1, 1)}
+    for key, (low, high) in bounds.items():
+        if not payload[key].isdigit() or not low <= int(payload[key]) <= high:
+            raise ValueError(f"Invalid AI limit: {key}")
     for key in ("POSTGRES_DB", "POSTGRES_USER"):
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", payload[key]):
             raise ValueError(f"Invalid PostgreSQL identifier: {key}")

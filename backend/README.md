@@ -67,7 +67,7 @@ docker compose --env-file backend/.env exec backend pytest -q
 }
 ```
 
-카테고리는 생략할 수 있다. 실제 Pi·S3 설정과 AI 구현이 없으면 촬영·분석·개방까지 Swagger에서 성공시키지는 못한다. 전체 모의 흐름을 직접 확인하려면 다음 명령을 실행한다. 가짜 장치는 테스트 안에서만 사용한다.
+카테고리는 생략할 수 있다. 실제 Pi·S3 설정과 Gemini 키가 없으면 촬영·분석·개방까지 Swagger에서 성공시키지는 못한다. 전체 모의 흐름을 직접 확인하려면 다음 명령을 실행한다. 가짜 장치는 테스트 안에서만 사용한다.
 
 ```powershell
 docker compose --env-file backend/.env exec backend pytest -v tests/test_registration.py::test_full_deposit_and_duplicates
@@ -83,6 +83,7 @@ docker compose --env-file backend/.env exec backend pytest -v tests/test_registr
 - 두 번의 수동 촬영 요청 → 비공개 S3 저장 → AI 특징 추출 → 등록 개방 → 사용자 완료 확인 및 문 조회 순서이다.
 - Pi HTTP와 S3 어댑터는 구현되어 있으나 실제 장치·버킷 연결 검증은 별도로 필요하다. `.env.example`의 크기·TTL·시간 제한 예시는 팀 합의값이 아니다. 실제 연결 전 명시적으로 설정한다.
 - S3 버킷은 비공개 및 Public Access Block을 설정한다. boto3의 환경변수 또는 역할 기반 인증을 사용한다. Compose는 `backend/.env`의 환경변수를 컨테이너에 전달한다. 키를 저장소에 커밋하지 않는다.
-- AI는 `app.api.get_analyzer`에서 `FeatureAnalyzer` 구현을 연결한다. 내부 입력은 등록 ID와 순서가 있는 JPEG 두 장, 반환은 같은 이미지 ID 두 개와 특징 딕셔너리이다. 이 형식은 BE 내부 경계이며 AI 담당자의 외부 계약·성공 기준은 아직 미정이다. 어댑터에서 담당자의 성공 기준을 검증한 뒤 `AnalysisResult`를 만들어야 한다.
-- 기본 AI는 `AI_NOT_CONFIGURED`를 반환한다. 앱에는 성공하는 AI가 들어 있지 않다. 실제 Pi·S3로 개방까지 손으로 확인할 때만 `tests/manual/local_server.py --stub-analyzer`가 분석기를 대역으로 바꾼다. 이 대역은 백엔드 패키지 밖에 있고 특징을 만들지 않는다. 순서는 [저장소 README](../README.md)의 '실제 Pi와 S3로 손으로 확인하기'에 있다.
-- 공개 검색·소유 확인·반환 코드·수령은 구현 범위에서 보류했다.
+- AI는 GeminiFeatureAnalyzer로 연결했다. 두 사진을 prepare_item으로 준비하고 한 번 호출한 결과를 fixed_common_v2로 검증한다. 원본 특징·metadata·검색 토큰은 동시에 저장한다. 키 공란은 시작 전 AI_NOT_CONFIGURED이며 원본 사진을 유지한다.
+- 질문 후보는 PostgreSQL GIN 인덱스로 조회한다. 검토 근거는 `python -m app.review_evidence --registration-id UUID --file reviewed.json`으로 별도 저장한다. 구체적 설정·시험 순서는 [구현 계획](docs/implementation-plan-20261116.md)을 따른다.
+
+- 소유 확인 API는 LOCAL_DEVELOPMENT에서만 제공한다. 반환 코드·수령은 기존 구현을 유지하며 소유 확인 결과 자동 승인은 연결하지 않았다.

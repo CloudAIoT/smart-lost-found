@@ -58,7 +58,12 @@ class Registration(Entity, Base):
     analysis_status: Mapped[str] = mapped_column(default="pending")
     analysis_input_image_ids: Mapped[list | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     analysis_features: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    analysis_metadata: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    ownership_evidence: Mapped[list] = mapped_column(JSON().with_variant(JSONB, "postgresql"), default=list, server_default=text("'[]'"))
+    search_features: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"), default=dict, server_default=text("'{}'"))
     __table_args__ = (
+        Index("ix_registrations_search_features", "search_features", postgresql_using="gin",
+              postgresql_ops={"search_features": "jsonb_path_ops"}),
         CheckConstraint("status IN ('draft','capturing','analyzing','ready','opening','awaiting_deposit','stored','blocked')", name="registration_status"),
         CheckConstraint("analysis_status IN ('pending','running','succeeded','failed')", name="analysis_status"),
     )

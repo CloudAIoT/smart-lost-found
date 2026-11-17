@@ -8,11 +8,11 @@ from pydantic import Field, StringConstraints
 from .schemas import Contract
 
 
-FieldName = Literal["category", "color", "material", "brand", "visible_text", "distinctive_features", "description", "location"]
+FieldName = Literal["category", "color", "shape", "surface_texture", "structure", "material", "brand", "visible_text", "distinctive_features", "description", "location"]
 Clue = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 ChoiceLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 Decision = Literal["supported", "not_confirmed", "insufficient_evidence"]
-PolicyVersion = Literal["development_v1", "development_v2"]
+PolicyVersion = Literal["development_v1", "development_v2", "development_v3"]
 
 
 class SearchRequest(Contract):
@@ -22,11 +22,12 @@ class SearchRequest(Contract):
 class SearchClues(Contract):
     category: Clue | None = None
     color: Clue | None = None
-    material: Clue | None = None
+    shape: Clue | None = None
+    surface_texture: Clue | None = None
+    structure: Clue | None = None
     brand: Clue | None = None
     visible_text: Clue | None = None
     distinctive_features: Clue | None = None
-    description: Clue | None = None
     location: Clue | None = None
 
 
@@ -36,7 +37,7 @@ class Distractors(Contract):
 
 class SearchMatch(Contract):
     item: int = Field(ge=1)
-    matched_fields: list[FieldName] = Field(min_length=1, max_length=7)
+    matched_fields: list[FieldName] = Field(min_length=1, max_length=9)
 
 
 class SimilarItems(Contract):
@@ -44,6 +45,10 @@ class SimilarItems(Contract):
 
 
 class Evidence(Contract):
+    # Optional only for completed legacy attempts; new reviews require these fields.
+    analysis_id: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None
     feature_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
     field: FieldName
     value: ChoiceLabel
@@ -55,7 +60,9 @@ class Evidence(Contract):
 
 class Candidate(Contract):
     item_id: UUID
+    analysis_id: str | None = None
     proof: list[Evidence]
+    evidence_digest: str | None = None
     initial_matches: list[FieldName] = Field(default_factory=list)
     narrowing: dict[FieldName, ChoiceLabel] = Field(default_factory=dict)
     matched_groups: list[str] = Field(default_factory=list)

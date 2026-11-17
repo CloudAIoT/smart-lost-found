@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 """키오스크 사용 흐름을 파트 전체로 잇는 종단 테스트의 준비물.
 
 기본값은 Pi 컨트롤러를 가짜 하드웨어 모드로 이 PC의 별도 프로세스 2개에 띄운다.
@@ -179,14 +180,17 @@ class StubAnalyzer:
     def __init__(self):
         self.calls = 0
 
-    def analyze(self, registration_id, images):
+    def slot(self):
+        return nullcontext()
+
+    def analyze(self, registration_id, images, *, category=None):
         from app.integrations import AnalysisResult
 
         self.calls += 1
         for value in images:
             assert value.jpeg, "분석기에 빈 이미지가 전달되었다"
         return AnalysisResult(image_ids=tuple(value.image_id for value in images),
-                              features={"test_only_shape": "stub"})
+                              features={"category": "pencil_case", "color": ["black"], "shape": None, "surface_texture": None, "brand": None, "visible_text": None, "structure": None, "distinctive_features": ["secret-scratch"]}, metadata={"analysis_id": str(__import__("uuid").uuid4()), "schema_version": "fixed_common_v2", "warnings": []})
 
 
 # 백엔드 설정은 DB 접속 정보를 요구한다. 실제 연결은 하지 않는다.

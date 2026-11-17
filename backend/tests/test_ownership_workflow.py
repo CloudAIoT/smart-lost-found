@@ -16,6 +16,7 @@ from app.config import GeminiSettings, Settings, get_settings
 from app.db import Base, get_session
 from app.errors import BusinessError, IntegrationError
 from app.main import app
+from app.search_features import project
 from app.models import FoundItem, Kiosk, Locker, OwnershipAttempt, Registration, StorageAssignment, now
 
 
@@ -45,7 +46,7 @@ class FakeAI:
         return {
             "distinctive_features": ["노란 리본", "작은 은색 구슬", "하얀 줄무늬 스티커", "주황색 고리"],
             "visible_text": ["ZX", "TS", "B-9", "VV"],
-            "material": ["종이", "금속", "고무", "유리"],
+            "surface_texture": ["종이", "금속", "고무", "유리"],
             "brand": ["Dickies", "Eastpak", "Muji", "Nike"],
             "color": ["red", "yellow", "white", "green"],
         }[field]
@@ -53,17 +54,21 @@ class FakeAI:
 
 def add_item(session, kiosk, *, number, decoration, mark, verified=True, group="mark", stored=True, location="도서관 1층"):
     values = {
-        "category": "pencil_case", "color": ["black"], "material": "fabric", "brand": "Carhartt",
-        "visible_text": [mark], "distinctive_features": [decoration], "description": "검은색 필통",
+        "category": "pencil_case", "color": ["black"], "surface_texture": "fabric", "brand": "Carhartt",
+        "visible_text": [mark], "distinctive_features": [decoration], "shape": None, "structure": None,
     }
     evidence = [
-        {"feature_id": "attachment", "field": "distinctive_features", "value": decoration,
+        {"feature_id": "distinctive_features:0", "field": "distinctive_features", "value": decoration,
          "group": "decoration", "visibility": "private", "verified": verified, "distinguishing": True},
-        {"feature_id": "mark", "field": "visible_text", "value": mark,
+        {"feature_id": "visible_text:0", "field": "visible_text", "value": mark,
          "group": group, "visibility": "private", "verified": verified, "distinguishing": True},
     ]
+    analysis_id = str(uuid4())
+    evidence = [{**ev, "analysis_id": analysis_id, "reviewed_by": "tester", "reviewed_at": now().isoformat()} for ev in evidence]
     reg = Registration(kiosk_id=kiosk.id, status="stored", analysis_status="succeeded",
-                       found_location=location, analysis_features={"data": values, "ownership_evidence": evidence})
+                       found_location=location, analysis_features=values, ownership_evidence=evidence,
+                       analysis_metadata={"analysis_id": analysis_id, "schema_version": "fixed_common_v2"},
+                       search_features=project(values, location=location))
     locker = Locker(kiosk_id=kiosk.id, locker_number=number)
     session.add_all([reg, locker])
     session.flush()
@@ -151,7 +156,7 @@ def test_hands_off_only_after_every_private_feature_matches(ownership):
     assert result.item_id == ownership.first
     assert result.matched_evidence_groups == 2
     assert result.answered_questions == 2
-    assert result.policy_version == "development_v2"
+    assert result.policy_version == "development_v3"
 
 
 def test_no_match_and_missing_clues_do_not_create_a_judgment(ownership):
@@ -179,15 +184,14 @@ def test_continues_past_two_matches_and_four_questions_until_exhausted(ownership
     ownership.ai.clues = SearchClues(category="필통")
     with Session(ownership.engine) as session:
         reg = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
-        raw = reg.analysis_features
-        reg.analysis_features = {
-            "data": {**raw["data"], "color": ["navy"]},
-            "ownership_evidence": raw["ownership_evidence"] + [
-                {"feature_id": field, "field": field, "value": value, "group": field,
-                 "visibility": "private", "verified": True, "distinguishing": True}
-                for field, value in [("material", "fabric"), ("brand", "Carhartt"), ("color", "navy")]
-            ],
-        }
+        reg.analysis_features = {**reg.analysis_features, "color": ["navy"]}
+        reg.search_features = project(reg.analysis_features, location=reg.found_location)
+        reg.ownership_evidence = reg.ownership_evidence + [
+            {"feature_id": field + ":0", "field": field, "value": value, "group": field,
+             "visibility": "private", "verified": True, "distinguishing": True,
+             "analysis_id": reg.analysis_metadata["analysis_id"], "reviewed_by": "tester", "reviewed_at": now().isoformat()}
+            for field, value in [("surface_texture", "fabric"), ("brand", "Carhartt"), ("color", "navy")]
+        ]
         session.commit()
 
     view = begin(ownership)
@@ -232,9 +236,8 @@ def test_unverified_raw_features_are_not_proof(ownership):
     with Session(ownership.engine) as session:
         first = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
         second = session.get(Registration, session.get(FoundItem, ownership.second).registration_id)
-        first.analysis_features = {**first.analysis_features, "ownership_evidence": [
-            {**ev, "verified": False} for ev in first.analysis_features["ownership_evidence"]]}
-        second.analysis_features = second.analysis_features["data"]
+        first.ownership_evidence = [{**ev, "verified": False} for ev in first.ownership_evidence]
+        second.ownership_evidence = []
         session.commit()
     view = begin(ownership)
     assert view["decision"] == "insufficient_evidence"
@@ -246,10 +249,12 @@ def test_public_difference_narrows_candidates_but_never_counts_as_ownership_proo
     with Session(ownership.engine) as session:
         for item_id, material in [(ownership.first, "fabric"), (ownership.second, "plastic")]:
             reg = session.get(Registration, session.get(FoundItem, item_id).registration_id)
-            reg.analysis_features = {**reg.analysis_features["data"], "material": material}
+            reg.analysis_features = {**reg.analysis_features, "surface_texture": material}
+            reg.ownership_evidence = []
+            reg.search_features = project(reg.analysis_features, location=reg.found_location)
         session.commit()
     view = begin(ownership)
-    assert "재질" in view["question"]["text"]
+    assert "표면 질감" in view["question"]["text"]
     assert {option["label"] for option in view["question"]["options"]} == {"fabric", "plastic", "종이", "금속", "고무"}
     wrong = submit(ownership, view, "종이").json()
     assert wrong["decision"] == "insufficient_evidence" and result_for(ownership, wrong).item_id is None
@@ -282,8 +287,7 @@ def test_only_eligible_private_feature_is_enough_when_it_all_matches(ownership):
 def test_same_group_does_not_count_as_two_independent_wrong_answers(ownership):
     with Session(ownership.engine) as session:
         reg = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
-        reg.analysis_features = {**reg.analysis_features, "ownership_evidence": [
-            {**ev, "group": "same_mark"} for ev in reg.analysis_features["ownership_evidence"]]}
+        reg.ownership_evidence = [{**ev, "group": "same_mark"} for ev in reg.ownership_evidence]
         session.commit()
     first = begin(ownership)
     second = submit(ownership, first, "노란 리본").json()
@@ -333,7 +337,7 @@ def test_changed_evidence_cannot_be_consumed_as_supported(ownership):
     last = submit(ownership, second, "MJ").json()
     with Session(ownership.engine) as session:
         reg = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
-        reg.analysis_features = reg.analysis_features["data"]
+        reg.ownership_evidence = []
         session.commit()
     with pytest.raises(BusinessError, match="OWNERSHIP_EVIDENCE_CHANGED"):
         result_for(ownership, last)

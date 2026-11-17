@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db import get_session
-from app.integrations import IntegrationError, PiGateway, UnconfiguredAnalyzer, make_store
+from app.integrations import IntegrationError, PiGateway, make_store
+from app.image_analysis import GeminiFeatureAnalyzer
 from app.models import Category, FoundItem, Kiosk, Locker, Registration
 from app import services
 
@@ -35,8 +36,8 @@ def get_store(settings: Config):
     return make_store(settings)
 
 
-def get_analyzer():
-    return UnconfiguredAnalyzer()
+def get_analyzer(settings: Config):
+    return GeminiFeatureAnalyzer(settings)
 
 
 Gateway = Annotated[object, Depends(get_gateway)]
@@ -61,6 +62,7 @@ class RegistrationView(BaseModel):
     found_location: str | None
     status: str
     analysis_status: str
+    analysis_warnings: list[str]
     images: list[dict]
     locker_number: int | None
 
@@ -73,6 +75,7 @@ def registration_view(session: Session, reg: Registration) -> RegistrationView:
     return RegistrationView(id=reg.id, kiosk_id=reg.kiosk_id, primary_category_id=reg.primary_category_id,
                             secondary_description=reg.secondary_description, found_location=reg.found_location, status=reg.status,
                             analysis_status=reg.analysis_status, locker_number=number,
+                            analysis_warnings=(reg.analysis_metadata or {}).get("warnings", []),
                             images=[{"id": value.id, "shot_order": value.shot_order} for value in services.images(session, reg.id)])
 
 

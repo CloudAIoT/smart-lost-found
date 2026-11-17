@@ -2,6 +2,8 @@
 
 2026-10-12 사용자 확인을 반영한 최초 구현이다. FE·AI·Pi 전체 팀의 최종 합의로 간주하지 않는다. Pi에 보내는 요청은 [장치 규약](device-protocol.md)을 따른다.
 
+2026-11-16: 두 사진 Gemini 분석, analysis_warnings 응답, JSONB 인덱스 후보 검색과 development_v3 질문 경로를 구현했다. 실제 키를 사용하는 추론 검증은 남아 있다.
+
 업무 API는 모두 `/api` 아래에 있다. 로컬에서는 `LOCAL_DEVELOPMENT=true`, EC2에서는 `BUSINESS_API_ENABLED=true`로 활성화한다. 둘 다 false면 503을 반환한다. 현재 로그인·키오스크 인증은 없으며, 활성화하면 인증 없이 호출할 수 있다. `/health`, `/ready`는 이 설정과 무관하다.
 
 ## 등록과 조회
@@ -25,11 +27,12 @@
 {
   "kiosk_id": "00000000-0000-0000-0000-000000000001",
   "primary_category_id": null,
-  "secondary_description": "사용자가 입력한 특징"
+  "secondary_description": "사용자가 입력한 특징",
+  "found_location": "도서관 2층"
 }
 ```
 
-`kiosk_id`는 DB에 있어야 한다. 나머지 두 항목은 생략 가능하다. 카테고리를 지정하면 DB에 있는 ID여야 한다. 자유 입력은 개발용 요청 크기 제한으로 최대 2,000자이며 최종 UI 계약은 별도 협의한다. 알 수 없는 필드는 422이다. 최초 등록 생성 POST 자체는 멱등 요청이 아니므로 FE는 받은 ID를 보관하고 후속 요청에 재사용한다.
+`kiosk_id`는 DB에 있어야 한다. 나머지 세 항목은 생략 가능하다. 카테고리는 DB의 ID여야 하고 secondary_description은 최대 2,000자, found_location은 최대 200자다. 습득 위치는 앞뒤 공백을 제거하고 빈 값은 null로 저장한다. 알 수 없는 필드는 422이다. 최초 등록 생성 POST 자체는 멱등 요청이 아니므로 FE는 받은 ID를 보관하고 후속 요청에 재사용한다.
 
 생성·등록 조회·촬영·분석·개방·완료의 공통 응답:
 
@@ -39,8 +42,10 @@
   "kiosk_id": "00000000-0000-0000-0000-000000000001",
   "primary_category_id": null,
   "secondary_description": "사용자가 입력한 특징",
+  "found_location": "도서관 2층",
   "status": "draft",
   "analysis_status": "pending",
+  "analysis_warnings": [],
   "images": [],
   "locker_number": null
 }
@@ -103,4 +108,24 @@
 | 502 | `DEVICE_UNREACHABLE`, `INVALID_DEVICE_RESPONSE`, `DEVICE_ROLE_MISMATCH`, `DEVICE_RESPONSE_TOO_LARGE`, `INVALID_IMAGE`, `IMAGE_STORAGE_FAILED`, `INVALID_ANALYSIS_RESULT`, 규약의 Pi 오류 code |
 | 503 | `BUSINESS_API_DISABLED`, `AI_NOT_CONFIGURED`, `DEVICE_NOT_CONFIGURED`, `CAPTURE_NOT_CONFIGURED`, `IMAGE_STORAGE_NOT_CONFIGURED`, `RETURN_CODE_NOT_CONFIGURED` |
 
-공개 검색·질문/답변 API는 제공하지 않는다. 반환 코드·수령은 위 절에 있으나 코드 발급의 승인 근거가 되는 소유 확인 평가는 미구현이다. 현재 발급은 인증·소유 확인 없이 호출된다. 내부 `search_stored_items`만 보관 완료 물건의 카테고리·현재 키오스크 정확 필터와 페이지네이션을 시험할 수 있다. 이 반환 구조를 공개 필드 합의로 해석하지 않는다.
+운영 공개 검색·질문 API는 제공하지 않는다. 로컬 개발용 소유 확인 API는 아래와 같이 이미 구현되어 있다. 현재 반환 코드 발급에는 이 결과가 연결되지 않았으며 인증·소유 확인 없이 호출된다. 내부 search_stored_items의 정확 필터와 아래 Gemini 유사 검색은 별도 경로다.
+
+## 소유 확인 개발용 API: 현재 구현
+
+LOCAL_DEVELOPMENT=true일 때만 활성화된다. BUSINESS_API_ENABLED만으로 활성화되지 않는다.
+
+| 메서드·경로 | 본문·응답 |
+| --- | --- |
+| POST /api/ownership/attempts | {description} → question/completed/needs_clues/no_candidates/refine_search |
+| GET /api/ownership/attempts/{id} | 현재 질문 또는 완료 상태 |
+| POST /api/ownership/attempts/{id}/answers | {question_id, option_id} → 다음 질문 또는 completed |
+
+현재 development_v3는 Gemini로 단서를 추출하고 DB 인덱스로 후보를 찾는다. 종류·색·브랜드만 있으면 유사 후보 모델 호출을 생략하고, 상세 단서가 있으면 50개 이하 후보만 의미 비교한다. 50개 초과면 추가 설명을 요청한다. 필요한 오답 선택지는 Gemini로 생성하고 서버가 5지선다 답을 채점한다. 판정은 supported/not_confirmed/insufficient_evidence다. 상세 현재 계약은 [소유 확인 워크플로](../backend/app/ai_ownership_verification/workflow.md)를 따른다.
+
+## 두 사진 분석: 현재 구현
+
+- POST /api/registrations/{id}/analysis 경로를 유지하고 본문 없이 호출한다. DB의 순서 있는 두 S3 사진으로 prepare_item → Gemini 1회 요청 → parse_item_output → DB 저장을 수행한다.
+- 성공은 기존 RegistrationView에 status=ready, analysis_status=succeeded이며, 공통 응답에 analysis_warnings 배열을 반환한다. 분석 특징·검토 근거·S3 키는 반환하지 않는다. 분석으로 보관함을 열거나 질문을 만들지 않는다.
+- 키 공란은 상태 변경 전 503 AI_NOT_CONFIGURED, 분석 슬롯 사용 중은 409 ANALYSIS_BUSY다. 같은 사진의 유효한 새 규격 성공 결과는 재호출 없이 반환한다. 알려진 실행 실패는 draft/failed로 복구하고 사진을 유지한다.
+- 소유 확인의 경로·요청 본문은 유지한다. 내부 검색은 새 8개 특징+location의 정규화 인덱스를 사용하고 검토 근거 컬럼을 읽으며 정책 버전은 development_v3로 구분한다.
+- DB 저장 형태·오류 코드·legacy 호환·오프라인/실키 검증의 원본은 [기능 명세](../backend/docs/functional-spec.md), [ERD](../backend/docs/erd.md), [구현 계획](../backend/docs/implementation-plan-20261116.md)이다. 구체적 시험 설정은 계획에 고정하고 GEMINI_API_KEY만 나중에 입력한다.

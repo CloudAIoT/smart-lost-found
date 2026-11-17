@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.errors import BusinessError, IntegrationError
 from app.models import FoundItem, OwnershipAttempt, now
-from .search import NARROW_FIELDS, PROOF_FIELDS, UNKNOWN, find_candidates, normalized, read_facts, stored_items
+from .search import NARROW_FIELDS, PROOF_FIELDS, UNKNOWN, find_candidates, normalized, read_facts, stored_items, evidence_digest
 from .workflow_ai import WorkflowAI
 from .workflow_schemas import (
     AnswerRequest, AttemptState, AttemptView, Candidate, Choice, FieldName, OptionView,
@@ -19,12 +19,14 @@ from .workflow_schemas import (
 
 MAX_WRONG_GROUPS = 2
 OPTION_COUNT = 5
-POLICY_VERSION = "development_v2"
+POLICY_VERSION = "development_v3"
 ATTEMPT_TTL = timedelta(minutes=20)
 PROMPTS = {
     "distinctive_features": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
     "visible_text": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
-    "material": "기억하는 물건의 재질을 골라 주세요.",
+    "shape": "기억하는 물건의 형태를 골라 주세요.",
+    "surface_texture": "기억하는 물건의 표면 질감을 골라 주세요.",
+    "structure": "기억하는 물건의 구조를 골라 주세요.",
     "brand": "기억하는 물건의 브랜드를 골라 주세요.",
     "color": "기억하는 물건의 색상을 골라 주세요.",
 }
@@ -104,6 +106,7 @@ def start(session: Session, description: str, ai: WorkflowAI) -> AttemptView:
                          mentioned_fields=list(clues.model_dump(exclude_none=True)))
     advance(state, ai)
     attempt_id = uuid4()
+    validate_snapshot(session, state)
     session.add(OwnershipAttempt(id=attempt_id, expires_at=now() + ATTEMPT_TTL, version=1,
                                  state=state.model_dump(mode="json")))
     session.commit()
@@ -183,9 +186,11 @@ def record_answer(state: AttemptState, answer: AnswerRequest) -> None:
 def answer(session: Session, attempt_id: UUID, body: AnswerRequest, ai: WorkflowAI) -> AttemptView:
     row = load_attempt(session, attempt_id)
     version, state = row.version, AttemptState.model_validate(row.state)
+    validate_snapshot(session, state)
     record_answer(state, body)
     session.rollback()
     advance(state, ai)
+    validate_snapshot(session, state)
     changed = session.execute(update(OwnershipAttempt).where(
         OwnershipAttempt.id == attempt_id, OwnershipAttempt.version == version, OwnershipAttempt.expires_at > now()
     ).values(version=version + 1, state=state.model_dump(mode="json")))
@@ -197,11 +202,31 @@ def answer(session: Session, attempt_id: UUID, body: AnswerRequest, ai: Workflow
     return view(attempt_id, state)
 
 
+def validate_snapshot(session, state):
+    if state.policy_version != POLICY_VERSION:
+        raise BusinessError("OWNERSHIP_ATTEMPT_RESTART_REQUIRED")
+    if not state.candidates:
+        return
+    rows = session.execute(stored_items().where(FoundItem.id.in_([c.item_id for c in state.candidates]))
+                           .execution_options(populate_existing=True)).all()
+    current = {item.id: (reg, category) for item, reg, category in rows}
+    for candidate in state.candidates:
+        if candidate.item_id not in current:
+            raise BusinessError("OWNERSHIP_ITEM_NO_LONGER_AVAILABLE")
+        reg, category = current[candidate.item_id]
+        _, proof, _ = read_facts(reg, category)
+        if (candidate.analysis_id != (reg.analysis_metadata or {}).get("analysis_id")
+                or candidate.evidence_digest != evidence_digest(reg)
+                or any(ev not in proof for ev in candidate.proof)):
+            raise BusinessError("OWNERSHIP_EVIDENCE_CHANGED")
+
+
 def get_ownership_result(session: Session, attempt_id: UUID) -> OwnershipResult | None:
     """Sunjae's in-process integration point, not a public result-detail API."""
     state = AttemptState.model_validate(load_attempt(session, attempt_id).state)
     if not state.decision:
         return None
+    validate_snapshot(session, state)
     candidate = state.candidates[0] if len(state.candidates) == 1 else None
     if state.decision == "supported":
         item = None if candidate is None else session.execute(

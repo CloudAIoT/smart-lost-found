@@ -1,51 +1,40 @@
 # 백엔드 설계 명세
 
-> 2026-10-12: 등록·촬영·분석 연결·보관의 로컬 구현이 추가되었다. 아래의 ‘구현 전’ 설명은 10월 8일 검토 기록이며, 최신 범위·D10~D13 결정은 [구현 현황](implementation-status.md), 실제 API는 [로컬 개발 계약](../../docs/api.md)을 따른다.
+개정: 2026-11-16 · 코드 확인 기준 `7c001a8`.
 
-작성일: 2026-10-08 · 검토 기준: `main`의 `3aebe307dbdc8ebf4ae08ec90e1737317af170b5`
+사진 2장 촬영·S3 저장 이후 Gemini 분석과 DB 저장, 인덱스 후보 검색, development_v3 질문을 연결했다. 실제 키를 사용하는 인식 품질·대기 시간 검증은 남아 있다.
 
-현재 저장소의 요구사항을 백엔드 관점에서 정리한다. 아래 문서는 구현 완료나 팀의 최종 승인을 의미하지 않는다. 원문에 없는 설계는 제안으로 표시하고, 미정 사항은 사용자·관련 담당자와 검토한 뒤 확정한다.
+2026-11-17 공유 시점에 질문 검증은 담당자 후속 변경의 확인·통합 대상으로 남겨 둔다. 웹 질문·반환 코드 연결을 추가한 원격 브랜치와 이 브랜치의 차이는 [구현 현황](implementation-status.md)의 최신 기록을 따른다.
 
-| 문서 | 내용 |
+| 문서 | 역할 |
 | --- | --- |
-| [ERD 명세](erd.md) | 데이터 관계, 검토용 스키마와 제약, 확정이 필요한 사항 |
-| [기능 명세](functional-spec.md) | 기능별 입력·처리·출력·예외·검증 기준 |
-| [명세 검토 및 질문](spec-review.md) | 원문 대조 결과, 충돌, 질문과 결정 기록 |
+| [기능 명세](functional-spec.md) | 분석 API, 성공·실패, 유사 검색, 5지선다 질문과 판정 |
+| [ERD](erd.md) | 실제 10개 테이블, 새 metadata/evidence/search_features 컬럼, JSON 저장·호환 |
+| [구현 계획](implementation-plan-20261116.md) | 단계별 변경 파일·키 공란 설정·패키징·오프라인/실호출 검증 |
+| [구현 현황](implementation-status.md) | 현재 코드와 다음 목표의 구분, 과거 검증 기록 |
+| [연동 계약 기록](integration-agreements.md) | 이미지 모듈 인수인계와 소유 확인 경계 |
+| [결정 기록](spec-review.md) | 과거 결정과 이번 사용자 요청의 범위 |
+| [팀 API](../../docs/api.md) | 현재 외부 요청·응답 |
 
-## 작성 기준
+## 현재 구현
 
-- 사용자 결정: `main`의 문서를 기준으로 삼는다. Git에 포함되지 않은 로컬 아키텍처 문서는 비교 참고만 한다.
-- 사용자 결정: 습득자 본인인증은 미정으로 유지하고 관련 DB·API 확정을 보류한다.
-- 사용자 결정: 이미지 분석 성공 후에만 등록용 보관함 개방을 허용한다.
-- 사용자 결정: 완료 버튼 후 백엔드가 문을 조회하고, 사용자 완료 확인과 `closed`를 함께 만족하면 투입·수령 완료로 처리한다.
-- 사용자 결정: 사진 원본은 비공개 S3에, 객체 키·메타데이터는 DB에 저장한다.
-- 사용자 결정: 검토용 테이블을 제안하되 소유 확인 AI의 입출력·판정 기준·코드 발급 조건은 협의 전까지 미정으로 둔다.
-- 후속 사용자 결정: AI 담당자가 특징 추출·특징 기반 질문 생성·답변 평가를 구현한다. Pi와 FE는 각각 별도 담당자가 구현하며, BE는 데이터 저장·연동·평가 결과에 따른 반환 처리를 맡는 계획으로 정리한다(D08·D09).
-- `원문 요구`: 기준 문서에 명시된 내용이다. 해당 문서 자체가 초안이면 최종 합의가 끝났다는 뜻은 아니다.
-- `구현 확인`: 실제 소스에 구현된 동작이다.
-- `제안`: 원문 요구를 구현하기 위해 이번에 제시한 설계이다. 사용자 검토 전에는 확정하지 않는다.
-- `사용자 결정`: 이번 대화에서 사용자가 직접 선택한 방향이다. 원문을 소급해 확정된 것으로 바꾸거나 관련 팀 계약이 이미 갱신되었다고 간주하지 않는다.
-- `미정`: 원문에서 협의 대상으로 두었거나 서로 충돌하거나 설명이 없는 내용이다.
+- 순차 두 사진·S3 저장 이후 분석 POST로 prepare_item → Gemini 한 번 → parse_item_output → 특징·메타데이터·검색 색인을 함께 저장한다.
+- 검색은 정규화 특징의 JSONB GIN 인덱스를 사용한다. 50개 초과면 refine_search, 상세 단서의 의미 비교는 후보 안에서만 수행한다.
+- 질문은 별도 검토 근거와 analysis_id를 확인하는 development_v3다. 새로운 AI 설정 중 GEMINI_API_KEY만 공란이다.
+- 실제 키·운영 DB·SSM·배포 변경은 수행하지 않았다. 최신 테스트 기록은 구현 현황을 따른다.
 
-이번 작업은 백엔드 내부 설계 문서를 `backend/docs/`에 정리한다는 사용자 요청을 따른다. 파트 간 공통 계약의 원본은 루트 `docs/`에 유지하며, 합의한 변경은 해당 원본과 함께 갱신한다.
+## 근거
 
-## 근거 문서
-
-이하 명세에서 S 번호는 다음 파일과 절을 가리킨다.
-
-| ID | 파일 | 검토 범위와 상태 |
+| ID | 원본 | 해석 |
 | --- | --- | --- |
-| S1 | [웹 구조](../../docs/web-structure.md) | 시스템 UI 개요, 기능 구현 범위, 기능 세부 사항, 협의 필요 내용 |
-| S2 | [장치 통신 규약](../../docs/device-protocol.md) | 1~7절 전체. 백엔드→Pi API 초안이며 웹→백엔드 API가 아님 |
-| S3 | [Pi 개요](../../raspberry-pi/README.md) | 두 Pi의 역할, 시제품 장치 수, 개발 현황 |
-| S4 | [단일 카메라 결정](../../raspberry-pi/docs/decisions/0001-single-camera-two-shots.md) | 팀 회의 결정과 통신·UI 영향 |
-| S5 | [AI 소유 확인 개발 기록](../app/ai_ownership_verification/README.md) | 목적, 확정·미정 사항, 설계 후보, 팀 협의 사항 |
-| S6 | [백엔드 개요](../README.md), [앱](../app/main.py), [DB](../app/db.py), [설정](../app/config.py), [Alembic](../alembic/env.py), [테스트](../tests/test_health.py), [Compose](../../compose.yaml) | 실행 환경과 현재 구현 대조 |
-| S7 | [팀 API](../../docs/api.md), [프런트엔드 개요](../../frontend/README.md) | 검토 시 모두 빈 파일. 업무 API 계약·구현의 근거로 사용할 수 없음 |
-| S8 | [개발 지침](../../docs/development-guide.md), [루트 개요](../../README.md) | 작업 브랜치·PR 흐름, 문서 위치, 백엔드 안내 |
+| S1 | [웹 구조](../../docs/web-structure.md) | 초기 UI 요구. 최신 개발용 API와 구분 |
+| S2 | [장치 규약](../../docs/device-protocol.md) | Pi 촬영·개방·문 상태 |
+| S3·S4 | [Pi 개요](../../raspberry-pi/README.md), [단일 카메라 결정](../../raspberry-pi/docs/decisions/0001-single-camera-two-shots.md) | 단일 카메라로 순차 2장 |
+| S5 | [소유 확인 워크플로](../app/ai_ownership_verification/workflow.md), [11/10 실험](../app/ai_ownership_verification/experiments/results/ownership_workflow_v2_100_20261110.md) | 합성 DB·Gemini 의미 검색·5지선다. 실사진 연결 검증은 아님 |
+| S6 | [ORM](../app/models.py), [API](../app/api.py), [분석 서비스](../app/services.py), [설정](../app/config.py) | 현재 동작의 기준 |
+| S7 | [팀 API](../../docs/api.md) | 현재 웹→BE 계약 |
+| S8 | [개발 지침](../../docs/development-guide.md) | 저장소 문서·개발 경계 |
+| S9 | [이미지 인수인계](../../imageprocess/docs/backend-handoff.md), [특징 스키마](../../imageprocess/docs/feature-schema.json) | 사진 2장 prepare/parse·fixed_common_v2 계약 |
+| S10 | [10종 실험](../../imageprocess/docs/experiments/single-photo-10-cases.md) | 단일 사진 성공 결과·오인식. 쌍사진 품질·최종 모델 우열의 근거는 아님 |
 
-S1의 본문 요구사항을 검토 대상으로 삼았다. 외부에 첨부된 UI 데모 이미지의 화면 세부는 이번 API·DB 계약의 근거로 사용하지 않았다. 로컬 Word 문서와의 구체적인 차이는 [검토 기록](spec-review.md)에 남긴다.
-
-## 현재 구현 범위
-
-`GET /health`와 `GET /ready`, DB 연결 설정, Alembic 실행 틀만 구현되어 있다. 업무 ORM 모델과 마이그레이션은 없으며 `alembic/versions/`에는 `.gitkeep`만 있다. 등록·검색·AI·반환 코드·장치 호출은 구현 전이다. 아래 기능의 검증 기준은 향후 구현 시 확인할 조건이며, 현재 테스트가 존재하거나 통과했다는 뜻이 아니다.
+원문 문서의 실험 결과는 보존한다. 이번 BE 설계가 이전에 미정이던 항목을 구체화한 경우 그 차이와 검증 범위를 기록한다. 11/01 직렬화 오류 보완의 완료 기록은 [별도 보존 문서](implementation-plan-20261101.md)에 있다.

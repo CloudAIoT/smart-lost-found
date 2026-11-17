@@ -17,12 +17,19 @@ class GeminiSettings(BaseSettings):
     )
 
     gemini_api_key: SecretStr | None = None
-    gemini_model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+    gemini_model: str | None = Field(default="gemini-3.5-flash-lite", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
     gemini_timeout_seconds: float = Field(default=30, gt=0, le=120)
     gemini_max_output_tokens: int = Field(default=4096, ge=256, le=8192)
 
 
 class Settings(GeminiSettings):
+    image_analysis_model: str = Field(default="gemini-3.6-flash", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+    image_analysis_timeout_seconds: int = Field(default=90, ge=5, le=90)
+    image_analysis_max_output_tokens: int = Field(default=8192, ge=128, le=32768)
+    image_analysis_max_bytes: int = Field(default=10485760, gt=0, le=10485760)
+    image_analysis_max_pixels: int = Field(default=4000000, gt=0, le=4000000)
+    image_analysis_max_side: int = Field(default=1280, ge=64, le=1280)
+    image_analysis_max_concurrency: int = Field(default=1, ge=1, le=1)
     postgres_db: str
     postgres_user: str
     postgres_password: SecretStr

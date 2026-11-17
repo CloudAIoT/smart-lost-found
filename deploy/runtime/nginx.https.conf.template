@@ -6,6 +6,7 @@ server {
 }
 server {
     listen 443 ssl;
+    proxy_read_timeout 120s;
     server_name __DOMAIN__;
     ssl_certificate /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;

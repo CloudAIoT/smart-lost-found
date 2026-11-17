@@ -42,6 +42,23 @@ def test_runtime_config_cannot_enable_local_mode(tmp_path):
         render(config, tmp_path)
 
 
+@pytest.mark.parametrize('key', ['', 'test-only-$key#with"quotes'])
+def test_ai_config_defaults_and_key_preservation(tmp_path, key):
+    render({**payload(), 'GEMINI_API_KEY': key}, tmp_path)
+    backend = (tmp_path / 'backend.env').read_text()
+    assert f'GEMINI_API_KEY={key}\n' in backend
+    assert 'IMAGE_ANALYSIS_MODEL=gemini-3.6-flash\n' in backend
+    assert 'IMAGE_ANALYSIS_MAX_CONCURRENCY=1\n' in backend
+    assert 'GEMINI' not in (tmp_path / 'db.env').read_text()
+
+
+@pytest.mark.parametrize('key,value', [('IMAGE_ANALYSIS_MODEL', ''), ('IMAGE_ANALYSIS_MAX_PIXELS', '25000000'),
+                                    ('IMAGE_ANALYSIS_MAX_CONCURRENCY', '2'), ('GEMINI_API_KEY', 'x\nBAD=1')])
+def test_invalid_ai_config_is_rejected(tmp_path, key, value):
+    with pytest.raises(ValueError):
+        render({**payload(), key: value}, tmp_path)
+
+
 @pytest.mark.parametrize("enabled", [None, "false", "true"])
 def test_runtime_api_switch_and_legacy_config(tmp_path, enabled):
     config = payload()

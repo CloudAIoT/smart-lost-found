@@ -1,8 +1,7 @@
 """실제 Pi와 실제 S3에 붙여 손으로 확인할 때 쓰는 로컬 백엔드 실행기.
 
-앱 코드는 그대로 돌린다. `--stub-analyzer`를 줄 때만 AI 분석기를 대역으로 바꾼다. AI 구현이
-아직 없어 그대로 두면 `/analysis`가 503 AI_NOT_CONFIGURED이고 `/deposit/open`은 409
-ANALYSIS_REQUIRED로 막힌다. 대역은 이 스크립트 안에만 있고 백엔드 패키지에는 들어가지 않는다.
+앱 코드는 그대로 돌린다. `--stub-analyzer`를 줄 때만 고정 합성 특징을 쓰는 분석기로 바꾼다.
+실제 Gemini 분석은 키가 있어야 실행된다. 대역은 이 스크립트 안에만 있으며 실제 인식 결과가 아니다.
 
 실행:
     python tests/manual/local_server.py --stub-analyzer
@@ -11,11 +10,14 @@ ANALYSIS_REQUIRED로 막힌다. 대역은 이 스크립트 안에만 있고 백�
 """
 
 import argparse
+from contextlib import nullcontext
+from uuid import uuid4
 import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
 
 # 백엔드를 컨테이너가 아니라 이 PC에서 돌린다. backend/.env의 DB_HOST=db는 Compose 안에서만
@@ -40,11 +42,18 @@ REQUIRED = {
 
 
 class StubAnalyzer:
-    """AI 대역. 특징을 만들지 않고 입력 이미지 ID만 그대로 돌려준다."""
+    """Explicit manual-only synthetic observation; never an ownership proof."""
 
-    def analyze(self, registration_id, images):
+    def slot(self):
+        return nullcontext()
+
+    def analyze(self, registration_id, images, *, category=None):
         return AnalysisResult(image_ids=tuple(value.image_id for value in images),
-                              features={"manual_check_only": True})
+                              features={'category': None, 'color': None, 'shape': 'manual-test-only',
+                                        'surface_texture': None, 'brand': None, 'visible_text': None,
+                                        'structure': None, 'distinctive_features': None},
+                              metadata={'analysis_id': str(uuid4()), 'schema_version': 'fixed_common_v2',
+                                        'provider': 'manual-stub', 'warnings': ['MANUAL_STUB_NOT_REAL_ANALYSIS']})
 
 
 def check(settings) -> None:

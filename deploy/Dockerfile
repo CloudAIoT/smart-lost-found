@@ -15,6 +15,8 @@ COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt && pip check \
     && useradd --uid 10001 --create-home appuser
 COPY backend/app ./app
+COPY imageprocess/__init__.py ./imageprocess/__init__.py
+COPY imageprocess/app ./imageprocess/app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./
 COPY deploy/runtime /opt/deploy

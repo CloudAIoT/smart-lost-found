@@ -15,6 +15,8 @@ from app.integrations import (AnalysisInput, AnalysisResult, DeviceGateway, Feat
                               IntegrationError, validate_jpeg)
 from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, ReturnCode, StorageAssignment, now
 from app.errors import BusinessError
+from app.search_features import project
+from app.image_analysis import valid_features
 
 # 40 bits of entropy rendered as 8 unpadded base32 characters, typed on a kiosk keyboard.
 RETURN_CODE_BYTES = 5
@@ -97,41 +99,58 @@ def capture(session: Session, registration_id: UUID, shot: int, gateway: DeviceG
 
 def analyze(session: Session, registration_id: UUID, analyzer: FeatureAnalyzer, store: ImageStore) -> Registration:
     reg = registration(session, registration_id)
-    if reg.status == "ready" and reg.analysis_status == "succeeded":
-        return reg
-    reg = claim(session, registration_id, ("draft",), "analyzing")
     current = images(session, registration_id)
+    if (reg.status == "ready" and reg.analysis_status == "succeeded"
+            and (reg.analysis_metadata or {}).get("schema_version") == "fixed_common_v2"
+            and valid_features(reg.analysis_features)
+            and [image.shot_order for image in current] == [1, 2]
+            and reg.analysis_input_image_ids == [str(image.id) for image in current]):
+        return reg
+    if reg.status not in ("draft", "ready") or session.scalar(select(FoundItem.id).where(FoundItem.registration_id == reg.id)):
+        raise BusinessError("INVALID_REGISTRATION_STATE")
     if [image.shot_order for image in current] != [1, 2]:
-        session.rollback()
         raise BusinessError("TWO_IMAGES_REQUIRED")
-    ids = tuple(image.id for image in current)
-    keys = [image.object_key for image in current]
-    reg.analysis_status = "running"
-    reg.analysis_input_image_ids = [str(value) for value in ids]
-    session.commit()
-    try:
-        inputs = tuple(AnalysisInput(image_id=value, jpeg=store.read(key)) for value, key in zip(ids, keys))
-        result = analyzer.analyze(registration_id, inputs)
-        if not isinstance(result, AnalysisResult) or result.image_ids != ids or not isinstance(result.features, dict) or not result.features:
-            raise IntegrationError("INVALID_ANALYSIS_RESULT")
-        try:
-            # Only this serialization check normalizes its failures. Nesting deeper than the
-            # encoder can walk raises RecursionError instead of ValueError/TypeError, and an
-            # unstored result must not leave the registration stuck in analyzing/running.
-            json.dumps(result.features, allow_nan=False)
-        except (ValueError, TypeError, RecursionError):
-            raise IntegrationError("INVALID_ANALYSIS_RESULT") from None
-    except IntegrationError:
-        reg.analysis_status = "failed"
-        reg.status = "draft"
-        reg.analysis_features = None
+    # Key and process capacity are checked before changing state or reading S3.
+    with analyzer.slot():
+        reg = claim(session, registration_id, ("draft", "ready"), "analyzing")
+        ids = tuple(image.id for image in current)
+        keys = [image.object_key for image in current]
+        category = session.get(Category, reg.primary_category_id) if reg.primary_category_id else None
+        category_hint = category.name if category else None
+        reg.analysis_status = "running"
+        reg.analysis_input_image_ids = [str(value) for value in ids]
+        reg.analysis_features = reg.analysis_metadata = None
+        reg.search_features, reg.ownership_evidence = {}, []
         session.commit()
-        raise
-    reg.analysis_features = result.features
-    reg.analysis_status = "succeeded"
-    reg.status = "ready"
-    session.commit()
-    return reg
+        try:
+            inputs = tuple(AnalysisInput(image_id=value, jpeg=store.read(key)) for value, key in zip(ids, keys))
+            result = analyzer.analyze(registration_id, inputs, category=category_hint)
+            if not isinstance(result, AnalysisResult) or result.image_ids != ids or not valid_features(result.features):
+                raise IntegrationError("INVALID_ANALYSIS_RESULT")
+            try:
+                json.dumps([result.features, result.metadata], allow_nan=False)
+                UUID(result.metadata["analysis_id"])
+                if result.metadata["schema_version"] != "fixed_common_v2":
+                    raise ValueError
+            except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+                raise IntegrationError("INVALID_ANALYSIS_RESULT") from None
+        except IntegrationError:
+            reg.analysis_status, reg.status = "failed", "draft"
+            session.commit()
+            raise
+        # Recheck under a short row lock after external work, before publishing observations.
+        session.refresh(reg, with_for_update=True)
+        if (reg.status != "analyzing" or reg.analysis_status != "running"
+                or reg.analysis_input_image_ids != [str(value) for value in ids]
+                or [image.id for image in images(session, registration_id)] != list(ids)):
+            session.rollback()
+            raise BusinessError("ANALYSIS_RESULT_STALE")
+        reg.analysis_features = result.features
+        reg.analysis_metadata = result.metadata
+        reg.search_features = project(result.features, category=category_hint, location=reg.found_location)
+        reg.analysis_status, reg.status = "succeeded", "ready"
+        session.commit()
+        return reg
 
 
 def assignment_for(session: Session, registration_id: UUID) -> StorageAssignment | None:
@@ -145,7 +164,9 @@ def open_deposit(session: Session, registration_id: UUID, gateway: DeviceGateway
         return assignment_for(session, registration_id)
     reg = claim(session, registration_id, ("ready",), "opening")
     current = images(session, registration_id)
-    if (reg.analysis_status != "succeeded" or [image.shot_order for image in current] != [1, 2]
+    if (reg.analysis_status != "succeeded" or not valid_features(reg.analysis_features)
+            or (reg.analysis_metadata or {}).get("schema_version") != "fixed_common_v2"
+            or [image.shot_order for image in current] != [1, 2]
             or reg.analysis_input_image_ids != [str(image.id) for image in current]):
         session.rollback()
         raise BusinessError("ANALYSIS_REQUIRED")

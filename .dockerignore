@@ -1,6 +1,12 @@
 **
 !backend/
 !backend/requirements.txt
+!backend/requirements-dev.txt
+!backend/Dockerfile
+!imageprocess/
+!imageprocess/__init__.py
+!imageprocess/app/
+!imageprocess/app/**
 !backend/app/
 !backend/app/**
 !backend/alembic/

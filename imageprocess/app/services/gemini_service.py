@@ -1,5 +1,6 @@
 """Gemini adapter. Constructing the client does not send images or make API calls."""
 from PIL import Image
+import httpx
 
 from ..core.errors import ServiceError
 from ..models.schemas import Features
@@ -56,7 +57,7 @@ class GeminiService:
             finish = getattr(finish, 'value', finish)
             if finish == 'MAX_TOKENS':
                 raise ServiceError('GEMINI_OUTPUT_TRUNCATED', 'Gemini reached the output limit. Increase GEMINI_MAX_OUTPUT_TOKENS.', 502)
-            if finish not in (None, 'STOP'):
+            if len(candidates) != 1 or finish != 'STOP':
                 raise ServiceError('GEMINI_RESPONSE_BLOCKED', 'Gemini did not return a completed feature response.', 502)
             text = response.text
             usage = response.usage_metadata
@@ -65,6 +66,8 @@ class GeminiService:
                     'prompt_token_count', 'candidates_token_count', 'thoughts_token_count', 'total_token_count')}
         except ServiceError:
             raise
+        except (TimeoutError, httpx.TimeoutException):
+            raise ServiceError('GEMINI_TIMEOUT', 'Gemini request timed out.', 504) from None
         except Exception as exc:
             # API exceptions may include request URLs, keys or image content.
             # Classify by HTTP status only, and never serialize the exception.

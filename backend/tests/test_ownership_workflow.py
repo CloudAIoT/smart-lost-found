@@ -154,6 +154,22 @@ def test_hands_off_only_after_every_private_feature_matches(ownership):
     assert result.policy_version == "development_v2"
 
 
+def test_two_photo_features_are_searchable_without_becoming_ownership_proof(ownership):
+    ownership.ai.clues = SearchClues(shape="직사각형", surface_texture="직조 표면", structure="측면 지퍼")
+    with Session(ownership.engine) as session:
+        item = session.get(FoundItem, ownership.first)
+        registration = session.get(Registration, item.registration_id)
+        registration.analysis_features = {
+            "category": "pencil_case", "color": ["navy"], "shape": "직사각형",
+            "surface_texture": "직조 표면", "brand": None, "visible_text": ["MJ"],
+            "structure": ["측면 지퍼"], "distinctive_features": ["파란 원형 핀"],
+        }
+        session.commit()
+    result = begin(ownership)
+    assert result["initial_candidate_count"] == 1
+    assert result["decision"] == "insufficient_evidence"
+
+
 def test_no_match_and_missing_clues_do_not_create_a_judgment(ownership):
     ownership.ai.clues = SearchClues(category="우산", color="검은색")
     missing = begin(ownership)

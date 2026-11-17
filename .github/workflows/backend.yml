@@ -98,6 +98,7 @@ jobs:
       MAX_IMAGE_BYTES: ${{ vars.MAX_IMAGE_BYTES }}
       PREVIEW_TTL_SECONDS: ${{ vars.PREVIEW_TTL_SECONDS }}
       RETURN_CODE_TTL_SECONDS: ${{ vars.RETURN_CODE_TTL_SECONDS }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -129,4 +130,5 @@ jobs:
         env:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           PI_DEVICES: ${{ secrets.PI_DEVICES }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python deploy/publish.py

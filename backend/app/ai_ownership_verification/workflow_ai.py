@@ -82,18 +82,30 @@ class GeminiWorkflowAI:
         return result.labels
 
     def _request[T: BaseModel](self, instruction: str, data: dict, schema: type[T], *, json_schema: dict | None = None) -> T:
+        raw = self.generate_json_text(
+            [{"text": json.dumps(data, ensure_ascii=False)}],
+            json_schema if json_schema is not None else schema.model_json_schema(),
+            instruction=instruction,
+        )
+        try:
+            return schema.model_validate_json(raw, strict=True)
+        except ValidationError:
+            raise IntegrationError("OWNERSHIP_AI_INVALID_RESPONSE") from None
+
+    def generate_json_text(self, parts: list[dict], schema: dict, *, instruction: str | None = None) -> str:
         key = self.settings.gemini_api_key
         if not key or not key.get_secret_value().strip() or not self.settings.gemini_model:
             raise IntegrationError("OWNERSHIP_AI_NOT_CONFIGURED")
         payload = {
-            "systemInstruction": {"parts": [{"text": instruction}]},
-            "contents": [{"role": "user", "parts": [{"text": json.dumps(data, ensure_ascii=False)}]}],
+            "contents": [{"role": "user", "parts": parts}],
             "generationConfig": {
                 "responseMimeType": "application/json",
-                "responseJsonSchema": json_schema if json_schema is not None else schema.model_json_schema(),
+                "responseJsonSchema": schema,
                 "maxOutputTokens": self.settings.gemini_max_output_tokens,
             },
         }
+        if instruction:
+            payload["systemInstruction"] = {"parts": [{"text": instruction}]}
         try:
             with self.client.stream("POST", f"{API_ROOT}/{self.settings.gemini_model}:generateContent",
                                     json=payload, headers={"x-goog-api-key": key.get_secret_value()},
@@ -119,7 +131,6 @@ class GeminiWorkflowAI:
             parts = candidates[0]["content"]["parts"]
             if not isinstance(parts, list):
                 raise ValueError
-            raw = "".join(part["text"] for part in parts if "text" in part and not part.get("thought", False))
-            return schema.model_validate_json(raw, strict=True)
+            return "".join(part["text"] for part in parts if "text" in part and not part.get("thought", False))
         except (ValueError, KeyError, IndexError, AttributeError, TypeError, ValidationError):
             raise IntegrationError("OWNERSHIP_AI_INVALID_RESPONSE") from None

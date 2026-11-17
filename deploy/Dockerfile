@@ -12,11 +12,14 @@ FROM python:3.12-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt && pip check \
+COPY imageprocess/requirements-core.txt ./imageprocess-requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -r imageprocess-requirements.txt && pip check \
     && useradd --uid 10001 --create-home appuser
 COPY backend/app ./app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./
+COPY imageprocess/__init__.py ./imageprocess/__init__.py
+COPY imageprocess/app ./imageprocess/app
 COPY deploy/runtime /opt/deploy
 # 배포 시 publish.py가 /opt/deploy를 릴리스 디렉터리로 복사하고 nginx가 frontend/를 서비스한다.
 COPY --from=frontend /frontend/dist /opt/deploy/frontend

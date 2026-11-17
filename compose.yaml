@@ -1,7 +1,9 @@
 services:
   backend:
     image: smart-lost-found-backend:dev
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     env_file:
       - ./backend/.env
     environment:
@@ -15,6 +17,7 @@ services:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./backend:/app
+      - ./imageprocess:/app/imageprocess:ro
     depends_on:
       db:
         condition: service_healthy

@@ -47,7 +47,7 @@ docker compose --env-file backend/.env exec backend pytest -q
 
 시드는 개발용 키오스크 1개와 2칸을 만든다. 반복 실행해도 중복 생성하지 않으며 카테고리 목록은 임의로 확정하지 않는다. 실제 키오스크의 위치·카테고리 관리 API는 이번 범위 밖이다.
 
-로컬 Python은 Python 3.12 가상환경에 `pip install -r backend/requirements-dev.txt`로 준비하고 `backend`에서 `python -m pytest -q`를 실행한다. 기본 테스트는 SQLite와 테스트 전용 Pi·S3·AI를 사용하며 실제 네트워크·장치에 접근하지 않는다.
+저장소 루트에서 Python 3.12 가상환경에 `pip install -r backend/requirements-dev.txt -r imageprocess/requirements-core.txt`로 준비하고 `backend`에서 `python -m pytest -q`를 실행한다. 기본 테스트는 SQLite와 테스트 전용 Pi·S3·AI를 사용한다.
 
 ## 업무 API와 연동 상태
 

@@ -14,9 +14,10 @@ from .workflow_ai import WorkflowAI
 from .workflow_schemas import Candidate, Evidence, SearchClues
 
 
-SEARCH_FIELDS = ("category", "color", "material", "brand", "location", "visible_text", "distinctive_features")
-PROOF_FIELDS = ("distinctive_features", "visible_text", "material", "brand", "color")
-NARROW_FIELDS = ("material", "brand", "color")
+SEARCH_FIELDS = ("category", "color", "shape", "surface_texture", "brand", "visible_text", "structure",
+                 "distinctive_features", "location", "material")
+PROOF_FIELDS = ("distinctive_features", "visible_text", "structure", "shape", "surface_texture", "material", "brand", "color")
+NARROW_FIELDS = ("shape", "surface_texture", "structure", "material", "brand", "color")
 MAX_REGISTERED_ROWS = 500
 SEARCH_BATCH_SIZE = 100
 ALIASES = {

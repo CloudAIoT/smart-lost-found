@@ -8,7 +8,10 @@ from pydantic import Field, StringConstraints
 from .schemas import Contract
 
 
-FieldName = Literal["category", "color", "material", "brand", "visible_text", "distinctive_features", "description", "location"]
+FieldName = Literal[
+    "category", "color", "shape", "surface_texture", "brand", "visible_text", "structure",
+    "distinctive_features", "location", "material", "description",
+]
 Clue = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 ChoiceLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 Decision = Literal["supported", "not_confirmed", "insufficient_evidence"]
@@ -22,9 +25,12 @@ class SearchRequest(Contract):
 class SearchClues(Contract):
     category: Clue | None = None
     color: Clue | None = None
+    shape: Clue | None = None
+    surface_texture: Clue | None = None
     material: Clue | None = None
     brand: Clue | None = None
     visible_text: Clue | None = None
+    structure: Clue | None = None
     distinctive_features: Clue | None = None
     description: Clue | None = None
     location: Clue | None = None
@@ -36,7 +42,7 @@ class Distractors(Contract):
 
 class SearchMatch(Contract):
     item: int = Field(ge=1)
-    matched_fields: list[FieldName] = Field(min_length=1, max_length=7)
+    matched_fields: list[FieldName] = Field(min_length=1, max_length=10)
 
 
 class SimilarItems(Contract):

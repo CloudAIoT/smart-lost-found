@@ -24,6 +24,9 @@ ATTEMPT_TTL = timedelta(minutes=20)
 PROMPTS = {
     "distinctive_features": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
     "visible_text": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
+    "structure": "기억하는 물건의 구성이나 부품을 골라 주세요.",
+    "shape": "기억하는 물건의 형태를 골라 주세요.",
+    "surface_texture": "기억하는 물건의 표면 질감을 골라 주세요.",
     "material": "기억하는 물건의 재질을 골라 주세요.",
     "brand": "기억하는 물건의 브랜드를 골라 주세요.",
     "color": "기억하는 물건의 색상을 골라 주세요.",

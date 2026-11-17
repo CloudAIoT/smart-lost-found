@@ -253,8 +253,7 @@ def latest_assignment(session: Session, found_item_id: UUID) -> StorageAssignmen
 def issue_return_code(session: Session, found_item_id: UUID, *, ttl: int) -> tuple[str, ReturnCode]:
     """Mint a code for a stored item. The plaintext is returned once and never stored.
 
-    Ownership is NOT checked here. Once the question/answer evaluation (A04) exists it
-    becomes the precondition of this call; until then any caller can mint a code.
+    The public API checks and claims a successful ownership attempt before calling this service.
     """
     item = found_item(session, found_item_id)
     if item.status != "stored":

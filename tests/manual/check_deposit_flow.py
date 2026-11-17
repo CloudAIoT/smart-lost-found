@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.models import FoundItem, ItemImage  # noqa: E402
+from app.services import issue_return_code  # noqa: E402
 
 TIMEOUT = 60
 
@@ -94,10 +95,12 @@ def pickup(settings, engine, client: httpx.Client, kiosk_id: str, registration_i
     """같은 칸을 다시 쓰려면 수령까지 끝내 칸을 비운다."""
     if not settings.return_code_ttl_seconds:
         raise SystemExit("수령까지 보려면 backend/.env에 RETURN_CODE_TTL_SECONDS가 필요하다")
+    if not settings.local_development:
+        raise SystemExit("장치 수령 시험에는 LOCAL_DEVELOPMENT=true가 필요하다")
     with Session(engine) as session:
-        found_item_id = str(session.scalar(select(FoundItem.id)
-                                           .where(FoundItem.registration_id == UUID(registration_id))))
-    code = call(client, "POST", f"/api/found-items/{found_item_id}/return-code")["code"]
+        found_item_id = session.scalar(select(FoundItem.id).where(FoundItem.registration_id == UUID(registration_id)))
+        # The device harness owns the local DB and tests pickup independently of ownership questions.
+        code, _ = issue_return_code(session, found_item_id, ttl=settings.return_code_ttl_seconds)
     opened = call(client, "POST", "/api/pickup/open", {"code": code, "kiosk_id": kiosk_id})
     number = opened["locker_number"]
     print(f"  수령 개방 {number}번, Pi 문 상태 {pi_door(settings, kiosk_id, number)}")

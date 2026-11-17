@@ -119,6 +119,7 @@ def view(attempt_id: UUID, state: AttemptState) -> AttemptView:
         status="completed" if state.decision else "question",
         attempt_id=attempt_id, initial_candidate_count=state.original_count,
         decision=state.decision,
+        found_item_id=state.candidates[0].item_id if state.decision == "supported" else None,
         question=QuestionView(id=question.id, text=question.text,
                               options=[OptionView(id=option.id, label=option.label) for option in question.options])
         if question else None,
@@ -202,7 +203,11 @@ def answer(session: Session, attempt_id: UUID, body: AnswerRequest, ai: Workflow
 
 def get_ownership_result(session: Session, attempt_id: UUID) -> OwnershipResult | None:
     """Sunjae's in-process integration point, not a public result-detail API."""
-    state = AttemptState.model_validate(load_attempt(session, attempt_id).state)
+    return _ownership_result(session, load_attempt(session, attempt_id))
+
+
+def _ownership_result(session: Session, attempt: OwnershipAttempt) -> OwnershipResult | None:
+    state = AttemptState.model_validate(attempt.state)
     if not state.decision:
         return None
     candidate = state.candidates[0] if len(state.candidates) == 1 else None
@@ -218,7 +223,25 @@ def get_ownership_result(session: Session, attempt_id: UUID) -> OwnershipResult 
                           if entry.purpose == "verification" and candidate.item_id in entry.matched_item_ids}
         if any(ev not in current_proof for ev in candidate.proof if ev.field in matched_fields):
             raise BusinessError("OWNERSHIP_EVIDENCE_CHANGED")
-    return OwnershipResult(attempt_id=attempt_id, item_id=candidate.item_id if candidate else None,
+    return OwnershipResult(attempt_id=attempt.id, item_id=candidate.item_id if candidate else None,
                            decision=state.decision, policy_version=state.policy_version,
                            matched_evidence_groups=len(candidate.matched_groups) if candidate else 0,
                            answered_questions=len(state.answers))
+
+
+def authorize_return_code(session: Session, attempt_id: UUID, item_id: UUID) -> None:
+    """Claim a successful attempt in the same transaction as code issuance."""
+    attempt = load_attempt(session, attempt_id)
+    result = _ownership_result(session, attempt)
+    if result is None or result.decision != "supported" or result.item_id != item_id:
+        raise BusinessError("OWNERSHIP_REQUIRED", 403)
+    if attempt.state.get("return_code_issued"):
+        raise BusinessError("OWNERSHIP_RETURN_CODE_ALREADY_ISSUED")
+    changed = session.execute(update(OwnershipAttempt).where(
+        OwnershipAttempt.id == attempt_id, OwnershipAttempt.version == attempt.version,
+        OwnershipAttempt.expires_at > now(),
+    ).values(version=attempt.version + 1, state={**attempt.state, "return_code_issued": True})
+      .execution_options(synchronize_session=False))
+    if changed.rowcount != 1:
+        load_attempt(session, attempt_id)
+        raise BusinessError("OWNERSHIP_RETURN_CODE_ALREADY_ISSUED")

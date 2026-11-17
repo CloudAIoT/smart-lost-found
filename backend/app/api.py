@@ -3,12 +3,13 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Response
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai_ownership_verification.workflow import authorize_return_code
 from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
 from app.config import Settings, get_settings
 from app.db import get_session
@@ -156,6 +157,12 @@ class ReturnCodeView(BaseModel):
     found_item_id: UUID
     code: str
     expires_at: datetime
+    kiosk_name: str
+
+
+class ReturnCodeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    attempt_id: UUID
 
 
 class PickupInput(BaseModel):
@@ -180,13 +187,20 @@ def pickup_view(session: Session, assignment) -> PickupView:
 
 
 @router.post("/found-items/{found_item_id}/return-code", response_model=ReturnCodeView, status_code=201)
-def create_return_code(found_item_id: UUID, session: DB, settings: Config):
+def create_return_code(found_item_id: UUID, body: ReturnCodeInput, response: Response, session: DB, settings: Config):
     if not settings.return_code_ttl_seconds:
         raise IntegrationError("RETURN_CODE_NOT_CONFIGURED")
+    authorize_return_code(session, body.attempt_id, found_item_id)
+    assignment = services.latest_assignment(session, found_item_id)
+    if assignment is None or assignment.status != "stored" or assignment.ended_at is not None:
+        raise services.BusinessError("OWNERSHIP_ITEM_NO_LONGER_AVAILABLE")
+    kiosk_name = session.scalar(select(Kiosk.name).join(Locker).where(Locker.id == assignment.locker_id))
     code, record = services.issue_return_code(session, found_item_id,
                                               ttl=settings.return_code_ttl_seconds)
     # The plaintext code is delivered once here and never stored or returned again.
-    return ReturnCodeView(found_item_id=found_item_id, code=code, expires_at=services.as_utc(record.expires_at))
+    response.headers["Cache-Control"] = "no-store"
+    return ReturnCodeView(found_item_id=found_item_id, code=code, expires_at=services.as_utc(record.expires_at),
+                          kiosk_name=kiosk_name)
 
 
 @router.post("/pickup/open", response_model=PickupView)

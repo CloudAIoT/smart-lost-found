@@ -6,10 +6,7 @@ import {
   Boxes,
   Camera,
   CircleCheck,
-  CircleHelp,
-  CircleX,
   DoorOpen,
-  Ellipsis,
   Footprints,
   Globe,
   HandHeart,
@@ -23,10 +20,8 @@ import {
   MapPin,
   MapPinned,
   Monitor,
-  Package,
   RefreshCw,
   RotateCw,
-  SquarePen,
   TriangleAlert,
 } from 'lucide-react';
 
@@ -34,7 +29,7 @@ import {
  * 설정
  * ------------------------------------------------------------
  * 백엔드(http://52.78.12.168)에 CORS 설정이 없으므로
- * vite.config.js 의 dev 프록시('/api' → 52.78.12.168)를 거쳐 호출한다.
+ * vite.config.js의 dev 프록시를 거쳐 호출한다.
  * ============================================================ */
 const API_BASE = '/api';
 
@@ -134,6 +129,11 @@ const ERROR_MESSAGES = {
   DEVICE_NOT_CONFIGURED: '장치 연결이 설정되지 않았습니다.',
   CAPTURE_NOT_CONFIGURED: '촬영 장치가 설정되지 않았습니다.',
   IMAGE_STORAGE_NOT_CONFIGURED: '사진 저장소가 설정되지 않았습니다.',
+  OWNERSHIP_ATTEMPT_EXPIRED: '확인 시간이 지났습니다. 검색을 다시 시작해 주세요.',
+  OWNERSHIP_RETURN_CODE_ALREADY_ISSUED: '이 소유 확인에서 이미 OTP가 발급됐습니다.',
+  OWNERSHIP_ITEM_NO_LONGER_AVAILABLE: '이 물건은 현재 수령할 수 없습니다.',
+  OWNERSHIP_AI_NOT_CONFIGURED: '분실물 검색 또는 이미지 분석 서비스가 설정되지 않았습니다.',
+  OWNERSHIP_AI_RATE_LIMITED: 'AI 요청이 많습니다. 잠시 후 다시 시도해 주세요.',
   RETURN_CODE_NOT_CONFIGURED: 'OTP 기능이 설정되지 않았습니다.',
 };
 
@@ -452,49 +452,69 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
 
 /* ============================================================
  * 웹 포털 - 분실자
- * ------------------------------------------------------------
- * 분실물 검색·소유 확인(질문/답변) API가 아직 없으므로 UI만 구현한다.
- * API가 제공되면 searchAndVerifyLostItem()을 실제 호출로 교체하고,
- * 소유 확인 성공 시 POST /api/found-items/{found_item_id}/return-code 를 호출하면
- * 백엔드가 OTP를 생성·저장하고 { code, expires_at } 를 응답한다. (OTP는 백엔드가 생성)
- * { status: 'success', code: data.code, expiresAt: data.expires_at, kioskName } 형태로
- * 반환하면 성공 화면에 그대로 표시된다.
  * ============================================================ */
-// eslint-disable-next-line no-unused-vars
-async function searchAndVerifyLostItem({ categoryId, categoryName, customName, answer }) {
-  // TODO: 검색·소유 확인 API 연결
-  return { status: 'unavailable' };
-}
-
-function WebOwner({ categories, categoriesError, onBack, onResult }) {
-  const [selected, setSelected] = useState(null); // { id, name } | { id: 'etc', name: '기타' }
-  const [customName, setCustomName] = useState('');
-  const [answer, setAnswer] = useState('');
+function WebOwner({ onBack, onResult }) {
+  const [description, setDescription] = useState('');
+  const [attempt, setAttempt] = useState(null);
+  const [optionId, setOptionId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const options = useMemo(
-    () => [...categories.map((c) => ({ id: c.id, name: c.name || c.code })), { id: 'etc', name: '기타', etc: true }],
-    [categories],
-  );
+  const accept = (result) => {
+    setOptionId('');
+    if (result.status === 'question' || result.decision === 'supported') {
+      setAttempt(result);
+    } else if (result.status === 'no_candidates' || result.status === 'completed') {
+      onResult({ status: result.decision || 'not_found' });
+    } else {
+      setError(result.status === 'search_limit'
+        ? '검색 가능한 물품 수를 초과했습니다. 잠시 후 다시 시도해 주세요.'
+        : '물건 종류나 색상, 잃어버린 장소 같은 단서를 더 적어 주세요.');
+    }
+  };
 
-  const submit = async () => {
-    setError('');
-    if (!selected) return setError('분실물 카테고리를 선택해 주세요.');
-    if (selected.etc && !customName.trim()) return setError('어떤 물건인지 직접 입력해 주세요.');
-    if (!answer.trim()) return setError('본인 확인 질문에 대한 답변을 입력해 주세요.');
+  const submit = async (event) => {
+    event.preventDefault();
+    if (busy) return;
     setBusy(true);
+    setError('');
     try {
-      const result = await searchAndVerifyLostItem({
-        categoryId: selected.etc ? null : selected.id,
-        categoryName: selected.name,
-        customName: customName.trim(),
-        answer: answer.trim(),
-      });
-      onResult(result);
+      if (attempt?.decision === 'supported') {
+        const code = await api(`/found-items/${attempt.found_item_id}/return-code`, {
+          method: 'POST',
+          body: { attempt_id: attempt.attempt_id },
+        });
+        onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name });
+      } else if (attempt?.question) {
+        const result = await api(`/ownership/attempts/${attempt.attempt_id}/answers`, {
+          method: 'POST',
+          body: { question_id: attempt.question.id, option_id: optionId },
+        });
+        accept(result);
+      } else {
+        accept(await api('/ownership/attempts', { method: 'POST', body: { description: description.trim() } }));
+      }
+    } catch (err) {
+      if (err.code === 'OWNERSHIP_QUESTION_NOT_CURRENT') {
+        try {
+          accept(await api(`/ownership/attempts/${attempt.attempt_id}`));
+        } catch (refreshError) {
+          setError(errorText(refreshError));
+        }
+      } else {
+        setError(errorText(err));
+      }
     } finally {
       setBusy(false);
     }
+  };
+
+  const question = attempt?.question;
+  const verified = attempt?.decision === 'supported';
+  const restart = () => {
+    setAttempt(null);
+    setOptionId('');
+    setError('');
   };
 
   return (
@@ -502,82 +522,54 @@ function WebOwner({ categories, categoriesError, onBack, onResult }) {
       <BackHeader
         onBack={onBack}
         title="잃어버린 물건 찾기"
-        desc="분실물의 카테고리 및 정보와 본인 확인 질문에 답해 주세요."
+        desc="물건의 특징이나 잃어버린 장소를 기억나는 대로 적어 주세요."
         badge="분실자 모드"
         badgeClass="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
       />
 
-      <div className="space-y-4 max-w-xl mx-auto py-2 w-full">
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-2">1. 분실물 카테고리 선택</label>
-          {categoriesError && <p className="text-[11px] text-rose-300 mb-2">{categoriesError}</p>}
-          {!categoriesError && categories.length === 0 && (
-            <p className="text-[11px] text-slate-500 mb-2">서버에 등록된 카테고리가 없습니다. [기타]를 선택해 직접 입력해 주세요.</p>
-          )}
-          <div className="grid grid-cols-3 gap-2">
-            {options.map((opt) => {
-              const active = selected?.id === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => setSelected(opt)}
-                  className={`p-3 border rounded-xl text-xs font-medium text-slate-300 flex flex-col items-center gap-1.5 transition-all hover:border-emerald-500 ${
-                    active ? 'border-emerald-500 bg-emerald-950/30' : 'bg-slate-800 border-slate-700'
-                  }`}
-                >
-                  {opt.etc ? <Ellipsis size={16} className="text-purple-400" /> : <Package size={16} className="text-indigo-400" />}
-                  {opt.name}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {selected?.etc && (
+      <form onSubmit={submit} className="space-y-4 max-w-xl mx-auto py-2 w-full">
+        {verified ? (
+          <p className="text-sm text-emerald-300">소유 확인이 완료됐습니다. 수령용 OTP를 발급받으세요.</p>
+        ) : question ? (
+          <fieldset disabled={busy} key={question.id} className="space-y-2">
+            <legend className="text-sm font-semibold text-white mb-3">{question.text}</legend>
+            {question.options.map((option) => (
+              <label key={option.id} className="flex items-center gap-3 rounded-xl bg-slate-900 border border-slate-700 p-3 text-sm text-slate-200">
+                <input
+                  type="radio" name="ownership-answer" value={option.id}
+                  checked={optionId === option.id} onChange={() => setOptionId(option.id)}
+                  className="accent-emerald-500"
+                />
+                {option.label}
+              </label>
+            ))}
+          </fieldset>
+        ) : (
           <div>
-            <label className="block text-xs font-semibold text-emerald-400 mb-1.5 flex items-center gap-1">
-              <SquarePen size={12} /> 어떤 물건인지 직접 입력해 주세요
-            </label>
-            <input
-              type="text"
-              value={customName}
-              onChange={(e) => setCustomName(e.target.value)}
-              placeholder="예: 무선 이어폰 케이스, 스케치북, 자동차 키 등"
-              className="w-full bg-slate-900 border border-emerald-500/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400 placeholder:text-slate-500"
+            <label htmlFor="lost-description" className="block text-sm font-semibold text-slate-300 mb-2">분실물 설명</label>
+            <textarea
+              id="lost-description" required maxLength={1000} rows={4} disabled={busy}
+              value={description} onChange={(event) => setDescription(event.target.value)}
+              placeholder="예: 도서관 근처에서 남색 필통을 잃어버렸어요."
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500"
             />
           </div>
         )}
 
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1.5">2. 습득물 본인 확인 질문 (특징 입력)</label>
-          <div className="bg-slate-900/80 p-3.5 rounded-xl border border-slate-700 space-y-2">
-            <p className="text-xs text-slate-400 flex items-start gap-1">
-              <CircleHelp size={14} className="text-emerald-400 shrink-0 mt-px" />
-              {selected
-                ? `[${selected.etc ? customName.trim() || '기타' : selected.name}] 물건의 브랜드, 색상, 내부 내용물 등 소유자만 알 수 있는 특징을 적어주세요.`
-                : '카테고리를 선택하면 본인 확인 질문이 생성됩니다.'}
-            </p>
-            <input
-              type="text"
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              placeholder="질문에 대한 답변을 입력해 주세요 (예: 검정색 가죽 지갑)"
-              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-            />
-          </div>
-        </div>
-
-        {error && <p className="text-xs text-rose-300">{error}</p>}
+        {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
 
         <button
-          onClick={submit}
-          disabled={busy}
-          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg shadow-emerald-600/20 transition-all mt-4"
+          type="submit" disabled={busy || (!verified && (question ? !optionId : !description.trim()))}
+          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
         >
-          {busy ? '확인 중...' : '본인 확인 및 분실물 검색'}
+          {busy ? '처리 중...' : verified ? '수령용 OTP 발급' : question ? '답변 제출' : '분실물 검색'}
         </button>
-      </div>
+        {attempt && (
+          <button type="button" disabled={busy} onClick={restart} className="text-sm text-slate-300 hover:text-white">
+            검색 다시 시작
+          </button>
+        )}
+      </form>
     </div>
   );
 }
@@ -622,20 +614,23 @@ function WebOwnerSuccess({ result, onGoKiosk }) {
 }
 
 function WebOwnerNotice({ kind, onRetry, onHome }) {
-  const unavailable = kind === 'unavailable';
+  const messages = {
+    not_found: ['찾고 있는 분실물이 없습니다', '설명과 일치하는 보관 물품을 찾지 못했습니다.'],
+    not_confirmed: ['소유를 확인할 수 없습니다', '선택한 답변이 등록된 특징과 일치하지 않습니다.'],
+    insufficient_evidence: ['소유 확인 보류', '현재 확인할 수 있는 특징으로는 물건의 소유를 판단하기 어렵습니다.'],
+  };
+  const [title, description] = messages[kind];
   return (
     <div className="space-y-6 text-center py-10">
       <div
-        className={`inline-flex p-3 rounded-full mb-1 ${unavailable ? 'bg-amber-500/20 text-amber-400' : 'bg-rose-500/20 text-rose-400'}`}
+        className="inline-flex p-3 rounded-full mb-1 bg-amber-500/20 text-amber-400"
       >
-        {unavailable ? <Info size={36} /> : <CircleX size={36} />}
+        <Info size={36} />
       </div>
       <div>
-        <h2 className="text-2xl font-bold text-white">{unavailable ? '분실물 검색 기능 준비 중' : '찾고 있는 분실물이 없습니다'}</h2>
+        <h2 className="text-2xl font-bold text-white">{title}</h2>
         <p className="text-xs text-slate-400 mt-2 max-w-sm mx-auto leading-relaxed">
-          {unavailable
-            ? '분실물 검색·본인 확인 서버 기능이 아직 제공되지 않아 결과를 조회할 수 없습니다.'
-            : '아직 시스템에 등록되지 않았거나, 입력하신 답변 및 정보가 등록된 특징과 일치하지 않습니다.'}
+          {description}
         </p>
       </div>
       <div className="pt-4 flex justify-center gap-3">
@@ -653,18 +648,16 @@ function WebOwnerNotice({ kind, onRetry, onHome }) {
 /* ============================================================
  * 웹 포털 컨테이너
  * ============================================================ */
-function WebPortal({ kiosks, kiosksError, categories, categoriesError, onReload, onGoKiosk }) {
-  const [step, setStep] = useState('type'); // type | finder | owner | success | not_found | unavailable
+function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
+  const [step, setStep] = useState('type');
   const [ownerResult, setOwnerResult] = useState(null);
 
   const handleOwnerResult = (result) => {
     if (result?.status === 'success') {
       setOwnerResult(result);
       setStep('success');
-    } else if (result?.status === 'not_found') {
-      setStep('not_found');
     } else {
-      setStep('unavailable');
+      setStep(result.status);
     }
   };
 
@@ -720,10 +713,10 @@ function WebPortal({ kiosks, kiosksError, categories, categoriesError, onReload,
         <WebFinder kiosks={kiosks} kiosksError={kiosksError} onReload={onReload} onBack={() => setStep('type')} onGoKiosk={onGoKiosk} />
       )}
       {step === 'owner' && (
-        <WebOwner categories={categories} categoriesError={categoriesError} onBack={() => setStep('type')} onResult={handleOwnerResult} />
+        <WebOwner onBack={() => setStep('type')} onResult={handleOwnerResult} />
       )}
       {step === 'success' && ownerResult && <WebOwnerSuccess result={ownerResult} onGoKiosk={onGoKiosk} />}
-      {(step === 'not_found' || step === 'unavailable') && (
+      {['not_found', 'not_confirmed', 'insufficient_evidence'].includes(step) && (
         <WebOwnerNotice kind={step} onRetry={() => setStep('owner')} onHome={() => setStep('type')} />
       )}
     </div>
@@ -753,7 +746,7 @@ function ShotBox({ label, imageUrl, scanning }) {
   );
 }
 
-function KioskView({ kiosks, kiosksError, categories, onReload }) {
+function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload }) {
   const [kioskId, setKioskId] = useState('');
   const [step, setStep] = useState('main');
   const [busy, setBusy] = useState('');
@@ -829,11 +822,11 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
   const startRegistration = () =>
     run('등록 정보를 생성하는 중...', async () => {
       const parts = [];
-      if (place.trim()) parts.push(`습득 장소: ${place.trim()}`);
       if (desc.trim()) parts.push(`특징: ${desc.trim()}`);
       const body = {
         kiosk_id: kioskId,
         primary_category_id: categoryId || null,
+        found_location: place.trim() || null,
         secondary_description: parts.length ? parts.join('\n') : null,
       };
       const data = await api('/registrations', { method: 'POST', body });
@@ -1006,6 +999,7 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
             <p className="text-xs text-slate-400">보관하실 물건의 정보를 입력해 주세요. (선택 입력)</p>
           </div>
           <div className="space-y-3">
+            {categoriesError && <p role="alert" className="text-xs text-rose-300">{categoriesError}</p>}
             {categories.length > 0 && (
               <div>
                 <label className="text-[11px] text-slate-400">물건 종류</label>
@@ -1386,13 +1380,12 @@ export default function App() {
             key={webKey}
             kiosks={kiosks}
             kiosksError={kiosksError}
-            categories={categories}
-            categoriesError={categoriesError}
             onReload={loadData}
             onGoKiosk={() => switchMode('kiosk')}
           />
         ) : (
-          <KioskView kiosks={kiosks} kiosksError={kiosksError} categories={categories} onReload={loadData} />
+          <KioskView kiosks={kiosks} kiosksError={kiosksError} categories={categories}
+            categoriesError={categoriesError} onReload={loadData} />
         )}
       </main>
     </div>

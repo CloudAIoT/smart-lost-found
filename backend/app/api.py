@@ -9,10 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.integrations import IntegrationError, PiGateway, UnconfiguredAnalyzer, make_store
 from app.models import Category, FoundItem, Kiosk, Locker, Registration
+from app.photo_analysis import GeminiPhotoAnalyzer
 from app import services
 
 
@@ -35,8 +37,15 @@ def get_store(settings: Config):
     return make_store(settings)
 
 
-def get_analyzer():
-    return UnconfiguredAnalyzer()
+def get_analyzer(registration_id: UUID, session: DB, settings: Config):
+    if not settings.gemini_api_key or not settings.gemini_model:
+        yield UnconfiguredAnalyzer()
+        return
+    category = session.scalar(select(Category.name).join(
+        Registration, Registration.primary_category_id == Category.id
+    ).where(Registration.id == registration_id))
+    with httpx.Client(trust_env=False) as client:
+        yield GeminiPhotoAnalyzer(GeminiWorkflowAI(settings, client), category)
 
 
 Gateway = Annotated[object, Depends(get_gateway)]

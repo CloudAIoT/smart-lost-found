@@ -36,7 +36,7 @@ class AnalysisInput:
 
 @dataclass(frozen=True)
 class AnalysisResult:
-    # Internal BE boundary only; AI's external response contract is still pending.
+    # Keep the capture order and store the validated feature data.
     image_ids: tuple[UUID, UUID]
     features: dict
 

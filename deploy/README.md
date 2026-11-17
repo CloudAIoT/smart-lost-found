@@ -38,6 +38,8 @@ Swagger 주소는 `http://52.78.12.168/docs`다. 업무 API는 GitHub production
 | Variable | MAX_IMAGE_BYTES | 백엔드가 받는 촬영 사진 크기 상한 |
 | Variable | PREVIEW_TTL_SECONDS | 미리보기 서명 URL 유효 시간(초) |
 | Variable | RETURN_CODE_TTL_SECONDS | 반환 코드 유효 시간(초) |
+| Secret | GEMINI_API_KEY | 등록 사진 분석과 분실물 검색·문답 생성용 Gemini 키 |
+| Variable | GEMINI_MODEL | 같은 흐름에 사용할 Gemini 모델 이름 |
 
 Pi 설정 6종은 모두 선택값이다. 전부 비우면 지금처럼 Pi·수령 기능이 미설정 오류를 낸다. 하나라도
 빈 문자열로 두면 그 키 자체를 보내지 않는다(`deploy/publish.py`). `PI_DEVICES`는 EC2가 두 Pi와

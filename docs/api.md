@@ -25,11 +25,12 @@
 {
   "kiosk_id": "00000000-0000-0000-0000-000000000001",
   "primary_category_id": null,
-  "secondary_description": "사용자가 입력한 특징"
+  "secondary_description": "사용자가 입력한 특징",
+  "found_location": "도서관 입구"
 }
 ```
 
-`kiosk_id`는 DB에 있어야 한다. 나머지 두 항목은 생략 가능하다. 카테고리를 지정하면 DB에 있는 ID여야 한다. 자유 입력은 개발용 요청 크기 제한으로 최대 2,000자이며 최종 UI 계약은 별도 협의한다. 알 수 없는 필드는 422이다. 최초 등록 생성 POST 자체는 멱등 요청이 아니므로 FE는 받은 ID를 보관하고 후속 요청에 재사용한다.
+`kiosk_id`는 DB에 있어야 한다. 나머지 필드는 생략할 수 있다. 카테고리를 지정하면 DB에 있는 ID여야 한다. 추가 설명은 최대 2,000자, 습득 위치는 최대 200자다. 알 수 없는 필드는 422다. 최초 등록 후 FE는 받은 ID를 후속 요청에 재사용한다.
 
 생성·등록 조회·촬영·분석·개방·완료의 공통 응답:
 
@@ -39,6 +40,7 @@
   "kiosk_id": "00000000-0000-0000-0000-000000000001",
   "primary_category_id": null,
   "secondary_description": "사용자가 입력한 특징",
+  "found_location": "도서관 입구",
   "status": "draft",
   "analysis_status": "pending",
   "images": [],
@@ -66,7 +68,9 @@
 
 | 메서드 | 경로 | 입력·출력 |
 | --- | --- | --- |
-| POST | `/api/found-items/{found_item_id}/return-code` | 보관 중인 물건에 201 `{"found_item_id","code","expires_at"}` |
+| POST | `/api/ownership/attempts` | `{"description":"도서관에서 남색 필통을 잃어버렸어요"}` → 질문 또는 검색 결과 |
+| POST | `/api/ownership/attempts/{attempt_id}/answers` | `{"question_id":"UUID","option_id":"UUID"}` → 다음 질문 또는 최종 판정 |
+| POST | `/api/found-items/{found_item_id}/return-code` | `{"attempt_id":"UUID"}` → 소유 확인에 성공한 해당 물품에 201 `{"found_item_id","code","expires_at","kiosk_name"}` |
 | POST | `/api/pickup/open` | `{"code":"...","kiosk_id":"UUID"}` → 코드 확인·보관함 개방 |
 | POST | `/api/pickup/{found_item_id}/complete` | `{"confirmed":true}` → 문 조회 → 수령 완료 |
 
@@ -82,9 +86,9 @@
 }
 ```
 
-- 코드 평문은 발급 응답에서 한 번만 받는다. 서버는 SHA-256 해시만 저장하므로 재조회 경로가 없고, 잃어버리면 재발급해야 한다. 재발급은 이전 코드를 즉시 `revoked`로 만든다.
+- 코드 평문은 발급 응답에서 한 번만 받는다. 서버는 SHA-256 해시를 저장한다. 코드를 잃어버리면 새 소유 확인을 거쳐 발급받는다. 재발급은 이전 코드를 `revoked`로 만든다.
 - 코드는 8자리 Base32(A~Z, 2~7)다. 입력의 공백·하이픈·소문자는 서버가 정규화하므로 FE가 맞출 필요는 없다.
-- 현재 발급에는 소유 확인이 없다. 보관 중(`stored`)이기만 하면 누구나 코드를 받을 수 있다. 질문·답변 평가(A04)가 정해지면 이 호출의 선행 조건이 된다. 그 전까지 공개 배포하지 않는다.
+- `found_item_id`는 소유 확인 응답의 `decision=supported`에서 받는다. 백엔드는 요청의 확인 시도와 물품이 일치하는지, 근거가 유효하고 물건이 보관 중인지 확인한다. 한 확인 시도에서 코드를 한 번 발급한다. [소유 확인 워크플로](../backend/app/ai_ownership_verification/workflow.md)
 - 물건 상태는 `stored → retrieved`, 배정 상태는 `stored → awaiting_pickup → retrieved`다. 등록(`registrations`) 상태는 수령으로 바뀌지 않는다.
 - 개방 성공 시 코드를 `used`로 처리한다. 완료된 개방을 재요청하면 문을 다시 열지 않고 같은 결과를 반환하므로 FE의 중복 클릭·새로고침은 안전하다.
 - 명확한 장치 실패는 코드를 그대로 두어 다시 시도할 수 있다. 통신 단절 등 결과 불명은 문이 이미 열렸을 수 있어 코드를 `locked`로 두고 같은 코드의 재개방을 막는다. 운영 복구 API는 아직 없다.

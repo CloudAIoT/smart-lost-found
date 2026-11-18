@@ -162,6 +162,7 @@ class ReturnCodeView(BaseModel):
     found_item_id: UUID
     code: str
     expires_at: datetime
+    kiosk_id: UUID
     kiosk_name: str
 
 
@@ -199,13 +200,15 @@ def create_return_code(found_item_id: UUID, body: ReturnCodeInput, response: Res
     assignment = services.latest_assignment(session, found_item_id)
     if assignment is None or assignment.status != "stored" or assignment.ended_at is not None:
         raise services.BusinessError("OWNERSHIP_ITEM_NO_LONGER_AVAILABLE")
-    kiosk_name = session.scalar(select(Kiosk.name).join(Locker).where(Locker.id == assignment.locker_id))
+    kiosk_id, kiosk_name = session.execute(
+        select(Kiosk.id, Kiosk.name).join(Locker).where(Locker.id == assignment.locker_id)
+    ).one()
     code, record = services.issue_return_code(session, found_item_id,
                                               ttl=settings.return_code_ttl_seconds)
     # The plaintext code is delivered once here and never stored or returned again.
     response.headers["Cache-Control"] = "no-store"
     return ReturnCodeView(found_item_id=found_item_id, code=code, expires_at=services.as_utc(record.expires_at),
-                          kiosk_name=kiosk_name)
+                          kiosk_id=kiosk_id, kiosk_name=kiosk_name)
 
 
 @router.post("/pickup/open", response_model=PickupView)

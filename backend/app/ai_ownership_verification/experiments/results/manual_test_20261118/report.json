@@ -1,0 +1,531 @@
+{
+  "created_at": "2026-11-18T07:33:32.144131+00:00",
+  "model": "gemini-3.5-flash-lite",
+  "suite": "baseline",
+  "data": {
+    "synthetic": true,
+    "item_count": 100,
+    "searchable_count": 90,
+    "distribution": {
+      "normal": 25,
+      "similar": 25,
+      "missing": 40,
+      "excluded": 10
+    }
+  },
+  "request_limit": 15,
+  "source_commit": "c3cfac57ed27381c3ed42243479d21a267dd7669",
+  "source_hashes": {
+    "search.py": "e0f464fa6d02721d8b50cf70f7c21b4474c3ebf37a6b4367efb518384ea1e987",
+    "workflow.py": "6d972b5d8f471a81baba819d72cea6261ac874ce81b445d721608a27fb571015",
+    "workflow_ai.py": "2a7d332111e4491ed77ec2f7a89b50d5d297cc81488b64344384bdc477c20db4",
+    "workflow_schemas.py": "7d659a22f1a9bf8f3ee4782e8d887c01c639d747bbeceec23a729130d88c3af4",
+    "experiments/ownership_live_corpus.py": "47ade4f3bdab0e2eb390371b273c3f25630f1806c9d346cc1ab8f4bf6e7b5dbf",
+    "experiments/run_ownership_live.py": "46429fb7708a29b1c854f9a2aabc5cc83527d03e3706c3ab6eae5daa1727c969"
+  },
+  "cases": [
+    {
+      "case": "owner_five_questions",
+      "description": "도서관에서 필통을 찾고 있어요.",
+      "expected": {
+        "status": "completed",
+        "decision": "supported",
+        "item": "P01",
+        "initial_count": 5,
+        "rounds": 5,
+        "answers": {
+          "장식": "파란 원형 핀",
+          "문구": "MJ",
+          "재질": "fabric",
+          "브랜드": "Carhartt",
+          "색상": "navy"
+        }
+      },
+      "steps": [
+        {
+          "question": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
+          "options": [
+            "검은색 삼각 핀",
+            "파란 원형 핀",
+            "노란 별 모양 배지",
+            "빨간 사각 핀",
+            "초록 줄무늬 배지"
+          ],
+          "selected": "파란 원형 핀",
+          "expected_wrong": false,
+          "candidates_before": [
+            {
+              "item": "P05",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P04",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P02",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P03",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "purpose": "verification",
+          "candidates_after": [
+            {
+              "item": "P05",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P04",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P02",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P03",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "matched_items": [
+            "P01"
+          ],
+          "conflicting_items": [
+            "P05",
+            "P04",
+            "P02",
+            "P03"
+          ]
+        },
+        {
+          "question": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
+          "options": [
+            "XY",
+            "AB",
+            "PQ",
+            "MJ",
+            "KL"
+          ],
+          "selected": "MJ",
+          "expected_wrong": false,
+          "candidates_before": [
+            {
+              "item": "P05",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P04",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P02",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P03",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "purpose": "verification",
+          "candidates_after": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "matched_items": [
+            "P01"
+          ],
+          "conflicting_items": [
+            "P05",
+            "P04",
+            "P02",
+            "P03"
+          ]
+        },
+        {
+          "question": "기억하는 물건의 재질을 골라 주세요.",
+          "options": [
+            "wood",
+            "plastic",
+            "metal",
+            "fabric",
+            "leather"
+          ],
+          "selected": "fabric",
+          "expected_wrong": false,
+          "candidates_before": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "purpose": "verification",
+          "candidates_after": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "matched_items": [
+            "P01"
+          ],
+          "conflicting_items": []
+        },
+        {
+          "question": "기억하는 물건의 브랜드를 골라 주세요.",
+          "options": [
+            "Wrangler",
+            "Carhartt",
+            "Dickies",
+            "Levi Strauss",
+            "Timberland Pro"
+          ],
+          "selected": "Carhartt",
+          "expected_wrong": false,
+          "candidates_before": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "purpose": "verification",
+          "candidates_after": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "matched_items": [
+            "P01"
+          ],
+          "conflicting_items": []
+        },
+        {
+          "question": "기억하는 물건의 색상을 골라 주세요.",
+          "options": [
+            "navy",
+            "crimson",
+            "maroon",
+            "teal",
+            "mustard"
+          ],
+          "selected": "navy",
+          "expected_wrong": false,
+          "candidates_before": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "purpose": "verification",
+          "candidates_after": [
+            {
+              "item": "P01",
+              "initial_matches": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "matched_items": [
+            "P01"
+          ],
+          "conflicting_items": []
+        }
+      ],
+      "checks": {
+        "status": true,
+        "decision": true,
+        "initial_count": true,
+        "rounds": true,
+        "five_unique_options": true,
+        "handoff_item": true,
+        "handoff_decision": true
+      },
+      "actual": {
+        "status": "completed",
+        "decision": "supported",
+        "initial_candidates": [
+          {
+            "item": "P05",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": "P04",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": "P02",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": "P03",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          },
+          {
+            "item": "P01",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          }
+        ],
+        "remaining_candidates": [
+          {
+            "item": "P01",
+            "initial_matches": [
+              "category",
+              "location"
+            ]
+          }
+        ],
+        "handoff": {
+          "item": "P01",
+          "decision": "supported",
+          "matched_evidence_groups": 5,
+          "answered_questions": 5,
+          "policy_version": "development_v2"
+        }
+      },
+      "passed": true
+    }
+  ],
+  "requests": 7,
+  "api_events": [
+    {
+      "case": "owner_five_questions",
+      "stage": "extract",
+      "provider_http_status": 200,
+      "result": {
+        "category": "필통",
+        "color": null,
+        "shape": null,
+        "surface_texture": null,
+        "material": null,
+        "brand": null,
+        "visible_text": null,
+        "structure": null,
+        "distinctive_features": null,
+        "description": null,
+        "location": "도서관"
+      },
+      "milliseconds": 1143
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "search",
+      "items_compared": 90,
+      "provider_http_status": 200,
+      "result": [
+        {
+          "item": 29,
+          "matched_fields": [
+            "category",
+            "location"
+          ]
+        },
+        {
+          "item": 40,
+          "matched_fields": [
+            "category",
+            "location"
+          ]
+        },
+        {
+          "item": 58,
+          "matched_fields": [
+            "category",
+            "location"
+          ]
+        },
+        {
+          "item": 72,
+          "matched_fields": [
+            "category",
+            "location"
+          ]
+        },
+        {
+          "item": 85,
+          "matched_fields": [
+            "category",
+            "location"
+          ]
+        }
+      ],
+      "milliseconds": 1866
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "options:distinctive_features",
+      "known": [
+        "초록 줄무늬 배지",
+        "빨간 사각 핀",
+        "파란 원형 핀"
+      ],
+      "required_count": 2,
+      "provider_http_status": 200,
+      "result": [
+        "노란 별 모양 배지",
+        "검은색 삼각 핀"
+      ],
+      "milliseconds": 1486
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "options:visible_text",
+      "known": [
+        "AB",
+        "MJ"
+      ],
+      "required_count": 3,
+      "provider_http_status": 200,
+      "result": [
+        "XY",
+        "KL",
+        "PQ"
+      ],
+      "milliseconds": 2874
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "options:material",
+      "known": [
+        "fabric"
+      ],
+      "required_count": 4,
+      "provider_http_status": 200,
+      "result": [
+        "plastic",
+        "leather",
+        "metal",
+        "wood"
+      ],
+      "milliseconds": 1207
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "options:brand",
+      "known": [
+        "Carhartt"
+      ],
+      "required_count": 4,
+      "provider_http_status": 200,
+      "result": [
+        "Dickies",
+        "Levi Strauss",
+        "Wrangler",
+        "Timberland Pro"
+      ],
+      "milliseconds": 1217
+    },
+    {
+      "case": "owner_five_questions",
+      "stage": "options:color",
+      "known": [
+        "navy"
+      ],
+      "required_count": 4,
+      "provider_http_status": 200,
+      "result": [
+        "crimson",
+        "mustard",
+        "teal",
+        "maroon"
+      ],
+      "milliseconds": 1358
+    }
+  ],
+  "stop_code": null
+}

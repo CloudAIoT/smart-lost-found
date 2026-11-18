@@ -171,6 +171,7 @@ def test_verified_attempt_issues_one_otp_for_the_matched_item(ownership):
     assert issued.headers["cache-control"] == "no-store"
     assert len(issued.json()["code"]) == 8
     assert issued.json()["kiosk_name"] == "보관 키오스크"
+    assert UUID(issued.json()["kiosk_id"])
     assert ownership.client.post(path, json=body).json()["detail"]["code"] == "OWNERSHIP_RETURN_CODE_ALREADY_ISSUED"
 
 

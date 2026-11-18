@@ -82,7 +82,9 @@ def registration_view(session: Session, reg: Registration) -> RegistrationView:
     number = None
     if reg.status in ("awaiting_deposit", "stored"):
         assignment = services.assignment_for(session, reg.id)
-        number = session.get(Locker, assignment.locker_id).locker_number
+        # Pickup ends the assignment while the registration remains stored.
+        if assignment is not None:
+            number = session.get(Locker, assignment.locker_id).locker_number
     return RegistrationView(id=reg.id, kiosk_id=reg.kiosk_id, primary_category_id=reg.primary_category_id,
                             secondary_description=reg.secondary_description, found_location=reg.found_location, status=reg.status,
                             analysis_status=reg.analysis_status, locker_number=number,

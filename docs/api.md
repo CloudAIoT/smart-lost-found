@@ -48,7 +48,9 @@
 }
 ```
 
-사진 응답 항목은 `{"id":"UUID","shot_order":1}`이다. S3 객체 키·AI 특징은 응답하지 않는다. 미리보기 URL은 별도로 발급하고 영구 저장하지 않는다. `locker_number`는 개방 성공이 저장된 `awaiting_deposit`/`stored`에서만 반환한다.
+사진 응답 항목은 `{"id":"UUID","shot_order":1}`이다. S3 객체 키·AI 특징은 응답하지 않는다. 미리보기 URL은 별도로 발급하고 영구 저장하지 않는다. `locker_number`는 개방 성공이 저장된 `awaiting_deposit`/`stored` 상태에서 종료되지 않은 사물함 배정이 있을 때만 반환한다.
+
+수령 완료 후에도 등록 조회는 200으로 응답한다. 등록 `status`는 `stored`로 유지되지만 배정이 종료되므로 `locker_number`는 `null`이다. 사진 목록과 분석 상태 등 등록 정보는 유지되며, 같은 칸에 다른 물품이 배정되어도 이전 등록의 `locker_number`는 `null`이다. 수령 완료 여부는 수령 API의 `item_status`/`assignment_status`가 `retrieved`인지로 확인한다.
 
 ## 순서와 중복 요청
 

@@ -36,6 +36,11 @@ def test_full_pickup_releases_the_locker(env):
     item_id = stored(env)
     with Session(env.engine) as session:
         assert len(search_stored_items(session)) == 1
+        registration_id = session.get(FoundItem, UUID(item_id)).registration_id
+    registration_url = f"/api/registrations/{registration_id}"
+    before_pickup = env.client.get(registration_url)
+    assert before_pickup.status_code == 200
+    assert before_pickup.json()["locker_number"] == 1
     code = issue(env, item_id)
 
     opened = env.client.post("/api/pickup/open", json={"code": code, "kiosk_id": env.kiosk_id})
@@ -44,6 +49,7 @@ def test_full_pickup_releases_the_locker(env):
     assert body["locker_number"] == 1
     assert (body["item_status"], body["assignment_status"]) == ("stored", "awaiting_pickup")
     assert len(env.gateway.opens) == 2  # deposit open, then pickup open
+    assert env.client.get(registration_url).json() == before_pickup.json()
     with Session(env.engine) as session:
         # An item on its way out is no longer offered by search.
         assert search_stored_items(session) == []
@@ -58,9 +64,15 @@ def test_full_pickup_releases_the_locker(env):
         assignment = session.scalar(select(StorageAssignment))
         assert assignment.ended_at is not None
         assert search_stored_items(session) == []
+    # Registration history remains readable after its active assignment ends.
+    after_pickup = env.client.get(registration_url)
+    assert after_pickup.status_code == 200, after_pickup.text
+    expected_registration = {**before_pickup.json(), "locker_number": None}
+    assert after_pickup.json() == expected_registration
     # The released locker is immediately reusable by a new registration.
     again = ready(env)
     assert env.client.post(f"/api/registrations/{again}/deposit/open").json()["locker_number"] == 1
+    assert env.client.get(registration_url).json() == expected_registration
 
 
 def test_code_is_single_use_and_replays_a_finished_open(env):

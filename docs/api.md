@@ -61,6 +61,38 @@
 - 촬영·개방 실패는 `blocked`로 두고 자동 재시도하지 않는다. 통신 단절·잘못된 성공 응답은 명령 `unknown`, 명시적 장치 오류는 `failed`로 저장한다. 개방 배정은 유지한다. 실패 후 복구·예약 해제·재촬영 정책은 미정이다.
 - 프로세스 종료나 DB 장애로 외부 호출 결과를 기록하지 못하면 `capturing/analyzing/opening` 및 `sent`가 남을 수 있다. 재요청으로 하드웨어를 다시 실행하지 않는다. 운영 복구 API는 아직 없다.
 
+## 등록 ID로 사진 분석·DB 저장 확인
+
+`POST /api/registrations/{id}/analysis`는 요청 본문 없이 호출한다. 서버가 `item_images`에서 해당 등록의 사진 2장을 `shot_order` 순서로 조회하고, 저장된 객체 키로 S3 JPEG를 읽는다. 두 사진 전처리 → Gemini 통합 요청 → 특징 JSON 검증 후 `registrations.analysis_features`에 아래 8개 필드를 직접 저장한다. `data`로 다시 감싸지 않는다.
+
+```json
+{
+  "category": "laptop",
+  "color": ["silver"],
+  "shape": "얇은 직사각형",
+  "surface_texture": "매끄러운 표면",
+  "brand": "Samsung",
+  "visible_text": ["SAMSUNG"],
+  "structure": ["힌지"],
+  "distinctive_features": null
+}
+```
+
+이는 저장 형식 예시다. 관찰할 수 없는 특징은 `null`이며, `analysis_input_image_ids`에는 실제 DB 사진 ID 2개를 촬영 순서대로 기록한다. 분석 성공 응답은 기존 등록 응답과 같으며 `status=ready`, `analysis_status=succeeded`가 된다. 전체 특징은 비공개 소유 확인 근거가 될 수 있어 공개 API 응답에는 포함하지 않는다.
+
+실패한 분석은 `draft/failed`로 돌아가 같은 요청으로 재시도할 수 있다. `ready/succeeded` 상태에서 재요청하면 저장된 성공 상태를 반환하며 S3·Gemini를 다시 호출하지 않는다. 보관이 시작된 등록을 재분석하는 API는 제공하지 않는다.
+
+EC2에서 실제 저장 JSON을 확인하려면 등록 분석 요청 후 운영자 DB 조회 명령을 사용한다. 이 명령은 AI·장치를 호출하거나 DB를 변경하지 않는다. `verified=true`는 분석 성공 상태, 사진 ID·순서 일치, 8개 특징 필드의 형식 검증을 뜻하며 인식 정확도 판정은 아니다.
+
+```bash
+curl --fail-with-body --max-time 120 -X POST \
+  http://127.0.0.1/api/registrations/REGISTRATION_ID/analysis
+
+cd /opt/smart-lost-found/current
+docker compose --project-name smart-lost-found-prod --env-file compose.env -f compose.yaml \
+  exec -T backend python -m app.inspect_analysis REGISTRATION_ID --require-succeeded
+```
+
 ## 수령 (분실자)
 
 소유 확인을 통과한 물건에 일회성 반환 코드를 발급하고, 키오스크에서 그 코드로 보관함을 연다.

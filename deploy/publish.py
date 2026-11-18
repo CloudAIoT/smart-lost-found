@@ -58,7 +58,8 @@ def main():
     payload["BUSINESS_API_ENABLED"] = os.environ.get("BUSINESS_API_ENABLED", "false")
     # 비어 있는 선택 설정은 런타임 구성에서 생략한다.
     for key in ("COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES", "PREVIEW_TTL_SECONDS",
-               "RETURN_CODE_TTL_SECONDS", "PI_DEVICES", "GEMINI_API_KEY", "GEMINI_MODEL"):
+               "RETURN_CODE_TTL_SECONDS", "PI_DEVICES", "GEMINI_API_KEY", "GEMINI_MODEL",
+               "IMAGE_ANALYSIS_TIMEOUT_SECONDS"):
         value = os.environ.get(key, "")
         if value:
             payload[key] = value

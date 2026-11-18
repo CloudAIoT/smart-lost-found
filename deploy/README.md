@@ -40,6 +40,9 @@ Swagger 주소는 `http://52.78.12.168/docs`다. 업무 API는 GitHub production
 | Variable | RETURN_CODE_TTL_SECONDS | 반환 코드 유효 시간(초) |
 | Secret | GEMINI_API_KEY | 등록 사진 분석과 분실물 검색·문답 생성용 Gemini 키 |
 | Variable | GEMINI_MODEL | 같은 흐름에 사용할 Gemini 모델 이름 |
+| Variable | IMAGE_ANALYSIS_TIMEOUT_SECONDS | 사진 2장 분석 대기 시간. 기본 90초, 허용 5~90초. 소유 확인 텍스트 요청의 대기 시간과 별도 |
+
+로컬 `backend/.env`의 Gemini 설정은 EC2에 자동으로 전달되지 않는다. 위 GitHub production Secret·Variable을 설정하고 배포해야 SSM SecureString과 런타임 환경에 반영된다. 사진 분석 경로의 Nginx 응답 대기 시간은 120초다. 배포 후 등록 ID로 호출하고 저장 JSON을 읽는 방법은 [분석·DB 저장 확인](../docs/api.md#등록-id로-사진-분석db-저장-확인)을 따른다.
 
 Pi 설정 6종은 모두 선택값이다. 전부 비우면 지금처럼 Pi·수령 기능이 미설정 오류를 낸다. 하나라도
 빈 문자열로 두면 그 키 자체를 보내지 않는다(`deploy/publish.py`). `PI_DEVICES`는 EC2가 두 Pi와

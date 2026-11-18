@@ -1,13 +1,16 @@
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
+import base64
 import json
 import sys
 from threading import Barrier
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+import httpx
 from PIL import Image
+from pydantic import SecretStr
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -16,7 +19,8 @@ from sqlalchemy.orm import Session
 from app.api import get_analyzer, get_gateway, get_store
 from app.config import Settings, get_settings
 from app.db import Base, get_session
-from app.integrations import AnalysisResult, IntegrationError
+from app.integrations import AnalysisResult, IntegrationError, S3ImageStore
+from app.inspect_analysis import inspect_analysis
 from app.main import app
 from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, StorageAssignment
 from app.services import BusinessError, complete_deposit, open_deposit, search_stored_items
@@ -207,6 +211,79 @@ def test_order_and_analysis_gates(env):
     assert env.gateway.opens == []
     env.analyzer.wrong_images = False
     assert env.client.post(base + "/analysis").status_code == 200
+
+
+@pytest.mark.parametrize("first_failure", [None, "provider", "schema"])
+def test_registration_api_reads_two_s3_photos_and_persists_gemini_json(env, monkeypatch, first_failure):
+    value = start(env)
+    base = f"/api/registrations/{value}"
+    for shot, color in enumerate(("red", "blue"), 1):
+        with Image.new("RGB", (2304, 1296), color=color) as photo, BytesIO() as jpeg:
+            photo.save(jpeg, format="JPEG")
+            env.gateway.jpeg = jpeg.getvalue()
+        assert env.client.post(f"{base}/shots/{shot}").status_code == 200
+    features = {
+        "category": "laptop", "color": ["silver"], "shape": "직사각형",
+        "surface_texture": "매끄러운 표면", "brand": "Samsung", "visible_text": ["SAMSUNG"],
+        "structure": ["힌지"], "distinctive_features": ["왼쪽 모서리의 작은 흠집"],
+    }
+    requests, reads = [], []
+
+    def respond(request):
+        requests.append(request)
+        assert request.extensions["timeout"]["read"] == 90
+        parts = json.loads(request.content)["contents"][0]["parts"]
+        assert len(parts) == 3
+        for part, channel in zip(parts[1:], (0, 2)):
+            with Image.open(BytesIO(base64.b64decode(part["inline_data"]["data"]))) as photo:
+                assert photo.size == (1280, 720)
+                assert photo.getpixel((10, 10))[channel] > 200
+        if len(requests) == 1 and first_failure == "provider":
+            return httpx.Response(503, json={"error": {"message": "temporarily unavailable"}})
+        data = {**features, "color": 123} if len(requests) == 1 and first_failure == "schema" else features
+        return httpx.Response(200, json={"candidates": [{
+            "finishReason": "STOP", "content": {"parts": [{"text": json.dumps(data)}]},
+        }]})
+
+    class S3:
+        def get_object(self, *, Bucket, Key):
+            assert Bucket == "test-bucket"
+            reads.append(Key)
+            return {"Body": BytesIO(env.store.objects[Key])}
+
+    real_client = httpx.Client
+    monkeypatch.setattr("app.api.httpx.Client", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(respond), **kwargs))
+    env.settings.gemini_api_key = SecretStr("test-key")
+    env.settings.gemini_model = "test-model"
+    del app.dependency_overrides[get_analyzer]
+    app.dependency_overrides[get_store] = lambda: S3ImageStore(S3(), "test-bucket", 60, 1024 * 1024)
+
+    response = env.client.post(base + "/analysis")
+    if first_failure:
+        assert response.status_code == 502
+        with Session(env.engine) as session:
+            row = session.get(Registration, UUID(value))
+            assert (row.status, row.analysis_status, row.analysis_features) == ("draft", "failed", None)
+        response = env.client.post(base + "/analysis")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "ready"
+    assert response.json()["analysis_status"] == "succeeded"
+    assert "analysis_features" not in response.json()
+    assert "왼쪽 모서리" not in response.text
+    with Session(env.engine) as session:
+        report = inspect_analysis(session, UUID(value))
+        assert report["verified"]
+        assert report["analysis_features"] == features
+        assert report["analysis_input_image_ids"] == [image["id"] for image in response.json()["images"]]
+        keys = list(session.scalars(select(ItemImage.object_key).where(
+            ItemImage.registration_id == UUID(value)).order_by(ItemImage.shot_order)))
+    call_count = 2 if first_failure else 1
+    assert reads == keys * call_count
+    assert env.client.post(base + "/analysis").status_code == 200
+    assert len(requests) == call_count
+    assert len(reads) == 2 * call_count
+    assert env.settings.gemini_timeout_seconds == 30
 
 
 def deeply_nested_features():

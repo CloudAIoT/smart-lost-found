@@ -45,8 +45,11 @@ def get_analyzer(registration_id: UUID, session: DB, settings: Config):
     category = session.scalar(select(Category.name).join(
         Registration, Registration.primary_category_id == Category.id
     ).where(Registration.id == registration_id))
+    analysis_settings = settings.model_copy(update={
+        "gemini_timeout_seconds": settings.image_analysis_timeout_seconds,
+    })
     with httpx.Client(trust_env=False) as client:
-        yield GeminiPhotoAnalyzer(GeminiWorkflowAI(settings, client), category)
+        yield GeminiPhotoAnalyzer(GeminiWorkflowAI(analysis_settings, client), category)
 
 
 Gateway = Annotated[object, Depends(get_gateway)]

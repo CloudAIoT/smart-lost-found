@@ -23,6 +23,8 @@ class GeminiSettings(BaseSettings):
 
 
 class Settings(GeminiSettings):
+    # Two-photo inference may take longer than ownership text requests.
+    image_analysis_timeout_seconds: int = Field(default=90, ge=5, le=90)
     postgres_db: str
     postgres_user: str
     postgres_password: SecretStr

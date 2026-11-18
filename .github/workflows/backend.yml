@@ -99,6 +99,7 @@ jobs:
       PREVIEW_TTL_SECONDS: ${{ vars.PREVIEW_TTL_SECONDS }}
       RETURN_CODE_TTL_SECONDS: ${{ vars.RETURN_CODE_TTL_SECONDS }}
       GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+      IMAGE_ANALYSIS_TIMEOUT_SECONDS: ${{ vars.IMAGE_ANALYSIS_TIMEOUT_SECONDS || '90' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

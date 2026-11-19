@@ -75,7 +75,7 @@ def capture(session: Session, registration_id: UUID, shot: int, gateway: DeviceG
     session.commit()
     # IDs and intent have been committed before the first external call.
     try:
-        jpeg = gateway.capture(reg.kiosk_id, command.command_id, registration_id, expires_at)
+        jpeg = gateway.capture(reg.kiosk_id, command.command_id, registration_id, expires_at, shot)
         validate_jpeg(jpeg, max_bytes)
         received = now()
         key = f"registrations/{registration_id}/{command.command_id}.jpg"

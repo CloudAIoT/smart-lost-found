@@ -33,6 +33,8 @@ class Settings(GeminiSettings):
     # Local fixtures remain separate from deployed API access.
     local_development: bool = False
     business_api_enabled: bool = False
+    # Development stand-in for the Pi. Never enable it where real storage is operated.
+    dev_fake_device: bool = False
     s3_bucket: str | None = None
     s3_region: str | None = None
     preview_ttl_seconds: int | None = Field(default=None, gt=0)

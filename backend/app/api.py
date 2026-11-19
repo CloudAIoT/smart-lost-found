@@ -13,6 +13,7 @@ from app.ai_ownership_verification.workflow import authorize_return_code
 from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
 from app.config import Settings, get_settings
 from app.db import get_session
+from app.dev_device import FakeDeviceGateway
 from app.integrations import IntegrationError, PiGateway, UnconfiguredAnalyzer, make_store
 from app.models import Category, FoundItem, Kiosk, Locker, Registration
 from app.photo_analysis import GeminiPhotoAnalyzer
@@ -29,7 +30,11 @@ DB = Annotated[Session, Depends(get_session)]
 Config = Annotated[Settings, Depends(get_settings)]
 
 
-def get_gateway(settings: Config) -> Generator[PiGateway, None, None]:
+def get_gateway(settings: Config) -> Generator[object, None, None]:
+    # Development only: an explicit setting replaces the Pi, never a device failure.
+    if settings.dev_fake_device:
+        yield FakeDeviceGateway()
+        return
     with httpx.Client(trust_env=False) as client:
         yield PiGateway(settings, client)
 

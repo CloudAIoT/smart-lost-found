@@ -36,8 +36,8 @@ class FakeDevice:
         self.error = None
         self.on_open = None
 
-    def capture(self, kiosk_id, command_id, registration_id, expires_at):
-        self.captures.append((kiosk_id, command_id, registration_id))
+    def capture(self, kiosk_id, command_id, registration_id, expires_at, shot_order):
+        self.captures.append((kiosk_id, command_id, registration_id, shot_order))
         self.expiries.append(expires_at)
         if self.error:
             raise self.error
@@ -148,6 +148,7 @@ def test_full_deposit_and_duplicates(env):
     assert len(env.gateway.captures) == 2
     assert env.gateway.captures[0][1] != env.gateway.captures[1][1]
     assert env.gateway.captures[0][2] == env.gateway.captures[1][2]
+    assert [capture[3] for capture in env.gateway.captures] == [1, 2]
     assert env.client.post(base + "/shots/1").status_code == 200
     assert len(env.gateway.captures) == 2
     assert env.client.post(base + "/analysis").status_code == 200

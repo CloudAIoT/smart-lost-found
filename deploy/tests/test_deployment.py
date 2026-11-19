@@ -52,6 +52,15 @@ def test_runtime_api_switch_and_legacy_config(tmp_path, enabled):
     assert "BUSINESS_API_ENABLED" not in (tmp_path / "db.env").read_text()
 
 
+def test_fake_device_is_absent_unless_requested(tmp_path):
+    config = payload()
+    render(config, tmp_path)
+    assert "DEV_FAKE_DEVICE" not in (tmp_path / "backend.env").read_text()
+    config["DEV_FAKE_DEVICE"] = "true"
+    render(config, tmp_path)
+    assert "DEV_FAKE_DEVICE=true" in (tmp_path / "backend.env").read_text()
+
+
 def test_pi_settings_are_optional_and_render_when_given(tmp_path):
     config = payload()
     config["COMMAND_TTL_SECONDS"] = "30"

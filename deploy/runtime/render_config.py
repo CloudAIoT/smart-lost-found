@@ -12,7 +12,7 @@ import boto3
 REQUIRED = {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "S3_BUCKET", "S3_REGION"}
 OPTIONAL = {"BUSINESS_API_ENABLED", "COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES",
             "PREVIEW_TTL_SECONDS", "RETURN_CODE_TTL_SECONDS", "PI_DEVICES", "GEMINI_API_KEY", "GEMINI_MODEL",
-            "IMAGE_ANALYSIS_TIMEOUT_SECONDS"}
+            "IMAGE_ANALYSIS_TIMEOUT_SECONDS", "DEV_FAKE_DEVICE"}
 
 
 def render(payload: dict, output: Path) -> None:
@@ -21,6 +21,9 @@ def render(payload: dict, output: Path) -> None:
     payload = {"BUSINESS_API_ENABLED": "false", **payload}
     if payload["BUSINESS_API_ENABLED"] not in ("true", "false"):
         raise ValueError("BUSINESS_API_ENABLED must be true or false")
+    # Development stand-in for the Pi. Only an explicit "true" enables it.
+    if payload.get("DEV_FAKE_DEVICE", "false") not in ("true", "false"):
+        raise ValueError("DEV_FAKE_DEVICE must be true or false")
     for key, value in payload.items():
         if not isinstance(value, str) or not value or any(c in value for c in "\r\n\0"):
             raise ValueError(f"Invalid deployment setting: {key}")

@@ -33,7 +33,7 @@ def test_pi_capture_wire_contract():
     kiosk, gateway = pi(handler)
     reg = uuid4()
     expiry = datetime.now(timezone.utc)
-    assert gateway.capture(kiosk, "cmd-1", reg, expiry) == b"jpeg from Pi"
+    assert gateway.capture(kiosk, "cmd-1", reg, expiry, 1) == b"jpeg from Pi"
     assert len(observed) == 1
     assert observed[0].url == "http://capture.test/capture"
     assert json.loads(observed[0].content) == {"command_id": "cmd-1", "registration_id": str(reg), "expires_at": expiry.isoformat()}
@@ -81,7 +81,7 @@ def test_device_timeout_is_not_retried():
 def test_definite_error_keeps_error_code():
     kiosk, gateway = pi(lambda request: httpx.Response(409, json={"detail": {"code": "DEVICE_BUSY", "message": "secret"}}))
     with pytest.raises(IntegrationError) as caught:
-        gateway.capture(kiosk, "cmd", uuid4(), datetime.now(timezone.utc))
+        gateway.capture(kiosk, "cmd", uuid4(), datetime.now(timezone.utc), 1)
     assert caught.value.code == "DEVICE_BUSY"
     assert not caught.value.uncertain
 
@@ -90,13 +90,13 @@ def test_wrong_role_stops_before_hardware_command():
     kiosk, gateway = pi(lambda request: pytest.fail("Must not call hardware"))
     gateway.settings.pi_devices[str(kiosk)]["capture_url"] = "http://locker.test"
     with pytest.raises(IntegrationError, match="DEVICE_ROLE_MISMATCH"):
-        gateway.capture(kiosk, "cmd", uuid4(), datetime.now(timezone.utc))
+        gateway.capture(kiosk, "cmd", uuid4(), datetime.now(timezone.utc), 1)
 
 
 def test_large_capture_is_bounded():
     kiosk, gateway = pi(lambda request: httpx.Response(200, headers={"content-type": "image/jpeg"}, content=b"x" * 4097))
     with pytest.raises(IntegrationError, match="DEVICE_RESPONSE_TOO_LARGE"):
-        gateway.capture(kiosk, "cmd", uuid4(), datetime.now(timezone.utc))
+        gateway.capture(kiosk, "cmd", uuid4(), datetime.now(timezone.utc), 1)
 
 
 def test_s3_private_object_and_short_lived_preview():

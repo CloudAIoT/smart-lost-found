@@ -5,7 +5,8 @@ from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy.orm import Session
 
-from app.models import Category, FoundItem, Kiosk, Locker, Registration, StorageAssignment, now
+from app.dev_device import ASSETS
+from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, StorageAssignment, now
 
 
 def ident(label):
@@ -16,12 +17,14 @@ def seed(session: Session):
     categories = {}
     mapping = {}
     counts = Counter()
+    sample_size = (ASSETS / "fake_capture_1.jpg").stat().st_size
     kiosk = Kiosk(id=ident("kiosk"), name="합성 보관 키오스크", location_description="합성 체육관")
     session.add(kiosk)
     session.flush()
 
     def add(code, group, category, name, *, color="black", material="fabric", brand="Generic",
-            mark=None, feature=None, location="학생회관 입구", private=(), invalid=None, omit=()):
+            mark=None, feature=None, shape=None, texture=None, structure=None,
+            location="학생회관 입구", private=(), invalid=None, omit=()):
         if category not in categories:
             row = Category(id=ident(f"category-{category}"), code=category, name=name)
             session.add(row)
@@ -29,6 +32,7 @@ def seed(session: Session):
             categories[category] = row.id
         raw = {
             "category": category, "color": [color] if color else [], "material": material,
+            "shape": shape, "surface_texture": texture, "structure": structure,
             "brand": brand, "visible_text": [mark] if mark else [], "distinctive_features": [feature] if feature else [],
             "description": f"합성 등록 물품 {name}. 색상: {color or '미상'}.",
         }
@@ -42,7 +46,7 @@ def seed(session: Session):
         reg_status = "awaiting_deposit" if invalid == "unplaced" else "stored"
         reg = Registration(id=ident(f"reg-{code}"), kiosk_id=kiosk.id, primary_category_id=categories[category],
                            found_location=location, status=reg_status, analysis_status="succeeded",
-                           analysis_features={"data": raw, "ownership_evidence": proof})
+                           analysis_features={"data": raw, "ownership_evidence": proof} if proof else raw)
         locker = Locker(id=ident(f"locker-{code}"), kiosk_id=kiosk.id, locker_number=len(mapping) + 1)
         session.add_all([reg, locker])
         session.flush()
@@ -52,16 +56,31 @@ def seed(session: Session):
         session.add(StorageAssignment(id=ident(f"assignment-{code}"), found_item_id=item.id, locker_id=locker.id,
                                       status="cancelled" if invalid == "ended" else reg_status,
                                       ended_at=now() if invalid == "ended" else None))
+        capture = DeviceCommand(command_id=str(ident(f"capture-{code}")), registration_id=reg.id,
+                                action="capture", shot_order=1, status="succeeded", expires_at=now())
+        session.add(capture)
+        session.flush()
+        session.add(ItemImage(registration_id=reg.id, capture_command_id=capture.command_id,
+                              shot_order=1, object_key=f"synthetic/{code}.jpg",
+                              byte_size=sample_size, received_at=now()))
         mapping[str(item.id)] = code
         counts[group] += 1
 
-    add("N01", "normal", "notebook", "수첩", mark="QX", feature="물방울 배지", private=("visible_text", "distinctive_features"))
-    normal_sets = [("bag", "가방"), ("keys", "열쇠"), ("phone", "휴대폰"), ("glasses", "안경"), ("card_case", "카드지갑")]
+    add("N01", "normal", "notebook", "수첩", color=None, material=None, brand=None, mark="QX", feature="물방울 배지",
+        private=("visible_text", "distinctive_features"))
+    normal_sets = [
+        ("bag", "가방", "직사각형", "지퍼"),
+        ("keys", "열쇠", "불규칙형", "고리"),
+        ("phone", "휴대폰", "직사각형", "버튼"),
+        ("glasses", "안경", "타원형", "접이식 다리"),
+        ("card_case", "카드지갑", "직사각형", "카드 슬롯"),
+    ]
     for n in range(2, 26):
-        code, name = normal_sets[(n - 2) % len(normal_sets)]
+        code, name, shape, structure = normal_sets[(n - 2) % len(normal_sets)]
         add(f"N{n:02}", "normal", code, name, color=["black", "white", "blue", "red"][n % 4],
             material=["fabric", "leather", "metal", "plastic"][n % 4],
             brand=["Nike", "Adidas", "Muji", "Generic"][n % 4],
+            shape=shape, texture=["직조 표면", "매끄러운 표면", "광택 표면"][n % 3], structure=[structure],
             location=["학생회관 입구", "중앙도서관 1층", "공학관 복도"][n % 3])
 
     add("P01", "similar", "pencil_case", "필통", color="navy", material="fabric", brand="Carhartt",
@@ -76,7 +95,8 @@ def seed(session: Session):
         add(f"B{n:02}", "similar", "bag", "가방", feature="작은 고리", brand="Generic")
         add(f"W{n:02}", "similar", "wallet", "지갑", mark="AB" if n < 3 else "CD",
             feature="은색 나뭇잎" if n < 3 else "갈색 고리", private=("distinctive_features", "visible_text"))
-        add(f"T{n:02}", "similar", "water_bottle", "물병", material="plastic", brand=None, color="blue")
+        add(f"T{n:02}", "similar", "water_bottle", "물병", material=None, brand=None, color="blue",
+            shape="원통형" if n == 1 else "직육면체")
 
     add("M01", "missing", "earbuds", "이어폰", color="white", material="unknown", brand=None, location=None)
     add("M02", "missing", "earbuds", "이어폰", color="black", material="unknown", brand=None, location=None)

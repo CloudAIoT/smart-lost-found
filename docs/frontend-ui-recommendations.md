@@ -10,7 +10,7 @@
 
 - React 19, Vite, Tailwind CSS 3.4, lucide-react 아이콘, Pretendard 글꼴을 쓴다. UI 라이브러리 없이 `App.jsx` 하나에 화면이 모여 있다.
 - 어두운 slate 바탕에 주 색은 indigo, 성공은 emerald, 오류는 rose를 쓴다.
-- 키오스크는 터치 화면이 아니라 24인치 모니터와 키보드·마우스로 쓴다.
+- 키오스크 화면은 촬영 상자 옆 아이패드로 띄운다(2026-11-18 회의). 손가락으로 누르는 터치 화면이다.
 
 고른 기준은 네 가지다.
 
@@ -193,9 +193,9 @@ confetti({ particleCount: 80, spread: 70, origin: { y: 0.7 }, disableForReducedM
 
 ## 문구와 접근성
 
-- 키오스크 첫 화면의 "원하시는 작업의 버튼을 터치해 주세요."는 "눌러 주세요."로 바꾼다. 터치 화면이 아니다.
-- 키보드로 옮겨 다닐 때 위치가 보이도록 버튼에 `focus-visible:ring-2 focus-visible:ring-indigo-400`을 붙인다. 지금은 `focus-visible`이 한 군데도 없다.
-- 키오스크 화면의 `text-xs` 문구가 41곳이다. 모니터에서 한 걸음 떨어져 읽는 핵심 안내는 `text-sm` 이상이 낫다.
+- 키오스크는 아이패드에서 손가락으로 누르므로 버튼과 보기 카드를 넉넉하게 둔다. 애플은 누르는 영역을 최소 44×44pt로 권한다.
+- 웹 포털을 키보드로 쓰는 사람도 위치를 알 수 있게 버튼에 `focus-visible:ring-2 focus-visible:ring-indigo-400`을 붙인다. 지금은 `focus-visible`이 한 군데도 없다.
+- 키오스크 화면의 `text-xs` 문구가 41곳이다. 아이패드를 세워 두고 서서 읽으므로 핵심 안내는 `text-sm` 이상이 낫다.
 - `animate-bounce`, `animate-pulse` 앞에 `motion-safe:`를 붙이면, 움직임을 줄이도록 설정한 사용자에게는 멈춰 보인다.
 
 ## 사이트별 확인 결과
@@ -220,6 +220,6 @@ confetti({ particleCount: 80, spread: 70, origin: { y: 0.7 }, disableForReducedM
 
 ## 들이는 순서 제안
 
-1. 패키지 없이 바로: 문구, `focus-visible`, `motion-safe:`, 보관함 LED 색, 분석 문구, 고른 보기 강조
+1. 패키지 없이 바로: 누르는 영역 크기, `focus-visible`, `motion-safe:`, 보관함 LED 색, 분석 문구, 고른 보기 강조
 2. 패키지 하나씩: input-otp, sonner
 3. 여유가 있으면: 등록 단계 표시, 완료 효과

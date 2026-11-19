@@ -130,6 +130,7 @@ const ERROR_MESSAGES = {
   CAPTURE_NOT_CONFIGURED: '촬영 장치가 설정되지 않았습니다.',
   IMAGE_STORAGE_NOT_CONFIGURED: '사진 저장소가 설정되지 않았습니다.',
   OWNERSHIP_ATTEMPT_EXPIRED: '확인 시간이 지났습니다. 검색을 다시 시작해 주세요.',
+  OWNERSHIP_ATTEMPT_RESTART_REQUIRED: '소유 확인 방식이 업데이트됐습니다. 검색을 다시 시작해 주세요.',
   OWNERSHIP_RETURN_CODE_ALREADY_ISSUED: '이 소유 확인에서 이미 OTP가 발급됐습니다.',
   OWNERSHIP_ITEM_NO_LONGER_AVAILABLE: '이 물건은 현재 수령할 수 없습니다.',
   OWNERSHIP_AI_NOT_CONFIGURED: '분실물 검색 또는 이미지 분석 서비스가 설정되지 않았습니다.',

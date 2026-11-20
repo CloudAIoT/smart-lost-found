@@ -11,7 +11,7 @@ from enum import IntEnum
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import create_app, make_lockers
+from app.main import create_app
 from conftest import HEADERS, later, make_settings
 
 
@@ -113,8 +113,3 @@ def test_real_mode_capture_pi_uses_pi_camera(camera_module):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
     assert isinstance(client.app.state.camera, camera_module.PiCamera)
-
-
-def test_real_mode_locker_pi_refuses_to_start():
-    with pytest.raises(RuntimeError):
-        make_lockers(make_settings("locker", fake_hardware=False))

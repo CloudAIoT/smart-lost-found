@@ -25,11 +25,12 @@
 {
   "kiosk_id": "00000000-0000-0000-0000-000000000001",
   "primary_category_id": null,
-  "secondary_description": "사용자가 입력한 특징"
+  "secondary_description": "사용자가 입력한 특징",
+  "found_location": "도서관 입구"
 }
 ```
 
-`kiosk_id`는 DB에 있어야 한다. 나머지 두 항목은 생략 가능하다. 카테고리를 지정하면 DB에 있는 ID여야 한다. 자유 입력은 개발용 요청 크기 제한으로 최대 2,000자이며 최종 UI 계약은 별도 협의한다. 알 수 없는 필드는 422이다. 최초 등록 생성 POST 자체는 멱등 요청이 아니므로 FE는 받은 ID를 보관하고 후속 요청에 재사용한다.
+`kiosk_id`는 DB에 있어야 한다. 나머지 필드는 생략할 수 있다. 카테고리를 지정하면 DB에 있는 ID여야 한다. 추가 설명은 최대 2,000자, 습득 위치는 최대 200자다. 알 수 없는 필드는 422다. 최초 등록 후 FE는 받은 ID를 후속 요청에 재사용한다.
 
 생성·등록 조회·촬영·분석·개방·완료의 공통 응답:
 
@@ -39,6 +40,7 @@
   "kiosk_id": "00000000-0000-0000-0000-000000000001",
   "primary_category_id": null,
   "secondary_description": "사용자가 입력한 특징",
+  "found_location": "도서관 입구",
   "status": "draft",
   "analysis_status": "pending",
   "images": [],
@@ -46,7 +48,9 @@
 }
 ```
 
-사진 응답 항목은 `{"id":"UUID","shot_order":1}`이다. S3 객체 키·AI 특징은 응답하지 않는다. 미리보기 URL은 별도로 발급하고 영구 저장하지 않는다. `locker_number`는 개방 성공이 저장된 `awaiting_deposit`/`stored`에서만 반환한다.
+사진 응답 항목은 `{"id":"UUID","shot_order":1}`이다. S3 객체 키·AI 특징은 응답하지 않는다. 미리보기 URL은 별도로 발급하고 영구 저장하지 않는다. `locker_number`는 개방 성공이 저장된 `awaiting_deposit`/`stored` 상태에서 종료되지 않은 사물함 배정이 있을 때만 반환한다.
+
+수령 완료 후에도 등록 조회는 200으로 응답한다. 등록 `status`는 `stored`로 유지되지만 배정이 종료되므로 `locker_number`는 `null`이다. 사진 목록과 분석 상태 등 등록 정보는 유지되며, 같은 칸에 다른 물품이 배정되어도 이전 등록의 `locker_number`는 `null`이다. 수령 완료 여부는 수령 API의 `item_status`/`assignment_status`가 `retrieved`인지로 확인한다.
 
 ## 순서와 중복 요청
 
@@ -59,6 +63,38 @@
 - 촬영·개방 실패는 `blocked`로 두고 자동 재시도하지 않는다. 통신 단절·잘못된 성공 응답은 명령 `unknown`, 명시적 장치 오류는 `failed`로 저장한다. 개방 배정은 유지한다. 실패 후 복구·예약 해제·재촬영 정책은 미정이다.
 - 프로세스 종료나 DB 장애로 외부 호출 결과를 기록하지 못하면 `capturing/analyzing/opening` 및 `sent`가 남을 수 있다. 재요청으로 하드웨어를 다시 실행하지 않는다. 운영 복구 API는 아직 없다.
 
+## 등록 ID로 사진 분석·DB 저장 확인
+
+`POST /api/registrations/{id}/analysis`는 요청 본문 없이 호출한다. 서버가 `item_images`에서 해당 등록의 사진 2장을 `shot_order` 순서로 조회하고, 저장된 객체 키로 S3 JPEG를 읽는다. 두 사진 전처리 → Gemini 통합 요청 → 특징 JSON 검증 후 `registrations.analysis_features`에 아래 8개 필드를 직접 저장한다. `data`로 다시 감싸지 않는다.
+
+```json
+{
+  "category": "laptop",
+  "color": ["silver"],
+  "shape": "얇은 직사각형",
+  "surface_texture": "매끄러운 표면",
+  "brand": "Samsung",
+  "visible_text": ["SAMSUNG"],
+  "structure": ["힌지"],
+  "distinctive_features": null
+}
+```
+
+이는 저장 형식 예시다. 관찰할 수 없는 특징은 `null`이며, `analysis_input_image_ids`에는 실제 DB 사진 ID 2개를 촬영 순서대로 기록한다. 분석 성공 응답은 기존 등록 응답과 같으며 `status=ready`, `analysis_status=succeeded`가 된다. 전체 특징은 비공개 소유 확인 근거가 될 수 있어 공개 API 응답에는 포함하지 않는다.
+
+실패한 분석은 `draft/failed`로 돌아가 같은 요청으로 재시도할 수 있다. `ready/succeeded` 상태에서 재요청하면 저장된 성공 상태를 반환하며 S3·Gemini를 다시 호출하지 않는다. 보관이 시작된 등록을 재분석하는 API는 제공하지 않는다.
+
+EC2에서 실제 저장 JSON을 확인하려면 등록 분석 요청 후 운영자 DB 조회 명령을 사용한다. 이 명령은 AI·장치를 호출하거나 DB를 변경하지 않는다. `verified=true`는 분석 성공 상태, 사진 ID·순서 일치, 8개 특징 필드의 형식 검증을 뜻하며 인식 정확도 판정은 아니다.
+
+```bash
+curl --fail-with-body --max-time 120 -X POST \
+  http://127.0.0.1/api/registrations/REGISTRATION_ID/analysis
+
+cd /opt/smart-lost-found/current
+docker compose --project-name smart-lost-found-prod --env-file compose.env -f compose.yaml \
+  exec -T backend python -m app.inspect_analysis REGISTRATION_ID --require-succeeded
+```
+
 ## 수령 (분실자)
 
 소유 확인을 통과한 물건에 일회성 반환 코드를 발급하고, 키오스크에서 그 코드로 보관함을 연다.
@@ -66,7 +102,9 @@
 
 | 메서드 | 경로 | 입력·출력 |
 | --- | --- | --- |
-| POST | `/api/found-items/{found_item_id}/return-code` | 보관 중인 물건에 201 `{"found_item_id","code","expires_at"}` |
+| POST | `/api/ownership/attempts` | `{"description":"도서관에서 남색 필통을 잃어버렸어요"}` → 질문 또는 검색 결과 |
+| POST | `/api/ownership/attempts/{attempt_id}/answers` | `{"question_id":"UUID","option_id":"UUID"}` → 다음 질문 또는 최종 판정 |
+| POST | `/api/found-items/{found_item_id}/return-code` | `{"attempt_id":"UUID"}` → 소유 확인에 성공한 해당 물품에 201 `{"found_item_id","code","expires_at","kiosk_name"}` |
 | POST | `/api/pickup/open` | `{"code":"...","kiosk_id":"UUID"}` → 코드 확인·보관함 개방 |
 | POST | `/api/pickup/{found_item_id}/complete` | `{"confirmed":true}` → 문 조회 → 수령 완료 |
 
@@ -82,9 +120,9 @@
 }
 ```
 
-- 코드 평문은 발급 응답에서 한 번만 받는다. 서버는 SHA-256 해시만 저장하므로 재조회 경로가 없고, 잃어버리면 재발급해야 한다. 재발급은 이전 코드를 즉시 `revoked`로 만든다.
+- 코드 평문은 발급 응답에서 한 번만 받는다. 서버는 SHA-256 해시를 저장한다. 코드를 잃어버리면 새 소유 확인을 거쳐 발급받는다. 재발급은 이전 코드를 `revoked`로 만든다.
 - 코드는 8자리 Base32(A~Z, 2~7)다. 입력의 공백·하이픈·소문자는 서버가 정규화하므로 FE가 맞출 필요는 없다.
-- 현재 발급에는 소유 확인이 없다. 보관 중(`stored`)이기만 하면 누구나 코드를 받을 수 있다. 질문·답변 평가(A04)가 정해지면 이 호출의 선행 조건이 된다. 그 전까지 공개 배포하지 않는다.
+- `found_item_id`는 소유 확인 응답의 `decision=supported`에서 받는다. 백엔드는 요청의 확인 시도와 물품이 일치하는지, 근거가 유효하고 물건이 보관 중인지 확인한다. 한 확인 시도에서 코드를 한 번 발급한다. [소유 확인 워크플로](../backend/app/ai_ownership_verification/workflow.md)
 - 물건 상태는 `stored → retrieved`, 배정 상태는 `stored → awaiting_pickup → retrieved`다. 등록(`registrations`) 상태는 수령으로 바뀌지 않는다.
 - 개방 성공 시 코드를 `used`로 처리한다. 완료된 개방을 재요청하면 문을 다시 열지 않고 같은 결과를 반환하므로 FE의 중복 클릭·새로고침은 안전하다.
 - 명확한 장치 실패는 코드를 그대로 두어 다시 시도할 수 있다. 통신 단절 등 결과 불명은 문이 이미 열렸을 수 있어 코드를 `locked`로 두고 같은 코드의 재개방을 막는다. 운영 복구 API는 아직 없다.

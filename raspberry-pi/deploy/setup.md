@@ -106,7 +106,7 @@ cp .env.example .env && chmod 600 .env          # 아래 표대로 고친다
 | 설정 | 촬영 Pi | 보관함 Pi |
 | --- | --- | --- |
 | `PI_ROLE` | `capture` | `locker` |
-| `PI_FAKE_HARDWARE` | `false` (실제 카메라) | `true` (잠금장치를 달기 전) |
+| `PI_FAKE_HARDWARE` | `false` (실제 카메라) | `false` (LED·버튼, [README의 배선](../README.md#보관함-led버튼-보관함-pi)대로 연결한 뒤) |
 | `PI_API_KEY` | 백엔드 `PI_DEVICES`의 `capture_api_key`와 같은 값 | `locker_api_key`와 같은 값 |
 
 전원을 켜면 저절로 실행되도록 서비스로 등록한다. 프로그램이 오류로 꺼지면 5초 뒤 다시 실행된다.
@@ -120,3 +120,7 @@ journalctl -u slf-pi -f       # 로그 보기
 ```
 
 코드를 고친 뒤에는 `git pull` 후 `sudo systemctl restart slf-pi`로 다시 띄운다.
+
+2026-11-13에 두 Pi에 등록했다. 촬영 Pi는 실제 카메라 모드로 돈다. 보관함 Pi는 가짜 모드로 돌다가 2026-11-17부터 실제 모드([LED·버튼](../README.md#보관함-led버튼-보관함-pi))로 돈다.
+
+2026-11-16에 전원을 다시 넣어 보니 두 Pi 모두 서비스와 Tailscale이 저절로 켜졌다. 보관함 Pi는 약 1분, 촬영 Pi는 카메라까지 약 2분 뒤부터 요청을 받는다. 시연 때는 미리 켜 둔다.

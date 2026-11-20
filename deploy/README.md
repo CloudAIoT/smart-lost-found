@@ -38,12 +38,24 @@ Swagger 주소는 `http://52.78.12.168/docs`다. 업무 API는 GitHub production
 | Variable | MAX_IMAGE_BYTES | 백엔드가 받는 촬영 사진 크기 상한 |
 | Variable | PREVIEW_TTL_SECONDS | 미리보기 서명 URL 유효 시간(초) |
 | Variable | RETURN_CODE_TTL_SECONDS | 반환 코드 유효 시간(초) |
+| Secret | GEMINI_API_KEY | 등록 사진 분석과 분실물 검색·문답 생성용 Gemini 키 |
+| Variable | GEMINI_MODEL | 같은 흐름에 사용할 Gemini 모델 이름 |
+| Variable | DEV_FAKE_DEVICE | true: Pi 대신 개발용 가짜 장치 사용. 값이 없거나 false면 실제 Pi를 호출한다 |
+| Variable | IMAGE_ANALYSIS_TIMEOUT_SECONDS | 사진 2장 분석 대기 시간. 기본 90초, 허용 5~90초. 소유 확인 텍스트 요청의 대기 시간과 별도 |
+
+로컬 `backend/.env`의 Gemini 설정은 EC2에 자동으로 전달되지 않는다. 위 GitHub production Secret·Variable을 설정하고 배포해야 SSM SecureString과 런타임 환경에 반영된다. 사진 분석 경로의 Nginx 응답 대기 시간은 120초다. 배포 후 등록 ID로 호출하고 저장 JSON을 읽는 방법은 [분석·DB 저장 확인](../docs/api.md#등록-id로-사진-분석db-저장-확인)을 따른다.
 
 Pi 설정 6종은 모두 선택값이다. 전부 비우면 지금처럼 Pi·수령 기능이 미설정 오류를 낸다. 하나라도
 빈 문자열로 두면 그 키 자체를 보내지 않는다(`deploy/publish.py`). `PI_DEVICES`는 EC2가 두 Pi와
 같은 tailnet에 있어야 닿는다. 값은 `backend/.env.example`의 `PI_DEVICES` 예시와 같은 JSON 한 줄이고,
 키오스크 ID마다 `capture_url`·`capture_api_key`·`locker_url`·`locker_api_key` 네 개가 모두 있어야
 한다. EC2의 Tailscale 설치·인증은 이 문서 범위 밖이며 이미 되어 있다고 가정한다.
+
+`DEV_FAKE_DEVICE=true`는 Pi를 부르는 자리에 `app.dev_device`의 개발용 가짜 장치를 끼운다. 촬영은 이미지에
+들어 있는 더미 JPEG 2장을 촬영 순서대로 돌려주고, 보관함 개방은 성공으로, 문 상태는 항상 `closed`로
+답한다. S3 저장·미리보기 URL·상태 전이·DB 기록은 실제 경로 그대로다. 이 값은 Pi 없이 FE 흐름을
+확인할 때만 켜고, 실제 물건을 보관하는 운영에서는 끈다. 장치 호출이 실패했다고 자동으로 가짜 장치로
+넘어가지는 않는다.
 
 Variables/Secrets 변경만으로 배포 이벤트가 발생하지 않는다. 저장소 Actions → Backend CI and EC2 deployment → Run workflow → **main**으로 재배포한다. `.env`나 장기 AWS 액세스 키를 Git에 올리지 않는다. 이미지 안에도 비밀값을 넣지 않는다.
 

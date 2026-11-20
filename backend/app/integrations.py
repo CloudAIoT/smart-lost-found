@@ -1,4 +1,5 @@
-"""Replaceable boundaries. No fake AI or device is installed in the application."""
+"""Replaceable boundaries. No fake AI is installed; the only fake device is the
+explicitly flagged development stand-in in app.dev_device."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,7 +18,8 @@ from app.errors import IntegrationError
 
 
 class DeviceGateway(Protocol):
-    def capture(self, kiosk_id: UUID, command_id: str, registration_id: UUID, expires_at: datetime) -> bytes: ...
+    def capture(self, kiosk_id: UUID, command_id: str, registration_id: UUID, expires_at: datetime,
+                shot_order: int) -> bytes: ...
     def open(self, kiosk_id: UUID, locker_number: int, command_id: str, expires_at: datetime) -> None: ...
     def door(self, kiosk_id: UUID, locker_number: int) -> Literal["open", "closed"]: ...
 
@@ -36,7 +38,7 @@ class AnalysisInput:
 
 @dataclass(frozen=True)
 class AnalysisResult:
-    # Internal BE boundary only; AI's external response contract is still pending.
+    # Keep the capture order and store the validated feature data.
     image_ids: tuple[UUID, UUID]
     features: dict
 
@@ -118,7 +120,10 @@ class PiGateway:
             pass
         raise IntegrationError("DEVICE_ROLE_MISMATCH")
 
-    def capture(self, kiosk_id: UUID, command_id: str, registration_id: UUID, expires_at: datetime) -> bytes:
+    def capture(self, kiosk_id: UUID, command_id: str, registration_id: UUID, expires_at: datetime,
+                shot_order: int) -> bytes:
+        # The device protocol carries no shot order; the server keeps that order itself.
+        del shot_order
         self._check_role(kiosk_id, "capture")
         response = self._request(kiosk_id, "capture", "POST", "/capture", {
             "command_id": command_id, "registration_id": str(registration_id), "expires_at": expires_at.isoformat(),

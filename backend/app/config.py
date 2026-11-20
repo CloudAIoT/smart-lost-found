@@ -23,6 +23,8 @@ class GeminiSettings(BaseSettings):
 
 
 class Settings(GeminiSettings):
+    # Two-photo inference may take longer than ownership text requests.
+    image_analysis_timeout_seconds: int = Field(default=90, ge=5, le=90)
     postgres_db: str
     postgres_user: str
     postgres_password: SecretStr
@@ -31,6 +33,8 @@ class Settings(GeminiSettings):
     # Local fixtures remain separate from deployed API access.
     local_development: bool = False
     business_api_enabled: bool = False
+    # Development stand-in for the Pi. Never enable it where real storage is operated.
+    dev_fake_device: bool = False
     s3_bucket: str | None = None
     s3_region: str | None = None
     preview_ttl_seconds: int | None = Field(default=None, gt=0)

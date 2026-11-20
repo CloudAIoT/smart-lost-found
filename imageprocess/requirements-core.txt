@@ -1,0 +1,5 @@
+# Processing helpers only; the backend owns the model client and HTTP endpoint.
+pydantic-settings>=2.6,<3
+starlette>=0.40,<2
+opencv-python-headless>=4.10,<5
+Pillow>=11,<13

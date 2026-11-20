@@ -1,8 +1,7 @@
 """실제 Pi와 실제 S3에 붙여 손으로 확인할 때 쓰는 로컬 백엔드 실행기.
 
-앱 코드는 그대로 돌린다. `--stub-analyzer`를 줄 때만 AI 분석기를 대역으로 바꾼다. AI 구현이
-아직 없어 그대로 두면 `/analysis`가 503 AI_NOT_CONFIGURED이고 `/deposit/open`은 409
-ANALYSIS_REQUIRED로 막힌다. 대역은 이 스크립트 안에만 있고 백엔드 패키지에는 들어가지 않는다.
+앱 코드는 그대로 돌린다. `--stub-analyzer`를 줄 때만 AI 분석기를 대역으로 바꾼다.
+실제 분석에는 Gemini 키와 모델 설정이 필요하다.
 
 실행:
     python tests/manual/local_server.py --stub-analyzer
@@ -16,6 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
 
 # 백엔드를 컨테이너가 아니라 이 PC에서 돌린다. backend/.env의 DB_HOST=db는 Compose 안에서만

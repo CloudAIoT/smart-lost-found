@@ -43,7 +43,8 @@ def make_camera(settings: Settings) -> Camera:
 def make_lockers(settings: Settings) -> Lockers:
     if settings.fake_hardware:
         return FakeLockers(settings.locker_count, settings.fake_door_open_seconds)
-    raise RuntimeError("보관함 실제 장치 연결은 아직 없습니다. PI_FAKE_HARDWARE=true로 실행하세요.")
+    from app.hardware.gpio import GpioLockers  # gpiozero가 있는 보관함 Pi에서만 불러온다
+    return GpioLockers(settings.locker_led_pins, settings.locker_button_pins)
 
 
 def create_app(settings: Settings | None = None, camera: Camera | None = None,

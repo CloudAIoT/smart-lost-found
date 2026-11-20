@@ -30,7 +30,7 @@ import {
  * 설정
  * ------------------------------------------------------------
  * 백엔드(http://52.78.12.168)에 CORS 설정이 없으므로
- * vite.config.js 의 dev 프록시('/api' → 52.78.12.168)를 거쳐 호출한다.
+ * vite.config.js의 dev 프록시를 거쳐 호출한다.
  * ============================================================ */
 const API_BASE = '/api';
 
@@ -133,6 +133,11 @@ const ERROR_MESSAGES = {
   DEVICE_NOT_CONFIGURED: '장치 연결이 설정되지 않았습니다.',
   CAPTURE_NOT_CONFIGURED: '촬영 장치가 설정되지 않았습니다.',
   IMAGE_STORAGE_NOT_CONFIGURED: '사진 저장소가 설정되지 않았습니다.',
+  OWNERSHIP_ATTEMPT_EXPIRED: '확인 시간이 지났습니다. 검색을 다시 시작해 주세요.',
+  OWNERSHIP_RETURN_CODE_ALREADY_ISSUED: '이 소유 확인에서 이미 OTP가 발급됐습니다.',
+  OWNERSHIP_ITEM_NO_LONGER_AVAILABLE: '이 물건은 현재 수령할 수 없습니다.',
+  OWNERSHIP_AI_NOT_CONFIGURED: '분실물 검색 또는 이미지 분석 서비스가 설정되지 않았습니다.',
+  OWNERSHIP_AI_RATE_LIMITED: 'AI 요청이 많습니다. 잠시 후 다시 시도해 주세요.',
   RETURN_CODE_NOT_CONFIGURED: 'OTP 기능이 설정되지 않았습니다.',
 };
 
@@ -458,253 +463,130 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
 }
 
 /* ============================================================
- * 웹 포털 - 분실자 (자연어 특징 입력 → 객관식 3문항 → 판정)
- * ------------------------------------------------------------
- * POST /api/ownership/attempts               자연어 특징 입력 → 질문 1
- * POST /api/ownership/attempts/{id}/answers  답변 제출 → 다음 질문 또는 판정
- * POST /api/found-items/{id}/return-code     소유 확인 성공 시 반환 코드(OTP) 발급
- *
- * 회의 결정: 질문 3개(5지선다) → 오답 시 처음 화면 → 3문항 후 후보 1개면 키오스크 위치 + OTP,
- *           2개 이상이면 관리자 문의 안내.
- *
- * 백엔드 계약과의 차이(백엔드는 수정하지 않음, 아래 함수에서 흡수한다):
- *  - 질문 수가 가변이다. 프론트가 답변 횟수를 세어 3문항에서 멈추고 판정한다.
- *  - 현재 응답에는 답변별 정답 여부가 없다. 백엔드가 answer_result("correct" | "incorrect")를
- *    내려주면 그 즉시 처음 화면으로 돌아간다. 없으면 백엔드 판정 decision === "not_confirmed"만 오답으로 본다.
- *  - 3문항 전에 백엔드가 판정을 끝내면 그 판정을 따른다(추가 질문을 강제할 수 없다).
+ * 웹 포털 - 분실자
  * ============================================================ */
-
-const OWNER_QUESTION_TARGET = 3;
-const OWNER_DESCRIPTION_EXAMPLE = 'ex: 뒤에 곰 스티커가 붙어있는 검은색 무선 이어폰';
-
-// 백엔드 응답 한 건을 화면 단계로 바꾼다.
-function interpretOwnerResponse(res) {
-  if (res?.status === 'question' && res.question) {
-    return { kind: 'question', attemptId: res.attempt_id, question: res.question };
-  }
-  if (res?.status === 'completed' || res?.decision) {
-    return { kind: 'decided', attemptId: res.attempt_id, decision: res.decision, foundItemId: res.found_item_id ?? null };
-  }
-  if (res?.status === 'needs_clues') return { kind: 'needs_clues' };
-  if (res?.status === 'no_candidates') return { kind: 'not_found' };
-  if (res?.status === 'search_limit') return { kind: 'search_limit' };
-  return { kind: 'error' };
-}
-
-// 답변 한 건 후 다음 행동을 정한다. answeredCount는 이번 답변을 포함한 누적 횟수다.
-function decideAfterAnswer(step, answeredCount, answerResult) {
-  if (answerResult === 'incorrect') return 'wrong';
-  if (step.kind === 'decided') return 'decided';
-  if (step.kind === 'question') return answeredCount < OWNER_QUESTION_TARGET ? 'question' : 'admin';
-  return 'error';
-}
-
-function WebOwner({ kiosks, onBack, onResult }) {
-  const [stage, setStage] = useState('describe'); // describe | question
+function WebOwner({ onBack, onResult }) {
   const [description, setDescription] = useState('');
-  const [attemptId, setAttemptId] = useState(null);
-  const [question, setQuestion] = useState(null);
-  const [answeredCount, setAnsweredCount] = useState(0);
+  const [attempt, setAttempt] = useState(null);
   const [optionId, setOptionId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const resetToDescribe = () => {
-    setStage('describe');
-    setAttemptId(null);
-    setQuestion(null);
-    setAnsweredCount(0);
+  const accept = (result) => {
+    setOptionId('');
+    if (result.status === 'question' || result.decision === 'supported') {
+      setAttempt(result);
+    } else if (result.status === 'no_candidates' || result.status === 'completed') {
+      onResult({ status: result.decision || 'not_found' });
+    } else {
+      setError(result.status === 'search_limit'
+        ? '검색 가능한 물품 수를 초과했습니다. 잠시 후 다시 시도해 주세요.'
+        : '물건 종류나 색상, 잃어버린 장소 같은 단서를 더 적어 주세요.');
+    }
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      if (attempt?.decision === 'supported') {
+        const code = await api(`/found-items/${attempt.found_item_id}/return-code`, {
+          method: 'POST',
+          body: { attempt_id: attempt.attempt_id },
+        });
+        onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name });
+      } else if (attempt?.question) {
+        const result = await api(`/ownership/attempts/${attempt.attempt_id}/answers`, {
+          method: 'POST',
+          body: { question_id: attempt.question.id, option_id: optionId },
+        });
+        accept(result);
+      } else {
+        accept(await api('/ownership/attempts', { method: 'POST', body: { description: description.trim() } }));
+      }
+    } catch (err) {
+      if (err.code === 'OWNERSHIP_QUESTION_NOT_CURRENT') {
+        try {
+          accept(await api(`/ownership/attempts/${attempt.attempt_id}`));
+        } catch (refreshError) {
+          setError(errorText(refreshError));
+        }
+      } else {
+        setError(errorText(err));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const question = attempt?.question;
+  const verified = attempt?.decision === 'supported';
+  const restart = () => {
+    setAttempt(null);
     setOptionId('');
     setError('');
   };
 
-  // 판정 결과를 부모 화면에 넘긴다. 소유 확인 성공이면 반환 코드를 발급받는다.
-  const finish = async (step) => {
-    if (step.decision === 'supported' && step.foundItemId) {
-      try {
-        const code = await api(`/found-items/${encodeURIComponent(step.foundItemId)}/return-code`, {
-          method: 'POST',
-          body: { attempt_id: attemptId },
-        });
-        return onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name ?? null });
-      } catch (err) {
-        return onResult({ status: 'error', message: errorText(err) });
-      }
-    }
-    if (step.decision === 'not_confirmed') return onResult({ status: 'wrong' });
-    return onResult({ status: 'admin' });
-  };
-
-  const startAttempt = async () => {
-    const text = description.trim();
-    if (!text) return setError('물건의 특징을 입력해 주세요.');
-    setError('');
-    setBusy(true);
-    try {
-      const res = await api('/ownership/attempts', { method: 'POST', body: { description: text } });
-      const step = interpretOwnerResponse(res);
-      if (step.kind === 'question') {
-        setAttemptId(step.attemptId);
-        setQuestion(step.question);
-        setAnsweredCount(0);
-        setOptionId('');
-        setStage('question');
-      } else if (step.kind === 'needs_clues') {
-        setError('특징을 조금 더 자세히 적어 주세요. 색상, 모양, 브랜드, 부착물 등을 함께 적으면 좋아요.');
-      } else if (step.kind === 'not_found') {
-        onResult({ status: 'not_found' });
-      } else if (step.kind === 'search_limit') {
-        setError('검색 가능한 물품 수를 초과했습니다. 잠시 후 다시 시도해 주세요.');
-      } else {
-        setError('응답을 처리하지 못했습니다. 다시 시도해 주세요.');
-      }
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submitAnswer = async () => {
-    if (!optionId || !question) return;
-    setError('');
-    setBusy(true);
-    try {
-      const res = await api(`/ownership/attempts/${attemptId}/answers`, {
-        method: 'POST',
-        body: { question_id: question.id, option_id: optionId },
-      });
-      const nextCount = answeredCount + 1;
-      setAnsweredCount(nextCount);
-      const step = interpretOwnerResponse(res);
-      const next = decideAfterAnswer(step, nextCount, res?.answer_result);
-      if (next === 'question') {
-        setQuestion(step.question);
-        setOptionId('');
-      } else if (next === 'wrong') {
-        onResult({ status: 'wrong' });
-      } else if (next === 'admin') {
-        onResult({ status: 'admin' });
-      } else if (next === 'decided') {
-        await finish(step);
-      } else {
-        setError('응답을 처리하지 못했습니다. 다시 시도해 주세요.');
-      }
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleBack = () => (stage === 'question' ? resetToDescribe() : onBack());
-
   return (
     <div className="space-y-6">
       <BackHeader
-        onBack={handleBack}
+        onBack={onBack}
         title="잃어버린 물건 찾기"
-        desc={
-          stage === 'describe'
-            ? '기억나는 특징을 최대한 많이 적어 주세요.'
-            : '질문에 맞는 답을 골라 주세요. 한 번이라도 틀리면 처음 화면으로 돌아갑니다.'
-        }
+        desc="물건의 특징이나 잃어버린 장소를 기억나는 대로 적어 주세요."
         badge="분실자 모드"
         badgeClass="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
       />
 
-      {stage === 'describe' && (
-        <div className="space-y-4 max-w-xl mx-auto py-2 w-full">
-          <div>
-            <label htmlFor="lost-description" className="block text-sm font-semibold text-slate-200 mb-1">
-              물건에 대한 특징을 최대한 많이 입력해주세요
-            </label>
-            <p className="text-[11px] text-slate-500 mb-2">색상, 모양, 브랜드, 부착물, 흠집, 내용물, 잃어버린 장소 등을 자유롭게 적어 주세요.</p>
-            <textarea
-              id="lost-description"
-              rows={4}
-              maxLength={1000}
-              disabled={busy}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={OWNER_DESCRIPTION_EXAMPLE}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500 placeholder:text-slate-600"
-            />
-            <p className="text-[11px] text-slate-500 mt-1.5">예시: {OWNER_DESCRIPTION_EXAMPLE}</p>
-          </div>
-
-          {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
-
-          <button
-            type="button"
-            onClick={startAttempt}
-            disabled={busy || !description.trim()}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
-          >
-            {busy ? '질문을 만드는 중...' : '다음: 확인 질문 받기'}
-          </button>
-        </div>
-      )}
-
-      {stage === 'question' && question && (
-        <div className="space-y-5 max-w-xl mx-auto py-2 w-full">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-emerald-400">
-              질문 {answeredCount + 1} / {OWNER_QUESTION_TARGET}
-            </span>
-            <div className="flex gap-1.5">
-              {Array.from({ length: OWNER_QUESTION_TARGET }, (_, i) => (
-                <span
-                  key={i}
-                  className={`w-2.5 h-2.5 rounded-full ${i < answeredCount ? 'bg-emerald-500' : i === answeredCount ? 'bg-emerald-400/60' : 'bg-slate-700'}`}
-                />
-              ))}
-            </div>
-          </div>
-
+      <form onSubmit={submit} className="space-y-4 max-w-xl mx-auto py-2 w-full">
+        {verified ? (
+          <p className="text-sm text-emerald-300">소유 확인이 완료됐습니다. 수령용 OTP를 발급받으세요.</p>
+        ) : question ? (
           <fieldset disabled={busy} key={question.id} className="space-y-2">
-            <legend className="text-base font-semibold text-white mb-3">{question.text}</legend>
+            <legend className="text-sm font-semibold text-white mb-3">{question.text}</legend>
             {question.options.map((option) => (
-              <label
-                key={option.id}
-                className={`flex items-center gap-3 rounded-xl border p-3.5 text-sm cursor-pointer transition-all ${
-                  optionId === option.id
-                    ? 'border-emerald-500 bg-emerald-950/30 text-white'
-                    : 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'
-                }`}
-              >
+              <label key={option.id} className="flex items-center gap-3 rounded-xl bg-slate-900 border border-slate-700 p-3 text-sm text-slate-200">
                 <input
-                  type="radio"
-                  name="ownership-answer"
-                  value={option.id}
-                  checked={optionId === option.id}
-                  onChange={() => setOptionId(option.id)}
-                  className="accent-emerald-500 w-5 h-5"
+                  type="radio" name="ownership-answer" value={option.id}
+                  checked={optionId === option.id} onChange={() => setOptionId(option.id)}
+                  className="accent-emerald-500"
                 />
                 {option.label}
               </label>
             ))}
           </fieldset>
+        ) : (
+          <div>
+            <label htmlFor="lost-description" className="block text-sm font-semibold text-slate-300 mb-2">분실물 설명</label>
+            <textarea
+              id="lost-description" required maxLength={1000} rows={4} disabled={busy}
+              value={description} onChange={(event) => setDescription(event.target.value)}
+              placeholder="예: 도서관 근처에서 남색 필통을 잃어버렸어요."
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+        )}
 
-          {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
+        {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
 
-          <button
-            type="button"
-            onClick={submitAnswer}
-            disabled={busy || !optionId}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
-          >
-            {busy ? '확인 중...' : '답변 제출'}
+        <button
+          type="submit" disabled={busy || (!verified && (question ? !optionId : !description.trim()))}
+          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
+        >
+          {busy ? '처리 중...' : verified ? '수령용 OTP 발급' : question ? '답변 제출' : '분실물 검색'}
+        </button>
+        {attempt && (
+          <button type="button" disabled={busy} onClick={restart} className="text-sm text-slate-300 hover:text-white">
+            검색 다시 시작
           </button>
-        </div>
-      )}
+        )}
+      </form>
     </div>
   );
 }
 
-function WebOwnerSuccess({ result, kiosks, onGoKiosk, onHome }) {
-  // 반환 코드 응답의 키오스크 이름으로 목록에서 위치 설명을 찾는다.
-  const kiosk = kiosks.find((k) => k.name === result.kioskName) || null;
+function WebOwnerSuccess({ result, onGoKiosk }) {
   return (
     <div className="space-y-6 text-center py-6">
       <div className="inline-flex p-3 bg-emerald-500/20 text-emerald-400 rounded-full mb-1">
@@ -712,89 +594,63 @@ function WebOwnerSuccess({ result, kiosks, onGoKiosk, onHome }) {
       </div>
       <div>
         <h2 className="text-2xl font-bold text-white">일치하는 분실물을 찾았습니다!</h2>
-        <p className="text-xs text-slate-400 mt-1">아래 키오스크에서 [분실물 수령]을 누른 뒤 OTP 8자리를 입력하세요.</p>
+        <p className="text-xs text-slate-400 mt-1">인증이 완료되었습니다. 아래 인증 수단으로 키오스크에서 보관함을 열 수 있습니다.</p>
       </div>
-      <div className="max-w-md mx-auto bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 shadow-xl space-y-4 text-left">
-        <div className="space-y-1">
-          <span className="text-xs text-slate-500">보관 키오스크 위치</span>
-          <p className="text-base font-bold text-white">{result.kioskName || '-'}</p>
-          {kiosk?.location_description && (
-            <p className="text-xs text-slate-300 flex items-start gap-1">
-              <MapPin size={12} className="text-slate-500 mt-0.5 shrink-0" /> {kiosk.location_description}
-            </p>
+      <div className="max-w-md mx-auto bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 shadow-xl space-y-4">
+        <div className="text-xs text-slate-400 border-b border-slate-800 pb-3 flex justify-between items-center">
+          <span>
+            보관소: <strong className="text-slate-200">{result.kioskName || '-'}</strong>
+          </span>
+          {result.expiresAt && (
+            <span className="text-emerald-400 font-bold">~{new Date(result.expiresAt).toLocaleString('ko-KR')}</span>
           )}
         </div>
-        <div className="border-t border-slate-800 pt-4 text-center">
+        <div>
           <span className="text-xs text-slate-500 block mb-1">수령용 OTP (8자리)</span>
           <div className="text-3xl font-mono font-bold tracking-[0.3em] text-emerald-400 bg-slate-950 py-3 pl-5 pr-4 rounded-lg border border-slate-800 inline-block">
             {result.code}
           </div>
-          {result.expiresAt && (
-            <p className="text-[11px] text-emerald-400 mt-2">~{new Date(result.expiresAt).toLocaleString('ko-KR')} 까지 사용 가능</p>
-          )}
         </div>
         <p className="text-[11px] text-slate-400 flex items-start justify-center gap-1">
-          <TriangleAlert size={12} className="text-amber-400 shrink-0 mt-px" /> OTP는 다시 조회할 수 없습니다. 반드시 지금 기록해 두세요.
+          <TriangleAlert size={12} className="text-amber-400 shrink-0 mt-px" /> OTP는 다시 조회할 수 없습니다. 현장 키오스크에서 [분실물 수령]을 누른 후 8자리 OTP를 입력하세요.
         </p>
       </div>
-      <div className="flex flex-col sm:flex-row justify-center gap-3">
-        <button
-          onClick={onHome}
-          className="px-6 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white text-sm font-bold rounded-xl transition-all inline-flex items-center justify-center gap-1.5"
-        >
-          <House size={16} /> 처음으로
-        </button>
-        <button
-          onClick={onGoKiosk}
-          className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg inline-flex items-center justify-center gap-1"
-        >
-          키오스크 모드로 이동 <ArrowRight size={12} />
-        </button>
-      </div>
+      <button
+        onClick={onGoKiosk}
+        className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg inline-flex items-center gap-1"
+      >
+        키오스크로 이동 <ArrowRight size={12} />
+      </button>
     </div>
   );
 }
 
-function WebOwnerNotice({ kind, message, onRetry, onHome }) {
+function WebOwnerNotice({ kind, onRetry, onHome }) {
   const messages = {
-    not_found: {
-      title: '찾고 있는 분실물이 없습니다',
-      body: '설명과 일치하는 보관 물품을 찾지 못했습니다. 다른 특징을 더해 다시 입력해 보세요.',
-      icon: <Info size={36} />,
-      tone: 'bg-amber-500/20 text-amber-400',
-    },
-    admin: {
-      title: '관리자에게 문의하세요',
-      body: '현재 사용자가 찾는 물품과 유사한 제품이 2개 이상 보관되어 있습니다. 관리자에게 문의하세요.',
-      icon: <Info size={36} />,
-      tone: 'bg-amber-500/20 text-amber-400',
-    },
-    error: {
-      title: 'OTP를 발급하지 못했습니다',
-      body: message || '잠시 후 다시 시도해 주세요.',
-      icon: <CircleX size={36} />,
-      tone: 'bg-rose-500/20 text-rose-400',
-    },
+    not_found: ['찾고 있는 분실물이 없습니다', '설명과 일치하는 보관 물품을 찾지 못했습니다.'],
+    not_confirmed: ['소유를 확인할 수 없습니다', '선택한 답변이 등록된 특징과 일치하지 않습니다.'],
+    insufficient_evidence: ['소유 확인 보류', '현재 확인할 수 있는 특징으로는 물건의 소유를 판단하기 어렵습니다.'],
   };
-  const view = messages[kind] || messages.error;
+  const [title, description] = messages[kind];
   return (
     <div className="space-y-6 text-center py-10">
-      <div className={`inline-flex p-3 rounded-full mb-1 ${view.tone}`}>{view.icon}</div>
+      <div
+        className="inline-flex p-3 rounded-full mb-1 bg-amber-500/20 text-amber-400"
+      >
+        <Info size={36} />
+      </div>
       <div>
-        <h2 className="text-2xl font-bold text-white">{view.title}</h2>
-        <p className="text-sm text-slate-300 mt-3 max-w-md mx-auto leading-relaxed">{view.body}</p>
+        <h2 className="text-2xl font-bold text-white">{title}</h2>
+        <p className="text-xs text-slate-400 mt-2 max-w-sm mx-auto leading-relaxed">
+          {description}
+        </p>
       </div>
       <div className="pt-4 flex justify-center gap-3">
-        {onRetry && (
-          <button onClick={onRetry} className="px-5 py-3 bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold rounded-xl transition-all">
-            정보 다시 입력하기
-          </button>
-        )}
-        <button
-          onClick={onHome}
-          className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg inline-flex items-center gap-1.5"
-        >
-          <House size={16} /> 처음으로
+        <button onClick={onRetry} className="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-xl transition-all">
+          정보 다시 입력하기
+        </button>
+        <button onClick={onHome} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition-all">
+          메인으로 돌아가기
         </button>
       </div>
     </div>
@@ -805,38 +661,22 @@ function WebOwnerNotice({ kind, message, onRetry, onHome }) {
  * 웹 포털 컨테이너
  * ============================================================ */
 function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
-  const [step, setStep] = useState('type'); // type | finder | owner | success | not_found | admin | error
+  const [step, setStep] = useState('type');
   const [ownerResult, setOwnerResult] = useState(null);
-  const [flash, setFlash] = useState('');
-
-  const goHome = () => {
-    setStep('type');
-    setOwnerResult(null);
-  };
 
   const handleOwnerResult = (result) => {
-    if (result?.status === 'wrong') {
-      // 오답이면 처음 화면으로 돌아가고 안내 문구를 띄운다.
-      setFlash('입력하신 답변이 등록된 특징과 일치하지 않아 처음 화면으로 돌아왔습니다. 다시 시도해 주세요.');
-      setOwnerResult(null);
-      setStep('type');
-      return;
+    if (result?.status === 'success') {
+      setOwnerResult(result);
+      setStep('success');
+    } else {
+      setStep(result.status);
     }
-    setFlash('');
-    setOwnerResult(result);
-    setStep(result?.status || 'error');
   };
 
   return (
     <div className="w-full bg-slate-800/50 border border-slate-700/60 rounded-3xl p-4 sm:p-8 flex-1 flex flex-col justify-between shadow-2xl backdrop-blur">
       {step === 'type' && (
         <div className="space-y-6 my-auto text-center py-8">
-          {flash && (
-            <div className="max-w-2xl mx-auto text-left p-3.5 bg-rose-950/40 border border-rose-500/40 rounded-xl text-xs text-rose-200 flex justify-between items-start gap-3">
-              <span>{flash}</span>
-              <button onClick={() => setFlash('')} className="text-rose-300 hover:text-white shrink-0">닫기</button>
-            </div>
-          )}
           <div>
             <span className="px-3 py-1 bg-indigo-500/10 text-indigo-400 rounded-full text-xs font-semibold uppercase tracking-wider border border-indigo-500/20">
               서비스 선택
@@ -871,7 +711,7 @@ function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
               <div>
                 <span className="text-xs text-emerald-400 font-semibold">분실자 (Owner)</span>
                 <h3 className="text-xl font-bold text-white mt-0.5">물건을 잃어버렸어요</h3>
-                <p className="text-xs text-slate-400 mt-2">특징을 자유롭게 적으면 확인 질문 3개에 답해 본인 확인 후 수령용 OTP를 받습니다.</p>
+                <p className="text-xs text-slate-400 mt-2">찾고 있는 물건 정보를 입력하고 본인 확인 후 수령용 OTP 8자리를 받습니다.</p>
               </div>
               <div className="mt-4 flex items-center gap-1 text-xs font-semibold text-emerald-400 group-hover:translate-x-1 transition-transform">
                 분실물 찾기 신청하기 <ArrowRight size={12} />
@@ -882,19 +722,14 @@ function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
       )}
 
       {step === 'finder' && (
-        <WebFinder kiosks={kiosks} kiosksError={kiosksError} onReload={onReload} onBack={goHome} onGoKiosk={onGoKiosk} />
+        <WebFinder kiosks={kiosks} kiosksError={kiosksError} onReload={onReload} onBack={() => setStep('type')} onGoKiosk={onGoKiosk} />
       )}
-      {step === 'owner' && <WebOwner kiosks={kiosks} onBack={goHome} onResult={handleOwnerResult} />}
-      {step === 'success' && ownerResult && (
-        <WebOwnerSuccess result={ownerResult} kiosks={kiosks} onGoKiosk={onGoKiosk} onHome={goHome} />
+      {step === 'owner' && (
+        <WebOwner onBack={() => setStep('type')} onResult={handleOwnerResult} />
       )}
-      {(step === 'not_found' || step === 'admin' || step === 'error') && (
-        <WebOwnerNotice
-          kind={step}
-          message={ownerResult?.message}
-          onRetry={step === 'admin' ? undefined : () => setStep('owner')}
-          onHome={goHome}
-        />
+      {step === 'success' && ownerResult && <WebOwnerSuccess result={ownerResult} onGoKiosk={onGoKiosk} />}
+      {['not_found', 'not_confirmed', 'insufficient_evidence'].includes(step) && (
+        <WebOwnerNotice kind={step} onRetry={() => setStep('owner')} onHome={() => setStep('type')} />
       )}
     </div>
   );
@@ -934,7 +769,7 @@ function ShotBox({ label, imageUrl, scanning }) {
   );
 }
 
-function KioskView({ kiosks, kiosksError, categories, onReload }) {
+function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload }) {
   const [kioskId, setKioskId] = useState('');
   const [step, setStep] = useState('main');
   const [busy, setBusy] = useState('');
@@ -1649,7 +1484,8 @@ export default function App() {
             onGoKiosk={() => switchMode('kiosk')}
           />
         ) : (
-          <KioskView kiosks={kiosks} kiosksError={kiosksError} categories={categories} onReload={loadData} />
+          <KioskView kiosks={kiosks} kiosksError={kiosksError} categories={categories}
+            categoriesError={categoriesError} onReload={loadData} />
         )}
       </main>
     </div>

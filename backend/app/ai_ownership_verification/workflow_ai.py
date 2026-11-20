@@ -1,7 +1,9 @@
 """Gemini extracts literal clues, searches comparable features, and suggests distractors."""
 
 import json
+import logging
 import unicodedata
+from collections.abc import Callable
 from typing import Protocol
 
 import httpx
@@ -11,6 +13,18 @@ from app.config import GeminiSettings
 from app.errors import IntegrationError
 from .gemini import API_ROOT, MAX_RESPONSE_BYTES
 from .workflow_schemas import Distractors, SearchClues, SearchMatch, SimilarItems
+
+
+logger = logging.getLogger(__name__)
+
+EXTRACTION_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite")
+MATCHING_MODELS = ("gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.5-flash-lite")
+FALLBACK_ERRORS = frozenset({
+    "OWNERSHIP_AI_AUTHENTICATION_FAILED", "OWNERSHIP_AI_MODEL_UNAVAILABLE", "OWNERSHIP_AI_RATE_LIMITED",
+    "OWNERSHIP_AI_REQUEST_FAILED", "OWNERSHIP_AI_RESPONSE_TOO_LARGE", "OWNERSHIP_AI_TIMEOUT",
+    "OWNERSHIP_AI_UNREACHABLE", "OWNERSHIP_AI_INVALID_RESPONSE", "OWNERSHIP_UNGROUNDED_CLUE",
+    "OWNERSHIP_AI_INVALID_MATCHES", "OWNERSHIP_AI_INVALID_OPTIONS",
+})
 
 
 EXTRACT = """Extract only clues about the item the person lost from the supplied JSON text.
@@ -78,7 +92,8 @@ SIMILAR_RESPONSE_SCHEMA = {
 class WorkflowAI(Protocol):
     def extract(self, description: str) -> SearchClues: ...
     def similar_items(self, clues: dict[str, str], items: dict[int, dict[str, list[str]]]) -> list[SearchMatch]: ...
-    def distractors(self, field: str, known: list[str], count: int) -> list[str]: ...
+    def distractors(self, field: str, known: list[str], count: int, *,
+                    validate: Callable[[list[str]], list[str]]) -> list[str]: ...
 
 
 def validate_search_matches(clues: dict[str, str], items: dict[int, dict[str, list[str]]],
@@ -99,12 +114,16 @@ class GeminiWorkflowAI:
         self.client = client
 
     def extract(self, description: str) -> SearchClues:
-        clues = self._request(EXTRACT, {"text": description}, SearchClues)
         source = unicodedata.normalize("NFKC", description).casefold()
-        if any(unicodedata.normalize("NFKC", clue).casefold() not in source
-               for clue in clues.model_dump(exclude_none=True).values()):
-            raise IntegrationError("OWNERSHIP_UNGROUNDED_CLUE")
-        return clues
+
+        def extract_with(model: str) -> SearchClues:
+            clues = self._request(model, EXTRACT, {"text": description}, SearchClues)
+            if any(unicodedata.normalize("NFKC", clue).casefold() not in source
+                   for clue in clues.model_dump(exclude_none=True).values()):
+                raise IntegrationError("OWNERSHIP_UNGROUNDED_CLUE")
+            return clues
+
+        return self._with_fallback("extract", EXTRACTION_MODELS, extract_with)
 
     def similar_items(self, clues: dict[str, str], items: dict[int, dict[str, list[str]]]) -> list[SearchMatch]:
         payload = {
@@ -112,35 +131,59 @@ class GeminiWorkflowAI:
             "items": [{"item": key, "features": {**dict.fromkeys(clues), **facts}}
                       for key, facts in items.items()],
         }
-        results = self._request(SIMILAR, payload, SimilarItems, json_schema=SIMILAR_RESPONSE_SCHEMA).results
-        if len(results) != len(items) or {result.item for result in results} != items.keys():
-            raise IntegrationError("OWNERSHIP_AI_INVALID_MATCHES")
-        if any(bool(result.matched_fields) != (result.decision == "match") for result in results):
-            raise IntegrationError("OWNERSHIP_AI_INVALID_MATCHES")
-        matches = [SearchMatch(item=result.item, matched_fields=result.matched_fields)
-                   for result in results if result.decision == "match"]
-        validate_search_matches(clues, items, matches)
-        return matches
 
-    def distractors(self, field: str, known: list[str], count: int) -> list[str]:
-        result = self._request(DISTRACT, {"feature_type": field, "known_labels": known,
-                                          "required_count": count}, Distractors)
-        return result.labels
+        def compare_with(model: str) -> list[SearchMatch]:
+            results = self._request(model, SIMILAR, payload, SimilarItems, json_schema=SIMILAR_RESPONSE_SCHEMA).results
+            if len(results) != len(items) or {result.item for result in results} != items.keys():
+                raise IntegrationError("OWNERSHIP_AI_INVALID_MATCHES")
+            if any(bool(result.matched_fields) != (result.decision == "match") for result in results):
+                raise IntegrationError("OWNERSHIP_AI_INVALID_MATCHES")
+            matches = [SearchMatch(item=result.item, matched_fields=result.matched_fields)
+                       for result in results if result.decision == "match"]
+            validate_search_matches(clues, items, matches)
+            return matches
 
-    def _request[T: BaseModel](self, instruction: str, data: dict, schema: type[T], *, json_schema: dict | None = None) -> T:
+        return self._with_fallback("search", MATCHING_MODELS, compare_with)
+
+    def distractors(self, field: str, known: list[str], count: int, *,
+                    validate: Callable[[list[str]], list[str]]) -> list[str]:
+        payload = {"feature_type": field, "known_labels": known, "required_count": count}
+
+        def generate_with(model: str) -> list[str]:
+            result = self._request(model, DISTRACT, payload, Distractors)
+            return validate(result.labels)
+
+        return self._with_fallback("distractors", MATCHING_MODELS, generate_with)
+
+    @staticmethod
+    def _with_fallback[T](operation: str, models: tuple[str, ...], run: Callable[[str], T]) -> T:
+        for model in models[:-1]:
+            try:
+                return run(model)
+            except IntegrationError as exc:
+                if exc.code not in FALLBACK_ERRORS:
+                    raise
+                logger.warning("Gemini %s via %s failed (%s), trying the next model", operation, model, exc.code)
+        return run(models[-1])
+
+    def _request[T: BaseModel](self, model: str, instruction: str, data: dict, schema: type[T], *,
+                               json_schema: dict | None = None) -> T:
         raw = self.generate_json_text(
             [{"text": json.dumps(data, ensure_ascii=False)}],
             json_schema if json_schema is not None else schema.model_json_schema(),
             instruction=instruction,
+            model=model,
         )
         try:
             return schema.model_validate_json(raw, strict=True)
         except ValidationError:
             raise IntegrationError("OWNERSHIP_AI_INVALID_RESPONSE") from None
 
-    def generate_json_text(self, parts: list[dict], schema: dict, *, instruction: str | None = None) -> str:
+    def generate_json_text(self, parts: list[dict], schema: dict, *, instruction: str | None = None,
+                           model: str | None = None) -> str:
         key = self.settings.gemini_api_key
-        if not key or not key.get_secret_value().strip() or not self.settings.gemini_model:
+        requested_model = model if model is not None else self.settings.gemini_model
+        if not key or not key.get_secret_value().strip() or not requested_model:
             raise IntegrationError("OWNERSHIP_AI_NOT_CONFIGURED")
         payload = {
             "contents": [{"role": "user", "parts": parts}],
@@ -152,8 +195,10 @@ class GeminiWorkflowAI:
         }
         if instruction:
             payload["systemInstruction"] = {"parts": [{"text": instruction}]}
+        if model == "gemini-4-hydrogen":
+            payload["generationConfig"]["thinkingConfig"] = {"thinkingLevel": "LOW"}
         try:
-            with self.client.stream("POST", f"{API_ROOT}/{self.settings.gemini_model}:generateContent",
+            with self.client.stream("POST", f"{API_ROOT}/{requested_model}:generateContent",
                                     json=payload, headers={"x-goog-api-key": key.get_secret_value()},
                                     timeout=self.settings.gemini_timeout_seconds, follow_redirects=False) as response:
                 if response.status_code != 200:

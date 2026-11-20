@@ -43,11 +43,11 @@ class FakeAI:
                 shortlist.append(SearchMatch(item=item, matched_fields=fields))
         return shortlist
 
-    def distractors(self, field, known, count):
+    def distractors(self, field, known, count, *, validate):
         self.calls.append(("distractors", field, known))
         if self.broken_options:
-            return known
-        return {
+            return validate(known)
+        proposed = {
             "distinctive_features": ["노란 리본", "작은 은색 구슬", "하얀 줄무늬 스티커", "주황색 고리"],
             "visible_text": ["ZX", "TS", "B-9", "VV"],
             "material": ["종이", "금속", "고무", "유리"],
@@ -56,6 +56,7 @@ class FakeAI:
             "brand": ["Dickies", "Eastpak", "Muji", "Nike"],
             "color": ["red", "yellow", "white", "green"],
         }[field]
+        return validate(proposed)
 
 
 def add_item(session, kiosk, *, number, decoration, mark, verified=True, group="mark", stored=True, location="도서관",
@@ -603,19 +604,23 @@ def gemini_json(result):
 
 
 def test_gemini_extracts_only_literal_user_clues():
-    settings = GeminiSettings(_env_file=None, gemini_api_key="test-key", gemini_model="test-model")
-    replies = iter(['{"category":"필통","color":"검은색","location":"도서관"}', '{"brand":"Carhartt"}'])
+    settings = GeminiSettings(_env_file=None, gemini_api_key="test-key")
+    responses = iter([gemini_json({}), *[gemini_json({"brand": "Carhartt"}) for _ in range(3)]])
+    models = []
 
     def handler(request):
         assert request.headers["x-goog-api-key"] == "test-key"
-        return httpx.Response(200, json={"candidates": [{"finishReason": "STOP",
-                              "content": {"parts": [{"text": next(replies)}]}}]})
+        models.append(request.url.path.rsplit("/", 1)[-1])
+        return next(responses)
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         ai = GeminiWorkflowAI(settings, client)
-        assert ai.extract("도서관에서 검은색 필통을 잃었어요").brand is None
+        assert not ai.extract("물건을 잃어버렸어요").model_dump(exclude_none=True)
+        assert models == ["gemini-3.5-flash-lite:generateContent"]
         with pytest.raises(IntegrationError, match="OWNERSHIP_UNGROUNDED_CLUE"):
             ai.extract("검은색 필통")
+    assert models[1:] == ["gemini-3.5-flash-lite:generateContent", "gemini-3.1-flash-lite:generateContent",
+                         "gemini-2.5-flash-lite:generateContent"]
 
 
 @pytest.mark.parametrize("mode", ["matched", "no_matches", "incomplete"])
@@ -652,8 +657,56 @@ def test_gemini_search_sends_explicit_unknowns_and_checks_full_batch(mode):
         if mode == "incomplete":
             with pytest.raises(IntegrationError, match="OWNERSHIP_AI_INVALID_MATCHES"):
                 ai.similar_items(clues, items)
-            assert len(calls) == 1
+            assert len(calls) == 3
             return
         result = ai.similar_items(clues, items)
     assert [item.item for item in result] == ([1, 2] if mode == "matched" else [])
     assert len(calls) == 1
+
+
+def test_ownership_uses_each_stage_model_chain_until_a_valid_response(ownership):
+    settings = GeminiSettings(_env_file=None, gemini_api_key="test-key", gemini_model="registration-only")
+    calls = []
+
+    def handler(request):
+        model = request.url.path.rsplit("/", 1)[-1].split(":", 1)[0]
+        payload = json.loads(request.content)
+        data = json.loads(payload["contents"][0]["parts"][0]["text"])
+        if "text" in data:
+            calls.append(("extract", model))
+            if model == "gemini-3.5-flash-lite":
+                return httpx.Response(429)
+            if model == "gemini-3.1-flash-lite":
+                return gemini_json({"category": "우산"})
+            return gemini_json({"category": "필통", "color": "검은색", "location": "도서관"})
+        if model == "gemini-4-hydrogen":
+            assert payload["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "LOW"}
+        if "items" in data:
+            calls.append(("search", model))
+            rows = [{"item": entry["item"], "decision": "match", "matched_fields": ["category"]}
+                    for entry in data["items"]]
+            if model == "gemini-4-hydrogen":
+                rows.pop()
+            elif model == "gemini-3.8-flash":
+                rows[0]["matched_fields"] = ["brand"]
+            return gemini_json({"results": rows})
+
+        calls.append(("options", model))
+        if model == "gemini-4-hydrogen":
+            return gemini_json({"labels": data["known_labels"]})
+        if model == "gemini-3.8-flash":
+            return httpx.Response(503)
+        return gemini_json({"labels": ["노란 리본", "작은 은색 구슬", "주황색 고리"]})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        app.dependency_overrides[get_ownership_ai] = lambda: GeminiWorkflowAI(settings, http)
+        result = begin(ownership)
+    assert {option["label"] for option in result["question"]["options"]} == {
+        "파란 원형 핀", "빨간 사각 핀", "노란 리본", "작은 은색 구슬", "주황색 고리",
+    }
+    assert calls == [
+        ("extract", "gemini-3.5-flash-lite"), ("extract", "gemini-3.1-flash-lite"),
+        ("extract", "gemini-2.5-flash-lite"), ("search", "gemini-4-hydrogen"),
+        ("search", "gemini-3.8-flash"), ("search", "gemini-3.5-flash-lite"),
+        ("options", "gemini-4-hydrogen"), ("options", "gemini-3.8-flash"), ("options", "gemini-3.5-flash-lite"),
+    ]

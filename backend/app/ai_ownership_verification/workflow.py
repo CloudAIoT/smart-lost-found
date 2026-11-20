@@ -2,6 +2,7 @@
 
 from collections import Counter
 from datetime import timedelta, timezone
+from functools import partial
 from random import SystemRandom
 from uuid import UUID, uuid4
 
@@ -133,8 +134,8 @@ def advance(session: Session, state: AttemptState, ai: WorkflowAI) -> None:
     rank, field, labels = max(choices, key=lambda entry: entry[0])
     verification = rank[2]
     if len(labels) < OPTION_COUNT:
-        proposed = ai.distractors(field, list(labels.values()), OPTION_COUNT - len(labels))
-        alternatives = select_distractors(field, labels, state.candidates, proposed)
+        alternatives = ai.distractors(field, list(labels.values()), OPTION_COUNT - len(labels),
+                                      validate=partial(select_distractors, field, labels, state.candidates))
         labels.update((normalized(field, label), label) for label in alternatives)
     options = [Choice(id=uuid4(), label=label, value=value) for value, label in labels.items()]
     SystemRandom().shuffle(options)

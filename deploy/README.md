@@ -39,7 +39,7 @@ Swagger 주소는 `http://52.78.12.168/docs`다. 업무 API는 GitHub production
 | Variable | PREVIEW_TTL_SECONDS | 미리보기 서명 URL 유효 시간(초) |
 | Variable | RETURN_CODE_TTL_SECONDS | 반환 코드 유효 시간(초) |
 | Secret | GEMINI_API_KEY | 등록 사진 분석과 분실물 검색·문답 생성용 Gemini 키 |
-| Variable | GEMINI_MODEL | 같은 흐름에 사용할 Gemini 모델 이름 |
+| Variable | GEMINI_MODEL | 키오스크 등록 사진 분석에 사용할 Gemini 모델 이름 |
 | Variable | DEV_FAKE_DEVICE | true: Pi 대신 개발용 가짜 장치 사용. 값이 없거나 false면 실제 Pi를 호출한다 |
 | Variable | IMAGE_ANALYSIS_TIMEOUT_SECONDS | 사진 2장 분석 대기 시간. 기본 90초, 허용 5~90초. 소유 확인 텍스트 요청의 대기 시간과 별도 |
 

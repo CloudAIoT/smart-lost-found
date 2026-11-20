@@ -6,10 +6,8 @@ import {
   Boxes,
   Camera,
   CircleCheck,
-  CircleHelp,
   CircleX,
   DoorOpen,
-  Ellipsis,
   Footprints,
   Globe,
   HandHeart,
@@ -23,10 +21,8 @@ import {
   MapPin,
   MapPinned,
   Monitor,
-  Package,
   RefreshCw,
   RotateCw,
-  SquarePen,
   TriangleAlert,
 } from 'lucide-react';
 
@@ -46,7 +42,10 @@ const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyrigh
 const DEFAULT_CENTER = [37.5665, 126.978]; // 좌표가 하나도 없을 때의 지도 중심(서울시청)
 
 // 2차 촬영 각도 가이드: 이미지 처리 AI 파트의 실험 결과가 나오면 이 문구를 교체한다.
-const SHOT2_GUIDE = '물건의 방향을 바꿔(돌리거나 눕혀) 다시 놓아주세요.';
+const SHOT2_GUIDE = '물건의 다른면이 카메라에 노출되도록 물건의 방향을 조정해주세요.';
+
+// 카메라 전원이 꺼져 있는 등 장치 자체의 기술적 오류는 500으로 내려온다.
+const CAMERA_HARDWARE_ERROR_MESSAGE = '현재 카메라에 기술적인 문제가 발생하였습니다. 관리자에게 문의하세요.';
 
 // 수령 인증: QR 없이 백엔드가 발급한 8자리 OTP를 입력한다.
 // 현재 백엔드는 Base32(A~Z, 2~7) 8자리를 발급하므로 영문 대문자·숫자를 모두 허용한다.
@@ -203,6 +202,11 @@ html { font-size: 16px !important; line-height: 1.5; color-scheme: dark; }
 .scanner-laser { background: linear-gradient(180deg, rgba(239,68,68,0) 0%, rgba(239,68,68,0.8) 50%, rgba(239,68,68,0) 100%); animation: slf-scan 2s infinite ease-in-out; }
 @keyframes slf-scan { 0% { top: 0%; } 50% { top: 85%; } 100% { top: 0%; } }
 .leaflet-container { background-color: #0f172a !important; border-radius: 0.75rem; }
+/* 터치(스마트폰·아이패드 키오스크) 지원: 최소 터치 영역, 입력 시 자동 확대 방지, 더블탭 지연 제거 */
+.slf-app button, .slf-app select, .slf-app [role="button"] { min-height: 44px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.slf-app input, .slf-app textarea, .slf-app select { font-size: 16px; }
+.slf-app input[type="radio"] { min-height: 0; width: 20px; height: 20px; }
+.slf-app button:active:not(:disabled) { transform: scale(0.98); }
 `;
 
 /* ============================================================
@@ -400,7 +404,10 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
             return (
               <div
                 key={k.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => setFocus({ id: k.id, t: Date.now() })}
+                onKeyDown={(e) => e.key === 'Enter' && setFocus({ id: k.id, t: Date.now() })}
                 className={`p-3.5 border rounded-xl cursor-pointer transition-all ${
                   active ? 'bg-slate-800 border-indigo-500/40' : 'bg-slate-800/60 border-slate-700 hover:bg-slate-800'
                 }`}
@@ -451,138 +458,253 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
 }
 
 /* ============================================================
- * 웹 포털 - 분실자
+ * 웹 포털 - 분실자 (자연어 특징 입력 → 객관식 3문항 → 판정)
  * ------------------------------------------------------------
- * 분실물 검색·소유 확인(질문/답변) API가 아직 없으므로 UI만 구현한다.
- * API가 제공되면 searchAndVerifyLostItem()을 실제 호출로 교체하고,
- * 소유 확인 성공 시 POST /api/found-items/{found_item_id}/return-code 를 호출하면
- * 백엔드가 OTP를 생성·저장하고 { code, expires_at } 를 응답한다. (OTP는 백엔드가 생성)
- * { status: 'success', code: data.code, expiresAt: data.expires_at, kioskName } 형태로
- * 반환하면 성공 화면에 그대로 표시된다.
+ * POST /api/ownership/attempts               자연어 특징 입력 → 질문 1
+ * POST /api/ownership/attempts/{id}/answers  답변 제출 → 다음 질문 또는 판정
+ * POST /api/found-items/{id}/return-code     소유 확인 성공 시 반환 코드(OTP) 발급
+ *
+ * 회의 결정: 질문 3개(5지선다) → 오답 시 처음 화면 → 3문항 후 후보 1개면 키오스크 위치 + OTP,
+ *           2개 이상이면 관리자 문의 안내.
+ *
+ * 백엔드 계약과의 차이(백엔드는 수정하지 않음, 아래 함수에서 흡수한다):
+ *  - 질문 수가 가변이다. 프론트가 답변 횟수를 세어 3문항에서 멈추고 판정한다.
+ *  - 현재 응답에는 답변별 정답 여부가 없다. 백엔드가 answer_result("correct" | "incorrect")를
+ *    내려주면 그 즉시 처음 화면으로 돌아간다. 없으면 백엔드 판정 decision === "not_confirmed"만 오답으로 본다.
+ *  - 3문항 전에 백엔드가 판정을 끝내면 그 판정을 따른다(추가 질문을 강제할 수 없다).
  * ============================================================ */
-// eslint-disable-next-line no-unused-vars
-async function searchAndVerifyLostItem({ categoryId, categoryName, customName, answer }) {
-  // TODO: 검색·소유 확인 API 연결
-  return { status: 'unavailable' };
+
+const OWNER_QUESTION_TARGET = 3;
+const OWNER_DESCRIPTION_EXAMPLE = 'ex: 뒤에 곰 스티커가 붙어있는 검은색 무선 이어폰';
+
+// 백엔드 응답 한 건을 화면 단계로 바꾼다.
+function interpretOwnerResponse(res) {
+  if (res?.status === 'question' && res.question) {
+    return { kind: 'question', attemptId: res.attempt_id, question: res.question };
+  }
+  if (res?.status === 'completed' || res?.decision) {
+    return { kind: 'decided', attemptId: res.attempt_id, decision: res.decision, foundItemId: res.found_item_id ?? null };
+  }
+  if (res?.status === 'needs_clues') return { kind: 'needs_clues' };
+  if (res?.status === 'no_candidates') return { kind: 'not_found' };
+  if (res?.status === 'search_limit') return { kind: 'search_limit' };
+  return { kind: 'error' };
 }
 
-function WebOwner({ categories, categoriesError, onBack, onResult }) {
-  const [selected, setSelected] = useState(null); // { id, name } | { id: 'etc', name: '기타' }
-  const [customName, setCustomName] = useState('');
-  const [answer, setAnswer] = useState('');
+// 답변 한 건 후 다음 행동을 정한다. answeredCount는 이번 답변을 포함한 누적 횟수다.
+function decideAfterAnswer(step, answeredCount, answerResult) {
+  if (answerResult === 'incorrect') return 'wrong';
+  if (step.kind === 'decided') return 'decided';
+  if (step.kind === 'question') return answeredCount < OWNER_QUESTION_TARGET ? 'question' : 'admin';
+  return 'error';
+}
+
+function WebOwner({ kiosks, onBack, onResult }) {
+  const [stage, setStage] = useState('describe'); // describe | question
+  const [description, setDescription] = useState('');
+  const [attemptId, setAttemptId] = useState(null);
+  const [question, setQuestion] = useState(null);
+  const [answeredCount, setAnsweredCount] = useState(0);
+  const [optionId, setOptionId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const options = useMemo(
-    () => [...categories.map((c) => ({ id: c.id, name: c.name || c.code })), { id: 'etc', name: '기타', etc: true }],
-    [categories],
-  );
-
-  const submit = async () => {
+  const resetToDescribe = () => {
+    setStage('describe');
+    setAttemptId(null);
+    setQuestion(null);
+    setAnsweredCount(0);
+    setOptionId('');
     setError('');
-    if (!selected) return setError('분실물 카테고리를 선택해 주세요.');
-    if (selected.etc && !customName.trim()) return setError('어떤 물건인지 직접 입력해 주세요.');
-    if (!answer.trim()) return setError('본인 확인 질문에 대한 답변을 입력해 주세요.');
+  };
+
+  // 판정 결과를 부모 화면에 넘긴다. 소유 확인 성공이면 반환 코드를 발급받는다.
+  const finish = async (step) => {
+    if (step.decision === 'supported' && step.foundItemId) {
+      try {
+        const code = await api(`/found-items/${encodeURIComponent(step.foundItemId)}/return-code`, {
+          method: 'POST',
+          body: { attempt_id: attemptId },
+        });
+        return onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name ?? null });
+      } catch (err) {
+        return onResult({ status: 'error', message: errorText(err) });
+      }
+    }
+    if (step.decision === 'not_confirmed') return onResult({ status: 'wrong' });
+    return onResult({ status: 'admin' });
+  };
+
+  const startAttempt = async () => {
+    const text = description.trim();
+    if (!text) return setError('물건의 특징을 입력해 주세요.');
+    setError('');
     setBusy(true);
     try {
-      const result = await searchAndVerifyLostItem({
-        categoryId: selected.etc ? null : selected.id,
-        categoryName: selected.name,
-        customName: customName.trim(),
-        answer: answer.trim(),
-      });
-      onResult(result);
+      const res = await api('/ownership/attempts', { method: 'POST', body: { description: text } });
+      const step = interpretOwnerResponse(res);
+      if (step.kind === 'question') {
+        setAttemptId(step.attemptId);
+        setQuestion(step.question);
+        setAnsweredCount(0);
+        setOptionId('');
+        setStage('question');
+      } else if (step.kind === 'needs_clues') {
+        setError('특징을 조금 더 자세히 적어 주세요. 색상, 모양, 브랜드, 부착물 등을 함께 적으면 좋아요.');
+      } else if (step.kind === 'not_found') {
+        onResult({ status: 'not_found' });
+      } else if (step.kind === 'search_limit') {
+        setError('검색 가능한 물품 수를 초과했습니다. 잠시 후 다시 시도해 주세요.');
+      } else {
+        setError('응답을 처리하지 못했습니다. 다시 시도해 주세요.');
+      }
+    } catch (err) {
+      setError(errorText(err));
     } finally {
       setBusy(false);
     }
   };
 
+  const submitAnswer = async () => {
+    if (!optionId || !question) return;
+    setError('');
+    setBusy(true);
+    try {
+      const res = await api(`/ownership/attempts/${attemptId}/answers`, {
+        method: 'POST',
+        body: { question_id: question.id, option_id: optionId },
+      });
+      const nextCount = answeredCount + 1;
+      setAnsweredCount(nextCount);
+      const step = interpretOwnerResponse(res);
+      const next = decideAfterAnswer(step, nextCount, res?.answer_result);
+      if (next === 'question') {
+        setQuestion(step.question);
+        setOptionId('');
+      } else if (next === 'wrong') {
+        onResult({ status: 'wrong' });
+      } else if (next === 'admin') {
+        onResult({ status: 'admin' });
+      } else if (next === 'decided') {
+        await finish(step);
+      } else {
+        setError('응답을 처리하지 못했습니다. 다시 시도해 주세요.');
+      }
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleBack = () => (stage === 'question' ? resetToDescribe() : onBack());
+
   return (
     <div className="space-y-6">
       <BackHeader
-        onBack={onBack}
+        onBack={handleBack}
         title="잃어버린 물건 찾기"
-        desc="분실물의 카테고리 및 정보와 본인 확인 질문에 답해 주세요."
+        desc={
+          stage === 'describe'
+            ? '기억나는 특징을 최대한 많이 적어 주세요.'
+            : '질문에 맞는 답을 골라 주세요. 한 번이라도 틀리면 처음 화면으로 돌아갑니다.'
+        }
         badge="분실자 모드"
         badgeClass="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
       />
 
-      <div className="space-y-4 max-w-xl mx-auto py-2 w-full">
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-2">1. 분실물 카테고리 선택</label>
-          {categoriesError && <p className="text-[11px] text-rose-300 mb-2">{categoriesError}</p>}
-          {!categoriesError && categories.length === 0 && (
-            <p className="text-[11px] text-slate-500 mb-2">서버에 등록된 카테고리가 없습니다. [기타]를 선택해 직접 입력해 주세요.</p>
-          )}
-          <div className="grid grid-cols-3 gap-2">
-            {options.map((opt) => {
-              const active = selected?.id === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => setSelected(opt)}
-                  className={`p-3 border rounded-xl text-xs font-medium text-slate-300 flex flex-col items-center gap-1.5 transition-all hover:border-emerald-500 ${
-                    active ? 'border-emerald-500 bg-emerald-950/30' : 'bg-slate-800 border-slate-700'
-                  }`}
-                >
-                  {opt.etc ? <Ellipsis size={16} className="text-purple-400" /> : <Package size={16} className="text-indigo-400" />}
-                  {opt.name}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {selected?.etc && (
+      {stage === 'describe' && (
+        <div className="space-y-4 max-w-xl mx-auto py-2 w-full">
           <div>
-            <label className="block text-xs font-semibold text-emerald-400 mb-1.5 flex items-center gap-1">
-              <SquarePen size={12} /> 어떤 물건인지 직접 입력해 주세요
+            <label htmlFor="lost-description" className="block text-sm font-semibold text-slate-200 mb-1">
+              물건에 대한 특징을 최대한 많이 입력해주세요
             </label>
-            <input
-              type="text"
-              value={customName}
-              onChange={(e) => setCustomName(e.target.value)}
-              placeholder="예: 무선 이어폰 케이스, 스케치북, 자동차 키 등"
-              className="w-full bg-slate-900 border border-emerald-500/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-400 placeholder:text-slate-500"
+            <p className="text-[11px] text-slate-500 mb-2">색상, 모양, 브랜드, 부착물, 흠집, 내용물, 잃어버린 장소 등을 자유롭게 적어 주세요.</p>
+            <textarea
+              id="lost-description"
+              rows={4}
+              maxLength={1000}
+              disabled={busy}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={OWNER_DESCRIPTION_EXAMPLE}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-500 placeholder:text-slate-600"
             />
+            <p className="text-[11px] text-slate-500 mt-1.5">예시: {OWNER_DESCRIPTION_EXAMPLE}</p>
           </div>
-        )}
 
-        <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1.5">2. 습득물 본인 확인 질문 (특징 입력)</label>
-          <div className="bg-slate-900/80 p-3.5 rounded-xl border border-slate-700 space-y-2">
-            <p className="text-xs text-slate-400 flex items-start gap-1">
-              <CircleHelp size={14} className="text-emerald-400 shrink-0 mt-px" />
-              {selected
-                ? `[${selected.etc ? customName.trim() || '기타' : selected.name}] 물건의 브랜드, 색상, 내부 내용물 등 소유자만 알 수 있는 특징을 적어주세요.`
-                : '카테고리를 선택하면 본인 확인 질문이 생성됩니다.'}
-            </p>
-            <input
-              type="text"
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              placeholder="질문에 대한 답변을 입력해 주세요 (예: 검정색 가죽 지갑)"
-              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-            />
-          </div>
+          {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
+
+          <button
+            type="button"
+            onClick={startAttempt}
+            disabled={busy || !description.trim()}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
+          >
+            {busy ? '질문을 만드는 중...' : '다음: 확인 질문 받기'}
+          </button>
         </div>
+      )}
 
-        {error && <p className="text-xs text-rose-300">{error}</p>}
+      {stage === 'question' && question && (
+        <div className="space-y-5 max-w-xl mx-auto py-2 w-full">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-emerald-400">
+              질문 {answeredCount + 1} / {OWNER_QUESTION_TARGET}
+            </span>
+            <div className="flex gap-1.5">
+              {Array.from({ length: OWNER_QUESTION_TARGET }, (_, i) => (
+                <span
+                  key={i}
+                  className={`w-2.5 h-2.5 rounded-full ${i < answeredCount ? 'bg-emerald-500' : i === answeredCount ? 'bg-emerald-400/60' : 'bg-slate-700'}`}
+                />
+              ))}
+            </div>
+          </div>
 
-        <button
-          onClick={submit}
-          disabled={busy}
-          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg shadow-emerald-600/20 transition-all mt-4"
-        >
-          {busy ? '확인 중...' : '본인 확인 및 분실물 검색'}
-        </button>
-      </div>
+          <fieldset disabled={busy} key={question.id} className="space-y-2">
+            <legend className="text-base font-semibold text-white mb-3">{question.text}</legend>
+            {question.options.map((option) => (
+              <label
+                key={option.id}
+                className={`flex items-center gap-3 rounded-xl border p-3.5 text-sm cursor-pointer transition-all ${
+                  optionId === option.id
+                    ? 'border-emerald-500 bg-emerald-950/30 text-white'
+                    : 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="ownership-answer"
+                  value={option.id}
+                  checked={optionId === option.id}
+                  onChange={() => setOptionId(option.id)}
+                  className="accent-emerald-500 w-5 h-5"
+                />
+                {option.label}
+              </label>
+            ))}
+          </fieldset>
+
+          {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
+
+          <button
+            type="button"
+            onClick={submitAnswer}
+            disabled={busy || !optionId}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
+          >
+            {busy ? '확인 중...' : '답변 제출'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function WebOwnerSuccess({ result, onGoKiosk }) {
+function WebOwnerSuccess({ result, kiosks, onGoKiosk, onHome }) {
+  // 반환 코드 응답의 키오스크 이름으로 목록에서 위치 설명을 찾는다.
+  const kiosk = kiosks.find((k) => k.name === result.kioskName) || null;
   return (
     <div className="space-y-6 text-center py-6">
       <div className="inline-flex p-3 bg-emerald-500/20 text-emerald-400 rounded-full mb-1">
@@ -590,60 +712,89 @@ function WebOwnerSuccess({ result, onGoKiosk }) {
       </div>
       <div>
         <h2 className="text-2xl font-bold text-white">일치하는 분실물을 찾았습니다!</h2>
-        <p className="text-xs text-slate-400 mt-1">인증이 완료되었습니다. 아래 인증 수단으로 키오스크에서 보관함을 열 수 있습니다.</p>
+        <p className="text-xs text-slate-400 mt-1">아래 키오스크에서 [분실물 수령]을 누른 뒤 OTP 8자리를 입력하세요.</p>
       </div>
-      <div className="max-w-md mx-auto bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 shadow-xl space-y-4">
-        <div className="text-xs text-slate-400 border-b border-slate-800 pb-3 flex justify-between items-center">
-          <span>
-            보관소: <strong className="text-slate-200">{result.kioskName || '-'}</strong>
-          </span>
-          {result.expiresAt && (
-            <span className="text-emerald-400 font-bold">~{new Date(result.expiresAt).toLocaleString('ko-KR')}</span>
+      <div className="max-w-md mx-auto bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 shadow-xl space-y-4 text-left">
+        <div className="space-y-1">
+          <span className="text-xs text-slate-500">보관 키오스크 위치</span>
+          <p className="text-base font-bold text-white">{result.kioskName || '-'}</p>
+          {kiosk?.location_description && (
+            <p className="text-xs text-slate-300 flex items-start gap-1">
+              <MapPin size={12} className="text-slate-500 mt-0.5 shrink-0" /> {kiosk.location_description}
+            </p>
           )}
         </div>
-        <div>
+        <div className="border-t border-slate-800 pt-4 text-center">
           <span className="text-xs text-slate-500 block mb-1">수령용 OTP (8자리)</span>
           <div className="text-3xl font-mono font-bold tracking-[0.3em] text-emerald-400 bg-slate-950 py-3 pl-5 pr-4 rounded-lg border border-slate-800 inline-block">
             {result.code}
           </div>
+          {result.expiresAt && (
+            <p className="text-[11px] text-emerald-400 mt-2">~{new Date(result.expiresAt).toLocaleString('ko-KR')} 까지 사용 가능</p>
+          )}
         </div>
         <p className="text-[11px] text-slate-400 flex items-start justify-center gap-1">
-          <TriangleAlert size={12} className="text-amber-400 shrink-0 mt-px" /> OTP는 다시 조회할 수 없습니다. 현장 키오스크에서 [분실물 수령]을 누른 후 8자리 OTP를 입력하세요.
+          <TriangleAlert size={12} className="text-amber-400 shrink-0 mt-px" /> OTP는 다시 조회할 수 없습니다. 반드시 지금 기록해 두세요.
         </p>
       </div>
-      <button
-        onClick={onGoKiosk}
-        className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg inline-flex items-center gap-1"
-      >
-        키오스크로 이동 <ArrowRight size={12} />
-      </button>
+      <div className="flex flex-col sm:flex-row justify-center gap-3">
+        <button
+          onClick={onHome}
+          className="px-6 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white text-sm font-bold rounded-xl transition-all inline-flex items-center justify-center gap-1.5"
+        >
+          <House size={16} /> 처음으로
+        </button>
+        <button
+          onClick={onGoKiosk}
+          className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg inline-flex items-center justify-center gap-1"
+        >
+          키오스크 모드로 이동 <ArrowRight size={12} />
+        </button>
+      </div>
     </div>
   );
 }
 
-function WebOwnerNotice({ kind, onRetry, onHome }) {
-  const unavailable = kind === 'unavailable';
+function WebOwnerNotice({ kind, message, onRetry, onHome }) {
+  const messages = {
+    not_found: {
+      title: '찾고 있는 분실물이 없습니다',
+      body: '설명과 일치하는 보관 물품을 찾지 못했습니다. 다른 특징을 더해 다시 입력해 보세요.',
+      icon: <Info size={36} />,
+      tone: 'bg-amber-500/20 text-amber-400',
+    },
+    admin: {
+      title: '관리자에게 문의하세요',
+      body: '현재 사용자가 찾는 물품과 유사한 제품이 2개 이상 보관되어 있습니다. 관리자에게 문의하세요.',
+      icon: <Info size={36} />,
+      tone: 'bg-amber-500/20 text-amber-400',
+    },
+    error: {
+      title: 'OTP를 발급하지 못했습니다',
+      body: message || '잠시 후 다시 시도해 주세요.',
+      icon: <CircleX size={36} />,
+      tone: 'bg-rose-500/20 text-rose-400',
+    },
+  };
+  const view = messages[kind] || messages.error;
   return (
     <div className="space-y-6 text-center py-10">
-      <div
-        className={`inline-flex p-3 rounded-full mb-1 ${unavailable ? 'bg-amber-500/20 text-amber-400' : 'bg-rose-500/20 text-rose-400'}`}
-      >
-        {unavailable ? <Info size={36} /> : <CircleX size={36} />}
-      </div>
+      <div className={`inline-flex p-3 rounded-full mb-1 ${view.tone}`}>{view.icon}</div>
       <div>
-        <h2 className="text-2xl font-bold text-white">{unavailable ? '분실물 검색 기능 준비 중' : '찾고 있는 분실물이 없습니다'}</h2>
-        <p className="text-xs text-slate-400 mt-2 max-w-sm mx-auto leading-relaxed">
-          {unavailable
-            ? '분실물 검색·본인 확인 서버 기능이 아직 제공되지 않아 결과를 조회할 수 없습니다.'
-            : '아직 시스템에 등록되지 않았거나, 입력하신 답변 및 정보가 등록된 특징과 일치하지 않습니다.'}
-        </p>
+        <h2 className="text-2xl font-bold text-white">{view.title}</h2>
+        <p className="text-sm text-slate-300 mt-3 max-w-md mx-auto leading-relaxed">{view.body}</p>
       </div>
       <div className="pt-4 flex justify-center gap-3">
-        <button onClick={onRetry} className="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded-xl transition-all">
-          정보 다시 입력하기
-        </button>
-        <button onClick={onHome} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl transition-all">
-          메인으로 돌아가기
+        {onRetry && (
+          <button onClick={onRetry} className="px-5 py-3 bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold rounded-xl transition-all">
+            정보 다시 입력하기
+          </button>
+        )}
+        <button
+          onClick={onHome}
+          className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg inline-flex items-center gap-1.5"
+        >
+          <House size={16} /> 처음으로
         </button>
       </div>
     </div>
@@ -653,25 +804,39 @@ function WebOwnerNotice({ kind, onRetry, onHome }) {
 /* ============================================================
  * 웹 포털 컨테이너
  * ============================================================ */
-function WebPortal({ kiosks, kiosksError, categories, categoriesError, onReload, onGoKiosk }) {
-  const [step, setStep] = useState('type'); // type | finder | owner | success | not_found | unavailable
+function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
+  const [step, setStep] = useState('type'); // type | finder | owner | success | not_found | admin | error
   const [ownerResult, setOwnerResult] = useState(null);
+  const [flash, setFlash] = useState('');
+
+  const goHome = () => {
+    setStep('type');
+    setOwnerResult(null);
+  };
 
   const handleOwnerResult = (result) => {
-    if (result?.status === 'success') {
-      setOwnerResult(result);
-      setStep('success');
-    } else if (result?.status === 'not_found') {
-      setStep('not_found');
-    } else {
-      setStep('unavailable');
+    if (result?.status === 'wrong') {
+      // 오답이면 처음 화면으로 돌아가고 안내 문구를 띄운다.
+      setFlash('입력하신 답변이 등록된 특징과 일치하지 않아 처음 화면으로 돌아왔습니다. 다시 시도해 주세요.');
+      setOwnerResult(null);
+      setStep('type');
+      return;
     }
+    setFlash('');
+    setOwnerResult(result);
+    setStep(result?.status || 'error');
   };
 
   return (
     <div className="w-full bg-slate-800/50 border border-slate-700/60 rounded-3xl p-4 sm:p-8 flex-1 flex flex-col justify-between shadow-2xl backdrop-blur">
       {step === 'type' && (
         <div className="space-y-6 my-auto text-center py-8">
+          {flash && (
+            <div className="max-w-2xl mx-auto text-left p-3.5 bg-rose-950/40 border border-rose-500/40 rounded-xl text-xs text-rose-200 flex justify-between items-start gap-3">
+              <span>{flash}</span>
+              <button onClick={() => setFlash('')} className="text-rose-300 hover:text-white shrink-0">닫기</button>
+            </div>
+          )}
           <div>
             <span className="px-3 py-1 bg-indigo-500/10 text-indigo-400 rounded-full text-xs font-semibold uppercase tracking-wider border border-indigo-500/20">
               서비스 선택
@@ -706,7 +871,7 @@ function WebPortal({ kiosks, kiosksError, categories, categoriesError, onReload,
               <div>
                 <span className="text-xs text-emerald-400 font-semibold">분실자 (Owner)</span>
                 <h3 className="text-xl font-bold text-white mt-0.5">물건을 잃어버렸어요</h3>
-                <p className="text-xs text-slate-400 mt-2">찾고 있는 물건 정보를 입력하고 본인 확인 후 수령용 OTP 8자리를 받습니다.</p>
+                <p className="text-xs text-slate-400 mt-2">특징을 자유롭게 적으면 확인 질문 3개에 답해 본인 확인 후 수령용 OTP를 받습니다.</p>
               </div>
               <div className="mt-4 flex items-center gap-1 text-xs font-semibold text-emerald-400 group-hover:translate-x-1 transition-transform">
                 분실물 찾기 신청하기 <ArrowRight size={12} />
@@ -717,14 +882,19 @@ function WebPortal({ kiosks, kiosksError, categories, categoriesError, onReload,
       )}
 
       {step === 'finder' && (
-        <WebFinder kiosks={kiosks} kiosksError={kiosksError} onReload={onReload} onBack={() => setStep('type')} onGoKiosk={onGoKiosk} />
+        <WebFinder kiosks={kiosks} kiosksError={kiosksError} onReload={onReload} onBack={goHome} onGoKiosk={onGoKiosk} />
       )}
-      {step === 'owner' && (
-        <WebOwner categories={categories} categoriesError={categoriesError} onBack={() => setStep('type')} onResult={handleOwnerResult} />
+      {step === 'owner' && <WebOwner kiosks={kiosks} onBack={goHome} onResult={handleOwnerResult} />}
+      {step === 'success' && ownerResult && (
+        <WebOwnerSuccess result={ownerResult} kiosks={kiosks} onGoKiosk={onGoKiosk} onHome={goHome} />
       )}
-      {step === 'success' && ownerResult && <WebOwnerSuccess result={ownerResult} onGoKiosk={onGoKiosk} />}
-      {(step === 'not_found' || step === 'unavailable') && (
-        <WebOwnerNotice kind={step} onRetry={() => setStep('owner')} onHome={() => setStep('type')} />
+      {(step === 'not_found' || step === 'admin' || step === 'error') && (
+        <WebOwnerNotice
+          kind={step}
+          message={ownerResult?.message}
+          onRetry={step === 'admin' ? undefined : () => setStep('owner')}
+          onHome={goHome}
+        />
       )}
     </div>
   );
@@ -737,6 +907,17 @@ function WebPortal({ kiosks, kiosksError, categories, categoriesError, onReload,
  *       → deposit/open → deposit/complete
  * 수령: POST /pickup/open → /pickup/{found_item_id}/complete
  * ============================================================ */
+function StepBackBar({ onBack }) {
+  return (
+    <button
+      onClick={onBack}
+      className="inline-flex items-center gap-1 text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg px-3.5 py-2.5 transition-colors shrink-0"
+    >
+      <ArrowLeft size={13} /> 뒤로가기
+    </button>
+  );
+}
+
 function ShotBox({ label, imageUrl, scanning }) {
   return (
     <div className="w-40 h-40 bg-slate-900 border-2 border-dashed border-indigo-500/60 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden shadow-inner">
@@ -763,10 +944,10 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
 
   // 등록 상태
   const [categoryId, setCategoryId] = useState('');
-  const [place, setPlace] = useState('');
-  const [desc, setDesc] = useState('');
   const [registration, setRegistration] = useState(null);
   const [previews, setPreviews] = useState({});
+  const [shot2GuideOpen, setShot2GuideOpen] = useState(false); // 1차 촬영 후 방향 안내 팝업
+  const [retakeOrder, setRetakeOrder] = useState(null); // 재촬영 대상 사진 번호(1|2) | null
 
   // 수령 상태
   const [code, setCode] = useState('');
@@ -790,25 +971,26 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
     setFailMessage('');
     setInlineError('');
     setCategoryId('');
-    setPlace('');
-    setDesc('');
     setRegistration(null);
     setPreviews({});
+    setShot2GuideOpen(false);
+    setRetakeOrder(null);
     setCode('');
     setPickup(null);
     setPickupConfirmed(false);
   };
 
   // 요청 실행 래퍼: 진행 중 표시, 실패 시 실패 화면 또는 화면 내 오류 표시
-  const run = useCallback(async (message, fn, { inline = false } = {}) => {
+  const run = useCallback(async (message, fn, { inline = false, mapError } = {}) => {
     setBusy(message);
     setInlineError('');
     try {
       await fn();
     } catch (err) {
-      if (inline) setInlineError(errorText(err));
+      const text = mapError ? mapError(err) : errorText(err);
+      if (inline) setInlineError(text);
       else {
-        setFailMessage(errorText(err));
+        setFailMessage(text);
         setStep('fail');
       }
     } finally {
@@ -828,13 +1010,10 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
   // [POST /api/registrations] 등록 건 생성 후 촬영 단계로
   const startRegistration = () =>
     run('등록 정보를 생성하는 중...', async () => {
-      const parts = [];
-      if (place.trim()) parts.push(`습득 장소: ${place.trim()}`);
-      if (desc.trim()) parts.push(`특징: ${desc.trim()}`);
       const body = {
         kiosk_id: kioskId,
         primary_category_id: categoryId || null,
-        secondary_description: parts.length ? parts.join('\n') : null,
+        secondary_description: null,
       };
       const data = await api('/registrations', { method: 'POST', body });
       setRegistration(data);
@@ -842,13 +1021,35 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
     });
 
   // [POST /api/registrations/{id}/shots/{1|2}] 촬영
+  // 카메라 전원 꺼짐 등 장치 자체 오류는 500으로 내려오며, 이 경우 안내 후 등록을 종료한다.
+  // 참고: 현재 백엔드는 같은 사진 번호의 재요청에 기존 저장 결과를 반환하므로(docs/api.md),
+  // 재촬영이 실제로 새 사진을 저장하려면 백엔드의 재촬영 지원이 먼저 필요하다.
   const capture = (order) =>
-    run(`${order}차 촬영 중입니다. 물건을 움직이지 마세요...`, async () => {
-      const data = await api(`/registrations/${registration.id}/shots/${order}`, { method: 'POST' });
-      setRegistration(data);
-      await loadPreview(registration.id, order);
-      setStep(order === 1 ? 'reg-shot2' : 'reg-review');
-    });
+    run(
+      `${order}차 촬영 중입니다. 물건을 움직이지 마세요...`,
+      async () => {
+        const data = await api(`/registrations/${registration.id}/shots/${order}`, { method: 'POST' });
+        setRegistration(data);
+        await loadPreview(registration.id, order);
+        if (retakeOrder === order) {
+          setRetakeOrder(null);
+          setStep('reg-review');
+        } else if (order === 1) {
+          setShot2GuideOpen(true);
+          setStep('reg-shot2');
+        } else {
+          setStep('reg-review');
+        }
+      },
+      { mapError: (err) => (err.status === 500 ? CAMERA_HARDWARE_ERROR_MESSAGE : errorText(err)) },
+    );
+
+  // 재촬영: 확인 화면에서 특정 사진만 다시 촬영하도록 해당 촬영 단계로 되돌아간다.
+  const retakeShot = (order) => {
+    setRetakeOrder(order);
+    setInlineError('');
+    setStep(order === 1 ? 'reg-shot1' : 'reg-shot2');
+  };
 
   // [POST analysis] → [POST deposit/open]
   const analyzeAndOpen = () =>
@@ -925,6 +1126,22 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
   const disabled = !!busy;
   const noKiosk = !kioskId;
 
+  // 뒤로가기: 재촬영 중에는 확인(reg-review) 화면으로 돌아간다.
+  const backTargets = {
+    'reg-info': 'main',
+    'reg-shot1': retakeOrder === 1 ? 'reg-review' : 'reg-info',
+    'reg-shot2': retakeOrder === 2 ? 'reg-review' : 'reg-shot1',
+    'reg-review': 'reg-shot2',
+    'pickup-scan': 'main',
+  };
+  const goBack = () => {
+    const target = backTargets[step];
+    if (!target) return;
+    if (target !== 'reg-review') setRetakeOrder(null);
+    setInlineError('');
+    setStep(target);
+  };
+
   return (
     <div className="w-full max-w-xl mx-auto kiosk-frame bg-slate-950 p-6 flex-1 flex flex-col justify-between text-slate-100 min-h-[580px] my-auto relative">
       {/* Kiosk Header */}
@@ -935,7 +1152,7 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
             <select
               value={kioskId}
               onChange={(e) => setKioskId(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-md text-xs font-bold text-slate-300 px-2 py-1 focus:outline-none"
+              className="bg-slate-900 border border-slate-700 rounded-md text-sm font-bold text-slate-300 px-3 py-2 focus:outline-none"
             >
               {kiosks.map((k) => (
                 <option key={k.id} value={k.id}>
@@ -997,58 +1214,37 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
         </div>
       )}
 
-      {/* 등록 - 정보 입력 */}
+      {/* 등록 - 물건 종류 선택 (자유 입력 없음) */}
       {step === 'reg-info' && (
         <div className="space-y-4 my-auto">
-          <div className="border-b border-slate-800 pb-2">
+          <div className="flex items-center justify-between gap-2">
+            <StepBackBar onBack={goBack} />
             <span className="text-xs text-indigo-400 font-semibold">습득물 등록 · 1/4</span>
-            <h3 className="font-bold text-white text-base">습득 위치 및 특징 입력</h3>
-            <p className="text-xs text-slate-400">보관하실 물건의 정보를 입력해 주세요. (선택 입력)</p>
           </div>
-          <div className="space-y-3">
-            {categories.length > 0 && (
-              <div>
-                <label className="text-[11px] text-slate-400">물건 종류</label>
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="">선택 안 함</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name || c.code}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div>
-              <label className="text-[11px] text-slate-400">습득 장소</label>
-              <input
-                type="text"
-                value={place}
-                maxLength={200}
-                onChange={(e) => setPlace(e.target.value)}
-                placeholder="예: 2번 출구 계단 부근"
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] text-slate-400">물건 특징 및 상세 정보</label>
-              <textarea
-                value={desc}
-                maxLength={1700}
-                onChange={(e) => setDesc(e.target.value)}
-                placeholder="예: 검정색 가죽 지갑, 내부 신분증 포함"
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white h-16 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
+          <div className="border-b border-slate-800 pb-2">
+            <h3 className="font-bold text-white text-base">물건 종류 선택</h3>
+            <p className="text-xs text-slate-400">등록된 물건 종류가 있으면 선택해 주세요.</p>
           </div>
+          {categories.length > 0 ? (
+            <select
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
+            >
+              <option value="">선택 안 함</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name || c.code}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="text-xs text-slate-500">등록된 물건 종류가 없습니다. 바로 다음 단계로 진행합니다.</p>
+          )}
           <button
             disabled={disabled}
             onClick={startRegistration}
-            className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-bold rounded-xl text-xs shadow-lg transition-all inline-flex items-center justify-center gap-1"
+            className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all inline-flex items-center justify-center gap-1"
           >
             다음: 물건 촬영하기 <Camera size={14} />
           </button>
@@ -1058,8 +1254,13 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
       {/* 등록 - 1차 촬영 */}
       {step === 'reg-shot1' && (
         <div className="space-y-6 text-center my-auto">
+          <div className="flex items-center justify-between gap-2 text-left">
+            <StepBackBar onBack={goBack} />
+            <span className="text-xs text-indigo-400 font-semibold">
+              {retakeOrder === 1 ? '1차 사진 재촬영' : '습득물 등록 · 2/4'}
+            </span>
+          </div>
           <div>
-            <span className="text-xs text-indigo-400 font-semibold">습득물 등록 · 2/4</span>
             <h3 className="text-xl font-bold text-white mt-1">1차 촬영</h3>
             <p className="text-xs text-slate-400 mt-0.5">촬영 공간에 물건을 넣은 뒤 [촬영하기]를 눌러주세요.</p>
           </div>
@@ -1079,8 +1280,13 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
       {/* 등록 - 2차 촬영 */}
       {step === 'reg-shot2' && (
         <div className="space-y-6 text-center my-auto">
+          <div className="flex items-center justify-between gap-2 text-left">
+            <StepBackBar onBack={goBack} />
+            <span className="text-xs text-indigo-400 font-semibold">
+              {retakeOrder === 2 ? '2차 사진 재촬영' : '습득물 등록 · 3/4'}
+            </span>
+          </div>
           <div>
-            <span className="text-xs text-indigo-400 font-semibold">습득물 등록 · 3/4</span>
             <h3 className="text-xl font-bold text-white mt-1">2차 촬영</h3>
             <p className="text-xs text-amber-300 mt-1 flex items-center justify-center gap-1">
               <RotateCw size={12} /> {SHOT2_GUIDE}
@@ -1109,14 +1315,37 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
       {/* 등록 - 확인 및 보관함 열기 */}
       {step === 'reg-review' && (
         <div className="space-y-6 text-center my-auto">
-          <div>
+          <div className="flex items-center justify-between gap-2 text-left">
+            <StepBackBar onBack={goBack} />
             <span className="text-xs text-indigo-400 font-semibold">습득물 등록 · 4/4</span>
+          </div>
+          <div>
             <h3 className="text-xl font-bold text-white mt-1">촬영 사진 확인</h3>
-            <p className="text-xs text-slate-400 mt-0.5">사진을 확인한 뒤 촬영 공간에서 물건을 꺼내고 [보관함 열기]를 눌러주세요.</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              사진을 확인한 뒤 촬영 공간에서 물건을 꺼내고 [보관함 열기]를 눌러주세요. 사진이 잘못 찍혔다면 [재촬영]을 눌러 다시 찍을 수 있습니다.
+            </p>
           </div>
           <div className="flex justify-center gap-4">
-            <ShotBox label="1차 사진" imageUrl={previews[1]} />
-            <ShotBox label="2차 사진" imageUrl={previews[2]} />
+            <div className="space-y-1.5">
+              <ShotBox label="1차 사진" imageUrl={previews[1]} />
+              <button
+                disabled={disabled}
+                onClick={() => retakeShot(1)}
+                className="inline-flex items-center gap-1 text-xs text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg px-3.5 py-2.5 disabled:opacity-40"
+              >
+                <RotateCw size={12} /> 재촬영
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              <ShotBox label="2차 사진" imageUrl={previews[2]} />
+              <button
+                disabled={disabled}
+                onClick={() => retakeShot(2)}
+                className="inline-flex items-center gap-1 text-xs text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg px-3.5 py-2.5 disabled:opacity-40"
+              >
+                <RotateCw size={12} /> 재촬영
+              </button>
+            </div>
           </div>
           <button
             disabled={disabled}
@@ -1161,8 +1390,11 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
             <h2 className="text-2xl font-extrabold text-white mt-1">{registration?.locker_number}번 보관함에 보관되었습니다</h2>
             <p className="text-xs text-slate-400 mt-2">소중한 물건을 맡겨주셔서 감사합니다.</p>
           </div>
-          <button onClick={reset} className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-xl border border-slate-700">
-            처음 화면으로 돌아가기
+          <button
+            onClick={reset}
+            className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold rounded-xl border border-slate-700 inline-flex items-center gap-1.5"
+          >
+            <House size={16} /> 처음 화면으로 돌아가기
           </button>
         </div>
       )}
@@ -1170,8 +1402,11 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
       {/* 수령 - OTP 8자리 입력 */}
       {step === 'pickup-scan' && (
         <div className="space-y-5 text-center my-auto">
-          <div>
+          <div className="flex items-center justify-between gap-2 text-left">
+            <StepBackBar onBack={goBack} />
             <span className="text-xs text-emerald-400 font-semibold">분실물 수령</span>
+          </div>
+          <div>
             <h3 className="text-xl font-bold text-white mt-1">OTP 인증</h3>
             <p className="text-xs text-slate-400 mt-0.5">웹에서 발급받은 OTP 8자리를 입력해 주세요.</p>
           </div>
@@ -1260,8 +1495,11 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
             <h2 className="text-2xl font-extrabold text-white mt-1">물건을 찾아가셨습니다</h2>
             <p className="text-xs text-slate-400 mt-2">이용해 주셔서 감사합니다.</p>
           </div>
-          <button onClick={reset} className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-xl border border-slate-700">
-            처음 화면으로 돌아가기
+          <button
+            onClick={reset}
+            className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold rounded-xl border border-slate-700 inline-flex items-center gap-1.5"
+          >
+            <House size={16} /> 처음 화면으로 돌아가기
           </button>
         </div>
       )}
@@ -1276,8 +1514,11 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
             <h2 className="text-xl font-bold text-white">요청을 처리하지 못했습니다</h2>
             <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">{failMessage}</p>
           </div>
-          <button onClick={reset} className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-xl border border-slate-700">
-            처음 화면으로
+          <button
+            onClick={reset}
+            className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold rounded-xl border border-slate-700 inline-flex items-center gap-1.5"
+          >
+            <House size={16} /> 처음으로
           </button>
         </div>
       )}
@@ -1290,15 +1531,33 @@ function KioskView({ kiosks, kiosksError, categories, onReload }) {
         </div>
       )}
 
+      {/* 1차 촬영 후 방향 안내 팝업 */}
+      {shot2GuideOpen && (
+        <div className="absolute inset-0 z-40 bg-slate-950/90 rounded-[16px] flex items-center justify-center px-6">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-5 max-w-xs text-center space-y-3 shadow-2xl">
+            <div className="inline-flex p-3 bg-amber-500/20 text-amber-400 rounded-full">
+              <RotateCw size={24} />
+            </div>
+            <p className="text-sm text-white font-semibold leading-relaxed">{SHOT2_GUIDE}</p>
+            <button
+              onClick={() => setShot2GuideOpen(false)}
+              className="w-full py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg"
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Kiosk Footer */}
-      <div className="border-t border-slate-800 pt-3 flex justify-between items-center text-[11px] text-slate-500">
+      <div className="border-t border-slate-800 pt-3 flex justify-between items-center gap-3 text-[11px] text-slate-500">
         <button
           onClick={reset}
           disabled={disabled || step === 'reg-deposit' || step === 'pickup-open'}
           title={step === 'reg-deposit' || step === 'pickup-open' ? '보관함 문을 닫고 완료 버튼을 눌러주세요' : undefined}
-          className="hover:text-slate-300 disabled:opacity-40 inline-flex items-center gap-1"
+          className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-rose-600 border border-slate-700 hover:border-rose-500 text-slate-200 hover:text-white font-bold text-xs px-4 py-2 rounded-xl shadow disabled:opacity-40 disabled:hover:bg-slate-800 disabled:hover:border-slate-700 transition-colors"
         >
-          <House size={12} /> 처음으로
+          <House size={16} /> 처음으로
         </button>
         <span>도움말: 1588-0000</span>
       </div>
@@ -1386,8 +1645,6 @@ export default function App() {
             key={webKey}
             kiosks={kiosks}
             kiosksError={kiosksError}
-            categories={categories}
-            categoriesError={categoriesError}
             onReload={loadData}
             onGoKiosk={() => switchMode('kiosk')}
           />

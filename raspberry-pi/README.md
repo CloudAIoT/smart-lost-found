@@ -4,6 +4,8 @@
 
 현재 두 Pi에 컨트롤러를 설치해 Tailscale로 백엔드(EC2)와 연결했다. 촬영 Pi는 실제 카메라로 찍고, 보관함 Pi는 잠금장치 대신 칸마다 LED와 버튼으로 동작을 보여 준다([결정 기록 0002](docs/decisions/0002-locker-led-button.md)). 백엔드와 주고받는 요청·응답은 [docs/device-protocol.md](../docs/device-protocol.md)에 정리했다.
 
+보관함 상자와 센서는 실제로 만들지 않는다. 문·충격·무게 센서가 있다고 가정한 가상 센서로 강제 개방, 보관 안 됨, 수령 안 됨, 촬영 상자에 남은 물건 같은 이상 상황을 판단하고 MQTT로 알린다([결정 기록 0004](docs/decisions/0004-virtual-sensors.md), [MQTT 규약](../docs/mqtt-protocol.md)).
+
 ## 문서
 
 | 문서 | 내용 |
@@ -15,15 +17,17 @@
 | [하드웨어 설계](hardware/README.md) | 촬영 모듈·보관함 모듈 3D 배치, 배선, 설계 점검 |
 | [결정 기록 0001](docs/decisions/0001-single-camera-two-shots.md) | 카메라 1대로 물건 방향을 바꿔 2장 촬영 |
 | [결정 기록 0002](docs/decisions/0002-locker-led-button.md) | 시제품 보관함은 잠금장치 대신 LED와 버튼 |
-| [결정 기록 0003](docs/decisions/0003-mqtt-device-status.md) | 물건 유무와 장치 상태를 MQTT로 알리기 (제안) |
+| [결정 기록 0003](docs/decisions/0003-mqtt-device-status.md) | 물건 유무와 장치 상태를 MQTT로 알리기 |
+| [결정 기록 0004](docs/decisions/0004-virtual-sensors.md) | 보관함은 만들지 않고 가상 센서로 이상 상황을 시뮬레이션 |
 | [결정 기록 0005](docs/decisions/0005-kiosk-ipad.md) | 키오스크 화면은 촬영 Pi 모니터 대신 아이패드 |
+| [MQTT 규약](../docs/mqtt-protocol.md) | 두 Pi가 MQTT로 보내는 상태·이벤트·경고의 토픽과 형식 |
 
 ## 구성
 
 | Pi | 연결 장치 | 하는 일 |
 | --- | --- | --- |
-| 촬영 Pi | 카메라 1대(Camera Module 3) | 분실물 촬영(방향을 바꿔 2장) |
-| 보관함 Pi | 칸마다 LED와 버튼 (시제품, 잠금장치·문 센서는 향후 과제) | 열린 칸 표시, 문 닫힘 확인 |
+| 촬영 Pi | 카메라 1대(Camera Module 3), 가상 무게 센서(촬영 상자) | 분실물 촬영(방향을 바꿔 2장), 촬영 상자에 남은 물건 알림 |
+| 보관함 Pi | 칸마다 LED와 버튼, 가상 문·충격·무게 센서 (잠금장치는 향후 과제) | 열린 칸 표시, 문 닫힘 확인, 강제 개방·보관 안 됨·수령 안 됨 알림 |
 
 사진을 2장 찍는 이유: 물건의 한 면만 찍으면 모양·크기·특징을 정확히 판별하기 어렵다. Raspberry Pi 4에는 카메라 단자가 하나뿐이라, 카메라 1대로 한 장을 찍은 뒤 사용자에게 물건을 돌리거나 눕혀 달라고 안내하고 한 장을 더 찍는다.
 
@@ -40,14 +44,18 @@ flowchart LR
     LockerPi -->|처리 결과| Backend
     CapturePi --- Camera[카메라]
     LockerPi --- Locker[칸별 LED·버튼]
+    CapturePi -.->|상태·경고| Broker[MQTT 브로커]
+    LockerPi -.->|상태·경고| Broker
+    Broker -.-> Backend
 ```
 
-백엔드와 두 Pi는 Tailscale로 연결된다. 키오스크 웹 화면은 촬영 상자 옆 아이패드에 띄우고, 화면은 Pi의 API를 직접 부르지 않고 백엔드하고만 통신한다. Pi도 백엔드를 주기적으로 조회하지 않는다.
+백엔드와 두 Pi는 Tailscale로 연결된다. 키오스크 웹 화면은 촬영 상자 옆 아이패드에 띄우고, 화면은 Pi의 API를 직접 부르지 않고 백엔드하고만 통신한다. Pi도 백엔드를 주기적으로 조회하지 않는다. 대신 장치에서 생긴 변화(센서 상태, 이상 상황 경고, 장치 연결)는 Pi가 MQTT 브로커에 먼저 보내고, 백엔드가 받아 간다(점선).
 
 ## 하드웨어 구성 (시제품)
 
 - 촬영 상자 1개: 카메라 1대(Raspberry Pi Camera Module 3, 자동초점). 분실물을 넣고 '촬영'을 누르면 한 장, 물건을 돌리거나 눕힌 뒤 한 장을 더 찍는다
-- 보관함 2칸: 칸마다 LED(열린 칸 표시)와 버튼(문 닫힘). 잠금장치와 문 센서는 향후 과제다
+- 보관함 2칸: 칸마다 LED(열린 칸 표시)와 버튼(문 닫힘). 잠금장치는 향후 과제다
+- 가상 센서: 보관함 칸마다 문(리드 스위치)·충격(진동)·무게(로드셀), 촬영 상자 바닥에 무게(로드셀). 실물 없이 시연용 명령으로 값을 만든다
 - 아이패드: 촬영 상자 옆에서 배포된 웹의 키오스크 화면을 띄운다 (터치)
 
 상자 크기, 장치 위치, 배선은 [하드웨어 설계](hardware/README.md)에 3D 모델로 정리했다.
@@ -56,9 +64,10 @@ flowchart LR
 
 ```text
 raspberry-pi/
-├── app/        Pi 컨트롤러 (FastAPI, 설정으로 촬영/보관함 역할 선택)
+├── app/        Pi 컨트롤러 (FastAPI, 설정으로 촬영/보관함 역할 선택), 가상 센서·상황 판단·MQTT
 │   └── hardware/   장치 기능 정의, 실제 카메라, 보관함 LED·버튼, 가짜 장치
-├── tests/      통신 규약·카메라·보관함 테스트
+├── tests/      통신 규약·카메라·보관함·가상 센서·MQTT 테스트
+├── tools/      시연 도구 (sim.py 가상 센서 조작, watch.py MQTT 메시지 보기)
 ├── deploy/     설치·접속 안내, 자동 실행 서비스
 ├── hardware/   3D 배치 모델과 배선 (OpenSCAD, STL), 시제품 사진
 ├── docs/       설계 결정, 실험, 문제 해결 기록
@@ -118,6 +127,43 @@ pytest -q               # 테스트
 
 시연할 때는 물건을 넣거나 꺼낸 뒤 그 칸의 버튼을 먼저 누르고 화면에서 완료를 누른다. 백엔드는 보관·수령을 완료하기 전에 문 상태를 확인하므로([D03·D06](../backend/docs/spec-review.md)), 버튼을 누르지 않으면 `DOOR_NOT_CLOSED`로 완료되지 않는다.
 
+## 가상 센서와 MQTT
+
+보관함 상자와 센서를 실제로 만들지 않고, 센서가 있다고 가정한 값으로 이상 상황을 판단해 MQTT로 알린다([결정 기록 0004](docs/decisions/0004-virtual-sensors.md)). 토픽과 메시지 형식은 [MQTT 규약](../docs/mqtt-protocol.md)에 있다.
+
+| 상황 | 시연 순서 (`tools/sim.py`) | 경고 |
+| --- | --- | --- |
+| 정상 보관 | 개방 명령 → `locker 1 put 150` → `locker 1 close` | 없음 |
+| 보관 안 됨 | 개방 명령 → `locker 1 close` | `ITEM_NOT_DEPOSITED` |
+| 수령 안 됨 | 물건이 있는 칸에 개방 명령 → `locker 1 close` | `ITEM_NOT_TAKEN` |
+| 강제 개방 | `locker 2 force-open` | `FORCED_OPEN`, LED가 빠르게 깜빡인다 |
+| 도난 의심 | 강제 개방 뒤 `locker 2 take` → `locker 2 close` | `ITEM_MISSING` |
+| 개방 시도 | 닫힌 칸에 `locker 1 shock` | `TAMPER` |
+| 촬영 상자에 남음 | `capture put 200` → 촬영 → 정해진 시간 기다림 | `CAPTURE_ITEM_LEFT` |
+
+개방 명령은 백엔드가 보낸다. 보관함 Pi가 실제 모드면 `close` 대신 그 칸의 버튼을 눌러도 된다. 물건이 있는 칸을 미리 만들려면 `locker 1 preset 150`, 닫힌 칸을 비우려면 `locker 1 clear`를 쓴다. 가상 무게는 Pi를 다시 켜도 남으므로, 시연 전에 `state`로 확인하고 백엔드의 보관 기록과 맞춘다.
+
+Pi의 `.env`에 아래를 더하고 서비스를 다시 켠다. 브로커 주소와 계정은 백엔드 담당과 정한다.
+
+```bash
+PI_SIMULATION=true
+PI_MQTT_HOST=<브로커 Tailscale 주소>
+PI_MQTT_USERNAME=<장치 계정>
+PI_MQTT_PASSWORD=<비밀번호>
+PI_SENSOR_STATE_FILE=/home/pi/.slf-pi/sensors.json
+```
+
+시연할 때는 맥에서 가상 센서를 움직이고, 다른 터미널에서 MQTT 메시지를 본다.
+
+```bash
+export PI_SIM_API_KEY=<보관함 Pi 키>
+python tools/sim.py --url http://slf-locker.local:8000 state
+python tools/sim.py --url http://slf-locker.local:8000 locker 2 force-open
+python tools/watch.py --host <브로커 주소> --user <계정>    # 비밀번호는 환경변수 MQTT_PASSWORD
+```
+
+2026-11-19 맥에서 확인했다. 실제 MQTT 브로커(amqtt)에 두 Pi 컨트롤러를 가짜 장치 모드로 붙이고 위 상황을 차례로 만들었다. 경고 6가지가 모두 왔고, 보관함 Pi를 갑자기 끄자 브로커가 대신 `offline`을 보냈다. 다시 켰을 때 1번 칸의 무게(150g)가 그대로 남아 있었다.
+
 ## 백엔드 호출 코드로 확인
 
 가짜 모드로 촬영 Pi와 보관함 Pi를 각각 띄운다(키는 예시).
@@ -150,7 +196,9 @@ PI_ROLE=locker PI_API_KEY=locker-key-123 PI_FAKE_HARDWARE=true uvicorn --factory
 - [ ] 잠금장치·문 센서 (향후 과제)
 - [x] 백엔드 서버·실제 Pi와 연동 시험 (백엔드 담당, #21)
 - [x] 키오스크 화면 정리: 아이패드로 웹을 띄우고, Pi의 화면 자동 실행은 하지 않기로 함 (결정 기록 0005)
-- [ ] MQTT로 물건 유무·장치 상태 알리기 (제안, 결정 기록 0003)
+- [x] 가상 센서와 상황 판단, MQTT 발행, 시연 도구 (Pi 쪽, 결정 기록 0004)
+- [ ] MQTT 브로커와 백엔드 구독, 화면 경고 표시 (백엔드·프론트 담당과 협의)
+- [ ] 두 Pi에 MQTT 설정 적용과 시연 점검
 
 ## 진행 기록
 
@@ -172,4 +220,6 @@ PI_ROLE=locker PI_API_KEY=locker-key-123 PI_FAKE_HARDWARE=true uvicorn --factory
 | 2026-11-16 | 두 Pi 전원을 새로 넣었을 때 서비스·Tailscale·시간 동기화가 저절로 켜지는 것 확인. 촬영 Pi는 카메라 준비까지 약 2분 |
 | 2026-11-17 | 보관함 Pi에 칸별 LED·버튼 배선(키트 브레드보드·T자 확장보드), 실제 Pi에서 개방 시 LED 깜빡임과 버튼으로 문 닫힘 확인 (#26) |
 | 2026-11-17 | #26 병합 후 보관함 Pi를 실제 모드로 전환(코드 받기, `PI_FAKE_HARDWARE=false`, 서비스 재시작), 서비스가 LED(GPIO 17·27)와 버튼(GPIO 22·23) 핀을 쓰는 것 확인 |
+| 2026-11-18 | 팀 회의와 교수님 조언으로 보관함을 하드웨어로 만드는 대신 MQTT와 가상 센서로 서비스 기능에 집중하기로 결정 (결정 기록 0004) |
 | 2026-11-18 | 팀 회의에서 키오스크 화면은 촬영 상자 옆 아이패드로 띄우기로 결정, Pi의 키오스크 화면 자동 실행은 하지 않음 (결정 기록 0005) |
+| 2026-11-19 | 가상 센서·상황 판단·MQTT 발행·시연 도구를 만들고, 맥에서 실제 브로커로 경고 6가지와 유언 메시지 확인 |

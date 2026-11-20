@@ -42,6 +42,28 @@ def test_button_of_closed_locker_does_nothing(pins):
     assert lockers.door(2) == "open"
 
 
+def test_forced_open_and_button_close_are_reported(pins):
+    lockers = GpioLockers([17, 27], [22, 23])
+    changes = []
+    lockers.listener = lambda number, change: changes.append((number, change))
+    lockers.force_open(1)  # 시뮬레이션의 강제 개방: LED가 빠르게 깜빡인다
+    assert lockers.door(1) == "open"
+    press(pins, 22)
+    assert lockers.door(1) == "closed"
+    assert changes == [(1, "forced"), (1, "closed")]
+
+
+def test_repeated_open_and_close_are_reported_once(pins):
+    lockers = GpioLockers([17, 27], [22, 23])
+    changes = []
+    lockers.listener = lambda number, change: changes.append((number, change))
+    lockers.open(2)
+    lockers.open(2)  # 같은 칸을 다시 열라는 명령
+    lockers.close(2)
+    lockers.close(2)
+    assert changes == [(2, "opened"), (2, "closed")]
+
+
 def test_pin_counts_must_match(pins):
     with pytest.raises(ValueError):
         GpioLockers([17, 27], [22])

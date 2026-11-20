@@ -1,5 +1,6 @@
 """One question at a time; the server owns the shortlist, progress, and decision."""
 
+from collections import Counter
 from datetime import timedelta, timezone
 from random import SystemRandom
 from uuid import UUID, uuid4
@@ -9,17 +10,17 @@ from sqlalchemy.orm import Session
 
 from app.errors import BusinessError, IntegrationError
 from app.models import FoundItem, OwnershipAttempt, now
-from .search import NARROW_FIELDS, PROOF_FIELDS, UNKNOWN, find_candidates, normalized, read_facts, stored_items
+from .search import PROOF_FIELDS, UNKNOWN, find_candidates, normalized, read_facts, stored_items
 from .workflow_ai import WorkflowAI
 from .workflow_schemas import (
-    AnswerRequest, AttemptState, AttemptView, Candidate, Choice, FieldName, OptionView,
+    AnswerRequest, AttemptState, AttemptView, Candidate, Choice, Evidence, FieldName, OptionView,
     OwnershipResult, Question, QuestionView, RecordedAnswer,
 )
 
 
 MAX_WRONG_GROUPS = 2
 OPTION_COUNT = 5
-POLICY_VERSION = "development_v2"
+POLICY_VERSION = "development_v3"
 ATTEMPT_TTL = timedelta(minutes=20)
 PROMPTS = {
     "distinctive_features": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
@@ -33,13 +34,30 @@ PROMPTS = {
 }
 
 
-def option_values(candidates: list[Candidate], field: FieldName) -> dict[str, str]:
-    options = {}
-    for candidate in candidates:
-        for feature in candidate.proof:
-            if feature.field == field:
-                options.setdefault(normalized(field, feature.value), feature.value)
-    return options
+def question_values(candidate: Candidate, field: FieldName) -> tuple[Evidence | None, list[str]]:
+    evidence = next((ev for ev in candidate.proof if ev.field == field), None)
+    return evidence, [evidence.value] if evidence else candidate.narrowing.get(field, [])
+
+
+def select_distractors(field: FieldName, known_labels: dict[str, str], candidates: list[Candidate],
+                       proposed: list[str]) -> list[str]:
+    seen = set(known_labels)
+    usable = []
+    for label in proposed:
+        key = normalized(field, label)
+        if not all(ch.isprintable() for ch in label) or key in UNKNOWN or key in {"모르겠어요", "기억안남"}:
+            continue
+        if any(key in other or other in key for other in seen):
+            continue
+        # Avoid revealing other known private facts as distractors.
+        if any(normalized(ev.field, ev.value) == normalized(ev.field, label)
+               for candidate in candidates for ev in candidate.proof):
+            continue
+        usable.append(label)
+        seen.add(key)
+        if len(seen) == OPTION_COUNT:
+            return usable
+    raise IntegrationError("OWNERSHIP_AI_INVALID_OPTIONS")
 
 
 def advance(state: AttemptState, ai: WorkflowAI) -> None:
@@ -53,18 +71,24 @@ def advance(state: AttemptState, ai: WorkflowAI) -> None:
     for field in PROOF_FIELDS:
         if field in used_fields:
             continue
-        labels = option_values(state.candidates, field)
-        if 1 <= len(labels) <= OPTION_COUNT:
-            coverage = sum(any(ev.field == field for ev in candidate.proof) for candidate in state.candidates)
-            choices.append((len(labels), coverage, True, field, labels))
-    if len(state.candidates) > 1:
-        for field in NARROW_FIELDS:
-            if field in used_fields or option_values(state.candidates, field):
+        labels, counts, coverage = {}, Counter(), 0
+        verification = False
+        for candidate in state.candidates:
+            evidence, values = question_values(candidate, field)
+            if not values:
                 continue
-            known = [candidate.narrowing[field] for candidate in state.candidates if field in candidate.narrowing]
-            labels = {normalized(field, label): label for label in known}
-            if 2 <= len(labels) <= OPTION_COUNT:
-                choices.append((len(labels), len(known), False, field, labels))
+            coverage += 1
+            verification = verification or evidence is not None
+            options = {normalized(field, label): label for label in values}
+            labels.update(options)
+            counts.update(options.keys())
+        if not 1 <= len(labels) <= OPTION_COUNT:
+            continue
+        if len(state.candidates) > 1 and not verification and min(counts.values()) == len(state.candidates):
+            continue
+        # With missing values retained, prefer the question that reduces the largest answer group most.
+        split = coverage - max(counts.values())
+        choices.append(((split, coverage, verification), field, labels))
     if not choices:
         state.decision = "insufficient_evidence"
         if len(state.candidates) == 1:
@@ -75,23 +99,12 @@ def advance(state: AttemptState, ai: WorkflowAI) -> None:
                 state.decision = "supported"
         return
 
-    _, _, verification, field, labels = max(choices, key=lambda entry: entry[:3])
+    rank, field, labels = max(choices, key=lambda entry: entry[0])
+    verification = rank[2]
     if len(labels) < OPTION_COUNT:
-        for label in ai.distractors(field, list(labels.values()), OPTION_COUNT - len(labels)):
-            key = normalized(field, label)
-            if not all(ch.isprintable() for ch in label) or key in UNKNOWN or key in {"모르겠어요", "기억안남"}:
-                continue
-            if any(key in known or known in key for known in labels):
-                continue
-            # Avoid revealing other known private facts as distractors.
-            if any(normalized(ev.field, ev.value) == normalized(ev.field, label)
-                   for candidate in state.candidates for ev in candidate.proof):
-                continue
-            labels[key] = label
-            if len(labels) == OPTION_COUNT:
-                break
-    if len(labels) != OPTION_COUNT:
-        raise IntegrationError("OWNERSHIP_AI_INVALID_OPTIONS")
+        proposed = ai.distractors(field, list(labels.values()), OPTION_COUNT - len(labels))
+        alternatives = select_distractors(field, labels, state.candidates, proposed)
+        labels.update((normalized(field, label), label) for label in alternatives)
     options = [Choice(id=uuid4(), label=label, value=value) for value, label in labels.items()]
     SystemRandom().shuffle(options)
     state.current = Question(id=uuid4(), field=field, purpose="verification" if verification else "narrowing",
@@ -150,18 +163,11 @@ def record_answer(state: AttemptState, answer: AnswerRequest) -> None:
     if choice is None:
         raise BusinessError("OWNERSHIP_OPTION_NOT_FOUND", 422)
     survivors, matched, conflicting = [], [], []
-    registered_narrowing_answer = question.purpose == "narrowing" and any(
-        question.field in candidate.narrowing
-        and normalized(question.field, candidate.narrowing[question.field]) == choice.value
-        for candidate in state.candidates
-    )
     for candidate in state.candidates:
-        evidence = next((ev for ev in candidate.proof if ev.field == question.field), None) if question.purpose == "verification" else None
-        expected = evidence.value if evidence else (
-            candidate.narrowing.get(question.field) if question.purpose == "narrowing" else None)
-        if choice.value is None or expected is None:
+        evidence, expected = question_values(candidate, question.field)
+        if choice.value is None or not expected:
             survivors.append(candidate)
-        elif normalized(question.field, expected) == choice.value:
+        elif any(normalized(question.field, label) == choice.value for label in expected):
             matched.append(candidate.item_id)
             if evidence and evidence.group not in candidate.matched_groups:
                 candidate.matched_groups.append(evidence.group)
@@ -175,8 +181,6 @@ def record_answer(state: AttemptState, answer: AnswerRequest) -> None:
                 wrong_groups = {ev.group for ev in candidate.proof if ev.field in wrong_fields}
                 if len(wrong_groups) < MAX_WRONG_GROUPS:
                     survivors.append(candidate)
-            elif not registered_narrowing_answer:
-                survivors.append(candidate)
     state.candidates = survivors
     state.answers.append(RecordedAnswer(question_id=question.id, field=question.field, option_id=choice.id,
                                         purpose=question.purpose,

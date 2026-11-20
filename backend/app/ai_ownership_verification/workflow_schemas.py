@@ -3,7 +3,7 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import Field, StringConstraints
+from pydantic import Field, StringConstraints, field_validator
 
 from .schemas import Contract
 
@@ -15,7 +15,7 @@ FieldName = Literal[
 Clue = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 ChoiceLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 Decision = Literal["supported", "not_confirmed", "insufficient_evidence"]
-PolicyVersion = Literal["development_v1", "development_v2"]
+PolicyVersion = Literal["development_v1", "development_v2", "development_v3"]
 
 
 class SearchRequest(Contract):
@@ -45,8 +45,14 @@ class SearchMatch(Contract):
     matched_fields: list[FieldName] = Field(min_length=1, max_length=10)
 
 
+class SearchAssessment(Contract):
+    item: int = Field(ge=1)
+    decision: Literal["match", "different", "unknown"]
+    matched_fields: list[FieldName] = Field(max_length=10)
+
+
 class SimilarItems(Contract):
-    matches: list[SearchMatch] = Field(max_length=100)
+    results: list[SearchAssessment] = Field(max_length=100)
 
 
 class Evidence(Contract):
@@ -63,8 +69,15 @@ class Candidate(Contract):
     item_id: UUID
     proof: list[Evidence]
     initial_matches: list[FieldName] = Field(default_factory=list)
-    narrowing: dict[FieldName, ChoiceLabel] = Field(default_factory=dict)
+    narrowing: dict[FieldName, list[ChoiceLabel]] = Field(default_factory=dict)
     matched_groups: list[str] = Field(default_factory=list)
+
+    @field_validator("narrowing", mode="before")
+    @classmethod
+    def read_legacy_single_values(cls, value):
+        if isinstance(value, dict):
+            return {field: [labels] if isinstance(labels, str) else labels for field, labels in value.items()}
+        return value
 
 
 class Choice(Contract):

@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.ai_ownership_verification.api import get_ownership_ai
-from app.ai_ownership_verification.search import matches
+from app.ai_ownership_verification.search import normalized
 from app.ai_ownership_verification.workflow import get_ownership_result
 from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
 from app.ai_ownership_verification.workflow_schemas import SearchClues, SearchMatch
@@ -32,9 +33,9 @@ class FakeAI:
     def similar_items(self, clues, items):
         shortlist = []
         for item, facts in items.items():
-            fields = [field for field, clue in clues.items() if any(
-                matches(field, value, clue) for value in facts.get(field, []))]
-            if fields and ("category" not in clues or "category" in fields):
+            fields = [field for field in clues if field in facts]
+            if fields and all({normalized(field, value) for value in facts[field]} ==
+                              {normalized(field, clues[field])} for field in fields):
                 shortlist.append(SearchMatch(item=item, matched_fields=fields))
         return shortlist
 
@@ -46,14 +47,17 @@ class FakeAI:
             "distinctive_features": ["노란 리본", "작은 은색 구슬", "하얀 줄무늬 스티커", "주황색 고리"],
             "visible_text": ["ZX", "TS", "B-9", "VV"],
             "material": ["종이", "금속", "고무", "유리"],
+            "shape": ["삼각기둥형", "반원형", "육각기둥형", "타원형"],
+            "structure": ["앞 주머니", "손잡이 고리", "뒷면 똑딱이", "가운데 칸막이"],
             "brand": ["Dickies", "Eastpak", "Muji", "Nike"],
             "color": ["red", "yellow", "white", "green"],
         }[field]
 
 
-def add_item(session, kiosk, *, number, decoration, mark, verified=True, group="mark", stored=True, location="도서관 1층"):
+def add_item(session, kiosk, *, number, decoration, mark, verified=True, group="mark", stored=True, location="도서관",
+             item_id=None):
     values = {
-        "category": "pencil_case", "color": ["black"], "material": "fabric", "brand": "Carhartt",
+        "category": "pencil_case", "color": ["black"],
         "visible_text": [mark], "distinctive_features": [decoration], "description": "검은색 필통",
     }
     evidence = [
@@ -67,11 +71,41 @@ def add_item(session, kiosk, *, number, decoration, mark, verified=True, group="
     locker = Locker(kiosk_id=kiosk.id, locker_number=number)
     session.add_all([reg, locker])
     session.flush()
-    item = FoundItem(registration_id=reg.id, status="stored" if stored else "awaiting_deposit")
+    item = FoundItem(id=item_id or uuid4(), registration_id=reg.id, status="stored" if stored else "awaiting_deposit")
     session.add(item)
     session.flush()
     session.add(StorageAssignment(found_item_id=item.id, locker_id=locker.id, status="stored"))
     return item.id
+
+
+def seed_matching_example(session):
+    # The 13 rows cover equivalent colors, missing fields, and explicit conflicts.
+    rows = [
+        ("필통", ["남색"], "도서관", "직사각형", ["옆 지퍼"], []),
+        ("필통", ["navy"], "도서관", "원통형", [], []),
+        ("필통", ["남색"], None, "직사각형", ["옆 지퍼"], []),
+        ("필통", None, "도서관", "원통형", [], ["MJ"]),
+        (None, ["남색"], "도서관", "직사각형", ["옆 지퍼"], []),
+        ("필통", None, None, "원통형", [], []),
+        (None, ["남색"], None, "직사각형", [], []),
+        (None, None, None, None, ["옆 지퍼"], ["AB"]),
+        ("필통", ["남색"], "학생회관", "직사각형", [], []),
+        ("필통", ["검정색"], "도서관", "원통형", [], []),
+        ("지갑", ["남색"], "도서관", "직사각형", ["옆 지퍼"], []),
+        ("필통", ["남색"], "도서관 앞 벤치", "직사각형", [], []),
+        ("필통", ["남색", "흰색"], "도서관", "직사각형", ["흰색 지퍼"], []),
+    ]
+    kiosk = Kiosk(name="후보 비교 테스트", location_description="캠퍼스")
+    session.add(kiosk)
+    session.flush()
+    for number, (category, color, location, shape, structure, text) in enumerate(rows, start=1):
+        item_id = add_item(session, kiosk, number=number, item_id=UUID(int=number),
+                           decoration="테스트용", mark="MJ", location=location)
+        reg = session.get(Registration, session.get(FoundItem, item_id).registration_id)
+        reg.analysis_features = {
+            "data": {"category": category, "color": color, "shape": shape, "structure": structure, "visible_text": text},
+            "ownership_evidence": reg.analysis_features["ownership_evidence"][1:] if number == 4 else [],
+        }
 
 
 @pytest.fixture
@@ -108,8 +142,8 @@ def ownership(database_engine):
 BASE = "/api/ownership/attempts"
 
 
-def begin(env):
-    response = env.client.post(BASE, json={"description": "도서관 근처에서 검은색 필통을 잃어버렸어요"})
+def begin(env, description="도서관 근처에서 검은색 필통을 잃어버렸어요"):
+    response = env.client.post(BASE, json={"description": description})
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -151,7 +185,7 @@ def test_hands_off_only_after_every_private_feature_matches(ownership):
     assert result.item_id == ownership.first
     assert result.matched_evidence_groups == 2
     assert result.answered_questions == 2
-    assert result.policy_version == "development_v2"
+    assert result.policy_version == "development_v3"
 
 
 def test_verified_attempt_issues_one_otp_for_the_matched_item(ownership):
@@ -188,6 +222,8 @@ def test_two_photo_features_are_searchable_without_becoming_ownership_proof(owne
         session.commit()
     result = begin(ownership)
     assert result["initial_candidate_count"] == 1
+    assert "색상" in result["question"]["text"]
+    result = submit(ownership, result, "navy").json()
     assert result["decision"] == "insufficient_evidence"
     path = f"/api/found-items/{ownership.first}/return-code"
     assert ownership.client.post(path, json={"attempt_id": result["attempt_id"]}).status_code == 403
@@ -220,7 +256,7 @@ def test_continues_past_two_matches_and_four_questions_until_exhausted(ownership
         reg = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
         raw = reg.analysis_features
         reg.analysis_features = {
-            "data": {**raw["data"], "color": ["navy"]},
+            "data": {**raw["data"], "color": ["navy"], "material": "fabric", "brand": "Carhartt"},
             "ownership_evidence": raw["ownership_evidence"] + [
                 {"feature_id": field, "field": field, "value": value, "group": field,
                  "visibility": "private", "verified": True, "distinguishing": True}
@@ -291,7 +327,7 @@ def test_public_difference_narrows_candidates_but_never_counts_as_ownership_proo
     assert "재질" in view["question"]["text"]
     assert {option["label"] for option in view["question"]["options"]} == {"fabric", "plastic", "종이", "금속", "고무"}
     wrong = submit(ownership, view, "종이").json()
-    assert wrong["decision"] == "insufficient_evidence" and result_for(ownership, wrong).item_id is None
+    assert wrong["decision"] == "not_confirmed" and result_for(ownership, wrong).item_id is None
     view = begin(ownership)
     finished = submit(ownership, view, "fabric").json()
     result = result_for(ownership, finished)
@@ -300,10 +336,11 @@ def test_public_difference_narrows_candidates_but_never_counts_as_ownership_proo
 
 
 def test_mentioned_feature_is_not_asked_again(ownership):
-    ownership.ai.clues = SearchClues(category="필통", distinctive_features="파란 원형 핀")
+    ownership.ai.clues = SearchClues(category="필통", color="검은색", distinctive_features="파란 원형 핀")
     view = begin(ownership)
+    assert view["initial_candidate_count"] == 1
     assert "문구" in view["question"]["text"]
-    assert submit(ownership, view, "MJ").json()["decision"] == "insufficient_evidence"
+    assert submit(ownership, view, "MJ").json()["decision"] == "supported"
 
 
 def test_only_eligible_private_feature_is_enough_when_it_all_matches(ownership):
@@ -313,7 +350,9 @@ def test_only_eligible_private_feature_is_enough_when_it_all_matches(ownership):
         session.commit()
     view = begin(ownership)
     assert "문구" in view["question"]["text"]
-    finished = submit(ownership, view, "MJ").json()
+    view = submit(ownership, view, "MJ").json()
+    assert "색상" in view["question"]["text"]
+    finished = submit(ownership, view, "black").json()
     assert finished["decision"] == "supported"
     assert result_for(ownership, finished).matched_evidence_groups == 1
 
@@ -394,3 +433,90 @@ def test_gemini_extracts_only_literal_user_clues():
         assert ai.extract("도서관에서 검은색 필통을 잃었어요").brand is None
         with pytest.raises(IntegrationError, match="OWNERSHIP_UNGROUNDED_CLUE"):
             ai.extract("검은색 필통")
+
+
+def test_missing_clues_keep_candidates_and_shape_question_partitions_them(ownership):
+    ownership.ai.clues = SearchClues(category="필통", color="남색", location="도서관")
+    with Session(ownership.engine) as session:
+        for item_id in (ownership.first, ownership.second):
+            session.get(FoundItem, item_id).status = "awaiting_deposit"
+        seed_matching_example(session)
+        session.commit()
+
+    def candidate_numbers(view):
+        with Session(ownership.engine) as session:
+            row = session.get(OwnershipAttempt, UUID(view["attempt_id"]))
+            return {UUID(candidate["item_id"]).int for candidate in row.state["candidates"]}
+
+    view = begin(ownership, "도서관에서 남색 필통을 잃어버렸어요.")
+    assert candidate_numbers(view) == set(range(1, 8))
+    assert "형태" in view["question"]["text"]
+    labels = {option["label"] for option in view["question"]["options"]}
+    assert len(labels) == 5 and {"직사각형", "원통형"} <= labels
+    assert candidate_numbers(submit(ownership, view, "직사각형").json()) == {1, 3, 5, 7}
+
+    view = begin(ownership, "도서관에서 남색 필통을 잃어버렸어요.")
+    view = submit(ownership, view, "원통형").json()
+    assert candidate_numbers(view) == {2, 4, 6}
+    assert "문구" in view["question"]["text"]
+    assert candidate_numbers(submit(ownership, view, "MJ").json()) == {2, 4, 6}
+
+
+def test_single_candidate_is_asked_about_remaining_shape(ownership):
+    with Session(ownership.engine) as session:
+        item = session.get(FoundItem, ownership.first)
+        reg = session.get(Registration, item.registration_id)
+        reg.analysis_features = {**reg.analysis_features["data"], "shape": "직사각형"}
+        session.get(FoundItem, ownership.second).status = "awaiting_deposit"
+        session.commit()
+    view = begin(ownership)
+    assert view["initial_candidate_count"] == 1
+    assert "형태" in view["question"]["text"]
+    pending = submit(ownership, view, "직사각형").json()
+    assert pending["status"] == "completed" and pending["decision"] == "insufficient_evidence"
+
+
+def gemini_json(result):
+    return httpx.Response(200, json={"candidates": [{"finishReason": "STOP",
+                          "content": {"parts": [{"text": json.dumps(result)}]}}]})
+
+
+@pytest.mark.parametrize("mode", ["matched", "no_matches", "incomplete"])
+def test_gemini_search_sends_explicit_unknowns_and_checks_full_batch(mode):
+    settings = GeminiSettings(_env_file=None, gemini_api_key="test-key", gemini_model="test-model")
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        payload = json.loads(request.content)
+        sent = json.loads(payload["contents"][0]["parts"][0]["text"])
+        assert sent == {
+            "clues": {"category": "필통", "color": "남색", "location": "도서관"},
+            "items": [
+                {"item": 1, "features": {"category": None, "color": ["navy"], "location": None}},
+                {"item": 2, "features": {"category": ["필통"], "color": None, "location": None}},
+                {"item": 3, "features": {"category": ["지갑"], "color": ["남색"], "location": None}},
+            ],
+        }
+        rows = [
+            {"item": 1, "decision": "match", "matched_fields": ["color"]},
+            {"item": 2, "decision": "match", "matched_fields": ["category"]},
+            {"item": 3, "decision": "different", "matched_fields": []},
+        ]
+        if mode == "no_matches":
+            rows = [{**row, "decision": "different", "matched_fields": []} for row in rows]
+        return gemini_json({"results": rows[:-1] if mode == "incomplete" else rows})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        ai = GeminiWorkflowAI(settings, client)
+        clues = {"category": "필통", "color": "남색", "location": "도서관"}
+        items = {1: {"color": ["navy"]}, 2: {"category": ["필통"]},
+                 3: {"category": ["지갑"], "color": ["남색"]}}
+        if mode == "incomplete":
+            with pytest.raises(IntegrationError, match="OWNERSHIP_AI_INVALID_MATCHES"):
+                ai.similar_items(clues, items)
+            assert len(calls) == 1
+            return
+        result = ai.similar_items(clues, items)
+    assert [item.item for item in result] == ([1, 2] if mode == "matched" else [])
+    assert len(calls) == 1

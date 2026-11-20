@@ -8,16 +8,14 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.errors import IntegrationError
 from app.models import Category, FoundItem, Registration, StorageAssignment
-from .workflow_ai import WorkflowAI
+from .workflow_ai import WorkflowAI, validate_search_matches
 from .workflow_schemas import Candidate, Evidence, SearchClues
 
 
 SEARCH_FIELDS = ("category", "color", "shape", "surface_texture", "brand", "visible_text", "structure",
                  "distinctive_features", "location", "material")
 PROOF_FIELDS = ("distinctive_features", "visible_text", "structure", "shape", "surface_texture", "material", "brand", "color")
-NARROW_FIELDS = ("shape", "surface_texture", "structure", "material", "brand", "color")
 MAX_REGISTERED_ROWS = 500
 SEARCH_BATCH_SIZE = 100
 ALIASES = {
@@ -28,6 +26,7 @@ ALIASES = {
     "color": {
         "검은색": "black", "검정": "black", "검정색": "black", "검은": "black", "블랙": "black",
         "흰색": "white", "하얀색": "white", "화이트": "white", "파랑": "blue",
+        "남색": "navy", "네이비": "navy",
         "파란색": "blue", "파란": "blue", "빨간색": "red", "빨간": "red", "빨강": "red",
     },
     "material": {"천": "fabric", "천재질": "fabric", "가죽": "leather", "플라스틱": "plastic"},
@@ -124,12 +123,13 @@ def find_candidates(session: Session, clues: SearchClues, ai: WorkflowAI) -> tup
     for item, reg, category in rows:
         facts, proof, registered = read_facts(reg, category)
         narrowing = {}
-        for field in NARROW_FIELDS:
-            if field in provided or len(facts[field]) != 1:
+        for field in PROOF_FIELDS:
+            if field in provided:
                 continue
-            label = facts[field][0].strip()
-            if 1 <= len(label) <= 100 and all(ch.isprintable() for ch in label):
-                narrowing[field] = label
+            labels = [label.strip() for label in facts[field]
+                      if 1 <= len(label.strip()) <= 100 and all(ch.isprintable() for ch in label.strip())]
+            if labels:
+                narrowing[field] = labels
         candidates.append(Candidate(
             item_id=item.id, narrowing=narrowing,
             proof=[ev for ev in proof if ev.field not in provided and not any(
@@ -140,14 +140,10 @@ def find_candidates(session: Session, clues: SearchClues, ai: WorkflowAI) -> tup
     shortlisted = []
     for batch in batched(enumerate(features, start=1), SEARCH_BATCH_SIZE):
         items = dict(batch)
-        seen = set()
-        for match in ai.similar_items(searchable, items):
-            available = items.get(match.item)
-            fields = set(match.matched_fields)
-            if available is None or match.item in seen or not fields or not fields <= (available.keys() & searchable.keys()):
-                raise IntegrationError("OWNERSHIP_AI_INVALID_MATCHES")
-            seen.add(match.item)
+        batch_matches = ai.similar_items(searchable, items)
+        validate_search_matches(searchable, items, batch_matches)
+        for match in batch_matches:
             candidate = candidates[match.item - 1]
-            candidate.initial_matches = sorted(fields)
+            candidate.initial_matches = sorted(match.matched_fields)
             shortlisted.append(candidate)
     return ("question" if shortlisted else "no_candidates"), shortlisted

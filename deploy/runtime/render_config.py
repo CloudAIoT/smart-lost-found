@@ -11,7 +11,8 @@ import boto3
 # Pi 설정은 전부 선택값이다. 값이 없으면 백엔드가 기존처럼 PI_NOT_CONFIGURED류 오류를 낸다.
 REQUIRED = {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "S3_BUCKET", "S3_REGION"}
 OPTIONAL = {"BUSINESS_API_ENABLED", "COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES",
-            "PREVIEW_TTL_SECONDS", "RETURN_CODE_TTL_SECONDS", "PI_DEVICES"}
+            "PREVIEW_TTL_SECONDS", "RETURN_CODE_TTL_SECONDS", "PI_DEVICES", "GEMINI_API_KEY", "GEMINI_MODEL",
+            "IMAGE_ANALYSIS_TIMEOUT_SECONDS", "DEV_FAKE_DEVICE"}
 
 
 def render(payload: dict, output: Path) -> None:
@@ -20,6 +21,9 @@ def render(payload: dict, output: Path) -> None:
     payload = {"BUSINESS_API_ENABLED": "false", **payload}
     if payload["BUSINESS_API_ENABLED"] not in ("true", "false"):
         raise ValueError("BUSINESS_API_ENABLED must be true or false")
+    # Development stand-in for the Pi. Only an explicit "true" enables it.
+    if payload.get("DEV_FAKE_DEVICE", "false") not in ("true", "false"):
+        raise ValueError("DEV_FAKE_DEVICE must be true or false")
     for key, value in payload.items():
         if not isinstance(value, str) or not value or any(c in value for c in "\r\n\0"):
             raise ValueError(f"Invalid deployment setting: {key}")
@@ -28,6 +32,12 @@ def render(payload: dict, output: Path) -> None:
             raise ValueError(f"Invalid PostgreSQL identifier: {key}")
     if len(payload["POSTGRES_PASSWORD"]) < 32:
         raise ValueError("POSTGRES_PASSWORD must contain at least 32 characters")
+    if "GEMINI_MODEL" in payload and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", payload["GEMINI_MODEL"]):
+        raise ValueError("Invalid Gemini model name")
+    if "IMAGE_ANALYSIS_TIMEOUT_SECONDS" in payload:
+        timeout = payload["IMAGE_ANALYSIS_TIMEOUT_SECONDS"]
+        if not re.fullmatch(r"[0-9]{1,2}", timeout) or not 5 <= int(timeout) <= 90:
+            raise ValueError("IMAGE_ANALYSIS_TIMEOUT_SECONDS must be between 5 and 90")
     for key in ("COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES", "PREVIEW_TTL_SECONDS",
                "RETURN_CODE_TTL_SECONDS"):
         if key in payload and not re.fullmatch(r"[1-9][0-9]{0,9}", payload[key]):

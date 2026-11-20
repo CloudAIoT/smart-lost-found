@@ -1,8 +1,8 @@
 """Gemini adapter. Constructing the client does not send images or make API calls."""
 from PIL import Image
 
-from app.core.errors import ServiceError
-from app.models.schemas import Features
+from ..core.errors import ServiceError
+from ..models.schemas import Features
 
 
 class GeminiService:
@@ -31,19 +31,22 @@ class GeminiService:
             ),
         )
 
-    def infer(self, image: Image.Image, prompt: str) -> str:
+    def infer(self, image: Image.Image, prompt: str, *, response_schema: dict | None = None) -> str:
+        return self.infer_images((image,), prompt, response_schema=response_schema)
+
+    def infer_images(self, images: tuple[Image.Image, ...], prompt: str, *, response_schema: dict | None = None) -> str:
         if self.client is None:
             raise ServiceError('MODEL_NOT_READY', 'Gemini client is not initialized.', 503)
         self.usage = None
         try:
             response = self.client.models.generate_content(
                 model=self.settings.gemini_model_name,
-                contents=[prompt, image],
+                contents=[prompt, *images],
                 config={
                     'temperature': 0.0,
                     'max_output_tokens': self.settings.gemini_max_output_tokens,
                     'response_mime_type': 'application/json',
-                    'response_json_schema': Features.model_json_schema(),
+                    'response_json_schema': response_schema if response_schema is not None else Features.model_json_schema(),
                 },
             )
             candidates = response.candidates or []

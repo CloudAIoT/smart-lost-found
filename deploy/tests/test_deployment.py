@@ -52,6 +52,15 @@ def test_runtime_api_switch_and_legacy_config(tmp_path, enabled):
     assert "BUSINESS_API_ENABLED" not in (tmp_path / "db.env").read_text()
 
 
+def test_fake_device_is_absent_unless_requested(tmp_path):
+    config = payload()
+    render(config, tmp_path)
+    assert "DEV_FAKE_DEVICE" not in (tmp_path / "backend.env").read_text()
+    config["DEV_FAKE_DEVICE"] = "true"
+    render(config, tmp_path)
+    assert "DEV_FAKE_DEVICE=true" in (tmp_path / "backend.env").read_text()
+
+
 def test_pi_settings_are_optional_and_render_when_given(tmp_path):
     config = payload()
     config["COMMAND_TTL_SECONDS"] = "30"
@@ -104,7 +113,7 @@ def test_invalid_deployment_identifier_reports_name_only(monkeypatch):
 @pytest.mark.parametrize("name", ["nginx.http.conf", "nginx.https.conf.template"])
 def test_nginx_serves_frontend_and_keeps_api_routes(name):
     conf = (ROOT / "runtime" / name).read_text()
-    assert "location /api/ { proxy_pass http://backend:8000; }" in conf
+    assert "location /api/ { proxy_pass http://backend:8000; proxy_read_timeout 120s; }" in conf
     assert "root /usr/share/nginx/html;" in conf
     assert "try_files $uri $uri/ /index.html;" in conf
     assert "return 503" not in conf
@@ -117,3 +126,18 @@ def test_frontend_build_is_shipped_and_mounted_read_only():
     assert "./frontend:/usr/share/nginx/html:ro" in compose
     deploy = (ROOT / "runtime" / "deploy.sh").read_text()
     assert '[[ -f "$release/frontend/index.html" ]]' in deploy
+
+
+@pytest.mark.parametrize("timeout", ["5", "90"])
+def test_photo_timeout_reaches_backend_only(tmp_path, timeout):
+    config = {**payload(), "IMAGE_ANALYSIS_TIMEOUT_SECONDS": timeout}
+    render(config, tmp_path)
+    assert f"IMAGE_ANALYSIS_TIMEOUT_SECONDS={timeout}\n" in (tmp_path / "backend.env").read_text()
+    assert "IMAGE_ANALYSIS_TIMEOUT_SECONDS" not in (tmp_path / "db.env").read_text()
+
+
+@pytest.mark.parametrize("timeout", ["0", "4", "91", "120", "-5", "90.0", "bad"])
+def test_photo_timeout_fits_proxy_deadline(tmp_path, timeout):
+    with pytest.raises(ValueError):
+        render({**payload(), "IMAGE_ANALYSIS_TIMEOUT_SECONDS": timeout}, tmp_path)
+    assert not (tmp_path / "backend.env").exists()

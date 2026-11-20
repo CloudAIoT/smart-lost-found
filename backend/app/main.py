@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.db import engine, get_session
 from app.api import router
+from app.ai_ownership_verification.api import router as ownership_router
 from app.errors import BusinessError, IntegrationError
 
 
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Smart Lost Found", lifespan=lifespan)
 app.include_router(router)
+app.include_router(ownership_router)
 
 
 @app.exception_handler(BusinessError)

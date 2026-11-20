@@ -4,14 +4,16 @@ import html
 import json
 from pathlib import Path
 
-from app.models.schemas import Features
+from app.models.schemas import Features, LegacyFeatures
 
 
 def read_result(path: Path) -> dict:
     result = json.loads(path.read_text(encoding='utf-8'))
     if not isinstance(result, dict) or result.get('success') is not True:
         raise ValueError('Both inputs must be successful analyze_image results.')
-    Features.model_validate(result.get('data'))
+    payload = result.get('data')
+    schema = LegacyFeatures if isinstance(payload, dict) and {'material', 'description'} <= payload.keys() else Features
+    schema.model_validate(payload)
     for name in ('comparison_metadata', 'timings_ms', 'usage'):
         if result.get(name) is not None and not isinstance(result[name], dict):
             raise ValueError('Invalid result metadata.')
@@ -28,8 +30,13 @@ def build_report(left: dict, right: dict) -> str:
              '| 항목 | 결과 A | 결과 B |', '| --- | --- | --- |']
     for name in ('backend', 'model_name', 'input_category'):
         lines.append(f'| {name} | {cell(left.get(name))} | {cell(right.get(name))} |')
-    for name in Features.model_fields:
-        lines.append(f'| {name} | {cell(left["data"][name])} | {cell(right["data"][name])} |')
+    if set(left['data']) != set(right['data']):
+        lines.append('| 특징 규격 | 필드 구성이 다릅니다. 이전·현재 규격의 누락 필드와 null을 구분해 표시합니다. | |')
+    names = dict.fromkeys([*left['data'], *right['data']])
+    for name in names:
+        a = cell(left['data'][name]) if name in left['data'] else '해당 규격에 없는 필드'
+        b = cell(right['data'][name]) if name in right['data'] else '해당 규격에 없는 필드'
+        lines.append(f'| {name} | {a} | {b} |')
     for name in ('model_load', 'inference', 'total'):
         lines.append(f'| {name} (ms) | {cell((left.get("timings_ms") or {}).get(name))} | {cell((right.get("timings_ms") or {}).get(name))} |')
     lines.extend(['', '## 비교 조건', ''])
@@ -50,7 +57,7 @@ def build_report(left: dict, right: dict) -> str:
                   '- 분류와 색상이 실제 물품과 일치하는가?',
                   '- 재질, 브랜드, 부착물, 흠집을 근거 없이 생성하지 않았는가?',
                   '- visible_text가 사진의 표기와 일치하는가?',
-                  '- 확인하기 어려운 특징은 unknown/null/빈 배열로 남겼는가?',
+                  '- 확인하기 어려운 특징은 null로 남겼는가? (이전 규격에는 unknown/빈 배열도 있음)',
                   '- 서로 다른 사진과 반복 실행에서도 결과가 유지되는가?', '',
                   'Gemini 시간에는 네트워크 왕복이 포함되고, Qwen의 모델 로딩 시간은 별도입니다. '
                   '두 모델의 생성 한도와 JSON 강제 방식도 다르므로 해당 설정을 함께 검토하세요. '

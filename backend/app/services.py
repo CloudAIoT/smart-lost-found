@@ -41,12 +41,14 @@ def claim(session: Session, registration_id: UUID, allowed: tuple[str, ...], tar
     return registration(session, registration_id)
 
 
-def create_registration(session: Session, kiosk_id: UUID, category_id: UUID | None, description: str | None) -> Registration:
+def create_registration(session: Session, kiosk_id: UUID, category_id: UUID | None, description: str | None,
+                        *, found_location: str | None = None) -> Registration:
     if session.get(Kiosk, kiosk_id) is None:
         raise BusinessError("KIOSK_NOT_FOUND", 404)
     if category_id is not None and session.get(Category, category_id) is None:
         raise BusinessError("CATEGORY_NOT_FOUND", 404)
-    value = Registration(kiosk_id=kiosk_id, primary_category_id=category_id, secondary_description=description)
+    value = Registration(kiosk_id=kiosk_id, primary_category_id=category_id, secondary_description=description,
+                         found_location=found_location)
     session.add(value)
     session.commit()
     return value
@@ -73,7 +75,7 @@ def capture(session: Session, registration_id: UUID, shot: int, gateway: DeviceG
     session.commit()
     # IDs and intent have been committed before the first external call.
     try:
-        jpeg = gateway.capture(reg.kiosk_id, command.command_id, registration_id, expires_at)
+        jpeg = gateway.capture(reg.kiosk_id, command.command_id, registration_id, expires_at, shot)
         validate_jpeg(jpeg, max_bytes)
         received = now()
         key = f"registrations/{registration_id}/{command.command_id}.jpg"
@@ -251,8 +253,7 @@ def latest_assignment(session: Session, found_item_id: UUID) -> StorageAssignmen
 def issue_return_code(session: Session, found_item_id: UUID, *, ttl: int) -> tuple[str, ReturnCode]:
     """Mint a code for a stored item. The plaintext is returned once and never stored.
 
-    Ownership is NOT checked here. Once the question/answer evaluation (A04) exists it
-    becomes the precondition of this call; until then any caller can mint a code.
+    The public API checks and claims a successful ownership attempt before calling this service.
     """
     item = found_item(session, found_item_id)
     if item.status != "stored":

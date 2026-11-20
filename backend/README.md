@@ -47,7 +47,7 @@ docker compose --env-file backend/.env exec backend pytest -q
 
 시드는 개발용 키오스크 1개와 2칸을 만든다. 반복 실행해도 중복 생성하지 않으며 카테고리 목록은 임의로 확정하지 않는다. 실제 키오스크의 위치·카테고리 관리 API는 이번 범위 밖이다.
 
-로컬 Python은 Python 3.12 가상환경에 `pip install -r backend/requirements-dev.txt`로 준비하고 `backend`에서 `python -m pytest -q`를 실행한다. 기본 테스트는 SQLite와 테스트 전용 Pi·S3·AI를 사용하며 실제 네트워크·장치에 접근하지 않는다.
+저장소 루트에서 Python 3.12 가상환경에 `pip install -r backend/requirements-dev.txt -r imageprocess/requirements-core.txt`로 준비하고 `backend`에서 `python -m pytest -q`를 실행한다. 기본 테스트는 SQLite와 테스트 전용 Pi·S3·AI를 사용한다.
 
 ## 업무 API와 연동 상태
 
@@ -83,6 +83,6 @@ docker compose --env-file backend/.env exec backend pytest -v tests/test_registr
 - 두 번의 수동 촬영 요청 → 비공개 S3 저장 → AI 특징 추출 → 등록 개방 → 사용자 완료 확인 및 문 조회 순서이다.
 - Pi HTTP와 S3 어댑터는 구현되어 있으나 실제 장치·버킷 연결 검증은 별도로 필요하다. `.env.example`의 크기·TTL·시간 제한 예시는 팀 합의값이 아니다. 실제 연결 전 명시적으로 설정한다.
 - S3 버킷은 비공개 및 Public Access Block을 설정한다. boto3의 환경변수 또는 역할 기반 인증을 사용한다. Compose는 `backend/.env`의 환경변수를 컨테이너에 전달한다. 키를 저장소에 커밋하지 않는다.
-- AI는 `app.api.get_analyzer`에서 `FeatureAnalyzer` 구현을 연결한다. 내부 입력은 등록 ID와 순서가 있는 JPEG 두 장, 반환은 같은 이미지 ID 두 개와 특징 딕셔너리이다. 이 형식은 BE 내부 경계이며 AI 담당자의 외부 계약·성공 기준은 아직 미정이다. 어댑터에서 담당자의 성공 기준을 검증한 뒤 `AnalysisResult`를 만들어야 한다.
-- 기본 AI는 `AI_NOT_CONFIGURED`를 반환한다. 앱에는 성공하는 AI가 들어 있지 않다. 실제 Pi·S3로 개방까지 손으로 확인할 때만 `tests/manual/local_server.py --stub-analyzer`가 분석기를 대역으로 바꾼다. 이 대역은 백엔드 패키지 밖에 있고 특징을 만들지 않는다. 순서는 [저장소 README](../README.md)의 '실제 Pi와 S3로 손으로 확인하기'에 있다.
-- 공개 검색·소유 확인·반환 코드·수령은 구현 범위에서 보류했다.
+- AI는 `app.api.get_analyzer`에서 `GeminiPhotoAnalyzer`를 연결한다. `GEMINI_API_KEY`와 `GEMINI_MODEL`이 있으면 등록 ID에 연결된 S3 JPEG 두 장을 전처리하고 Gemini 결과의 8개 특징을 검증해 `analysis_features`에 저장한다. 사진 ID는 `analysis_input_image_ids`에 순서대로 저장한다.
+- 키·모델이 없으면 `AI_NOT_CONFIGURED`를 반환한다. 사진 분석만 `IMAGE_ANALYSIS_TIMEOUT_SECONDS`(기본 90초)를 사용하며 소유 확인 텍스트 요청은 기존 시간 제한을 유지한다. 실제 DB 저장 결과는 서버에서 `python -m app.inspect_analysis REGISTRATION_ID --require-succeeded`로 조회한다. [API와 EC2 확인 방법](../docs/api.md#등록-id로-사진-분석db-저장-확인)을 참고한다.
+- 소유 확인 통과 후 반환 코드 발급과 수령 API가 연결되어 있다. 검토된 소유 확인 근거의 준비는 사진 특징 추출과 별도다.

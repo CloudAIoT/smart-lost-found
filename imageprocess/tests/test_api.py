@@ -15,11 +15,12 @@ from app.main import create_app
 FEATURES = {
     'category': 'wallet',
     'color': ['black'],
-    'material': 'leather',
+    'shape': '직사각형',
+    'surface_texture': '주름과 광택이 있는 표면',
     'brand': None,
     'visible_text': ['분실물'],
-    'distinctive_features': ['silver zipper'],
-    'description': 'A small black leather wallet with a silver zipper.',
+    'structure': ['전면 덮개'],
+    'distinctive_features': ['하단 중앙의 음각 표시'],
 }
 
 
@@ -90,6 +91,14 @@ def test_analyze_returns_validated_features_and_correlation_id():
     assert response.headers['x-request-id'] == body['request_id']
     assert len(service.images) == 1
     assert service.images[0].mode == 'RGB'
+
+
+def test_analyze_keeps_explicit_null_fields_in_response():
+    payload = dict.fromkeys(FEATURES)
+    with TestClient(create_app(settings(), FakeVisionService(output=json.dumps(payload)))) as client:
+        response = upload(client)
+    assert response.status_code == 200
+    assert response.json()['data'] == payload
 
 
 def test_invalid_file_is_rejected_before_inference():
@@ -304,7 +313,7 @@ def test_unsafe_request_id_is_replaced():
 
 def test_logs_contain_stages_and_request_id_without_private_input_or_output(caplog):
     output = json.dumps({**FEATURES, 'visible_text': ['private-printed-password'],
-                         'description': 'private-generated-description'})
+                         'distinctive_features': ['private-generated-description']})
     service = FakeVisionService(output=output)
     caplog.set_level(logging.INFO)
     with TestClient(create_app(settings(), service)) as client:

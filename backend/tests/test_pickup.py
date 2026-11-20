@@ -1,13 +1,16 @@
 """Return code issuance and kiosk pickup, from a stored item to a released locker."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+import pytest
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.errors import BusinessError
 from app.integrations import IntegrationError
 from app.models import DeviceCommand, FoundItem, ReturnCode, StorageAssignment
-from app.services import hash_return_code, search_stored_items
+from app.services import hash_return_code, issue_return_code, search_stored_items
 
 from test_registration import env, ready  # noqa: F401  (shared harness)
 
@@ -24,15 +27,20 @@ def stored(env):
 
 
 def issue(env, found_item_id):
-    response = env.client.post(f"/api/found-items/{found_item_id}/return-code")
-    assert response.status_code == 201, response.text
-    return response.json()["code"]
+    with Session(env.engine) as session:
+        code, _ = issue_return_code(session, UUID(found_item_id), ttl=env.settings.return_code_ttl_seconds)
+        return code
 
 
 def test_full_pickup_releases_the_locker(env):
     item_id = stored(env)
     with Session(env.engine) as session:
         assert len(search_stored_items(session)) == 1
+        registration_id = session.get(FoundItem, UUID(item_id)).registration_id
+    registration_url = f"/api/registrations/{registration_id}"
+    before_pickup = env.client.get(registration_url)
+    assert before_pickup.status_code == 200
+    assert before_pickup.json()["locker_number"] == 1
     code = issue(env, item_id)
 
     opened = env.client.post("/api/pickup/open", json={"code": code, "kiosk_id": env.kiosk_id})
@@ -41,6 +49,7 @@ def test_full_pickup_releases_the_locker(env):
     assert body["locker_number"] == 1
     assert (body["item_status"], body["assignment_status"]) == ("stored", "awaiting_pickup")
     assert len(env.gateway.opens) == 2  # deposit open, then pickup open
+    assert env.client.get(registration_url).json() == before_pickup.json()
     with Session(env.engine) as session:
         # An item on its way out is no longer offered by search.
         assert search_stored_items(session) == []
@@ -55,9 +64,15 @@ def test_full_pickup_releases_the_locker(env):
         assignment = session.scalar(select(StorageAssignment))
         assert assignment.ended_at is not None
         assert search_stored_items(session) == []
+    # Registration history remains readable after its active assignment ends.
+    after_pickup = env.client.get(registration_url)
+    assert after_pickup.status_code == 200, after_pickup.text
+    expected_registration = {**before_pickup.json(), "locker_number": None}
+    assert after_pickup.json() == expected_registration
     # The released locker is immediately reusable by a new registration.
     again = ready(env)
     assert env.client.post(f"/api/registrations/{again}/deposit/open").json()["locker_number"] == 1
+    assert env.client.get(registration_url).json() == expected_registration
 
 
 def test_code_is_single_use_and_replays_a_finished_open(env):
@@ -165,8 +180,8 @@ def test_code_is_refused_before_the_item_is_stored(env):
     assert env.client.post(f"/api/registrations/{registration_id}/deposit/open").status_code == 200
     with Session(env.engine) as session:
         item_id = str(session.scalar(select(FoundItem)).id)
-    early = env.client.post(f"/api/found-items/{item_id}/return-code")
-    assert early.status_code == 409
-    assert early.json()["detail"]["code"] == "ITEM_NOT_STORED"
-    assert env.client.post(f"/api/found-items/{uuid4()}/return-code").status_code == 404
+    with pytest.raises(BusinessError, match="ITEM_NOT_STORED"):
+        issue(env, item_id)
+    with pytest.raises(BusinessError, match="ITEM_NOT_FOUND"):
+        issue(env, str(uuid4()))
     assert env.client.post(f"/api/pickup/{uuid4()}/complete", json={"confirmed": True}).status_code == 404

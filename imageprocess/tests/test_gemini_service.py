@@ -12,9 +12,9 @@ from app.core.errors import ServiceError
 from app.models.schemas import Features
 from app.services.vision_service import VisionService, build_prompt, parse_features
 
-PAYLOAD = {'category': 'pencil_case', 'color': ['black'], 'material': 'unknown',
-           'brand': None, 'visible_text': [], 'distinctive_features': [],
-           'description': 'A black pencil case.'}
+PAYLOAD = {'category': 'pencil_case', 'color': ['black'], 'shape': '직사각형',
+           'surface_texture': '직조 표면', 'brand': None, 'visible_text': None,
+           'structure': ['측면 지퍼'], 'distinctive_features': None}
 
 
 @pytest.fixture
@@ -73,6 +73,32 @@ def test_missing_key_is_reported_without_loading_model_or_api():
     with pytest.raises(ServiceError) as failure:
         VisionService(config).load()
     assert failure.value.code == 'GEMINI_API_KEY_MISSING'
+
+
+def test_two_photos_share_one_gemini_request_in_shot_order(gemini):
+    config, _, client = gemini
+    service = VisionService(config)
+    service.load()
+    photos = (Image.new('RGB', (32, 32), 'white'), Image.new('RGB', (32, 32), 'black'))
+    assert parse_features(service.infer_images(photos, category='필통')).model_dump() == PAYLOAD
+    client.models.generate_content.assert_called_once()
+    request = client.models.generate_content.call_args.kwargs
+    assert request['contents'] == [build_prompt('필통', image_count=2), *photos]
+    assert request['config']['response_json_schema'] == Features.model_json_schema()
+    service.close()
+
+
+def test_experimental_schema_does_not_change_default_service_schema(gemini):
+    from app.services.gemini_service import GeminiService
+    config, _, client = gemini
+    service = GeminiService(config)
+    service.load()
+    experimental = {'type': 'object', 'properties': {'observations': {'type': 'array', 'items': {'type': 'string'}}}}
+    service.infer(Image.new('RGB', (32, 32)), 'experimental prompt', response_schema=experimental)
+    assert client.models.generate_content.call_args.kwargs['config']['response_json_schema'] == experimental
+    service.infer(Image.new('RGB', (32, 32)), 'normal prompt')
+    assert client.models.generate_content.call_args.kwargs['config']['response_json_schema'] == Features.model_json_schema()
+    service.close()
 
 
 @pytest.mark.parametrize('status, code', [(400, 'GEMINI_REQUEST_REJECTED'), (401, 'GEMINI_REQUEST_REJECTED'),

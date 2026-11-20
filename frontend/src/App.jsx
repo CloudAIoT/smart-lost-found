@@ -1060,6 +1060,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
             <h3 className="font-bold text-white text-base">물건 종류 선택</h3>
             <p className="text-xs text-slate-400">등록된 물건 종류가 있으면 선택해 주세요.</p>
           </div>
+          {categoriesError && <p role="alert" className="text-xs text-rose-300">{categoriesError}</p>}
           {categories.length > 0 ? (
             <select
               value={categoryId}

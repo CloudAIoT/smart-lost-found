@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai_ownership_verification.api import get_ownership_ai
@@ -13,11 +14,14 @@ from app.ai_ownership_verification.search import normalized
 from app.ai_ownership_verification.workflow import get_ownership_result
 from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
 from app.ai_ownership_verification.workflow_schemas import SearchClues, SearchMatch
+from app.api import get_store
 from app.config import GeminiSettings, Settings, get_settings
 from app.db import Base, get_session
-from app.errors import BusinessError, IntegrationError
+from app.dev_device import ASSETS
+from app.errors import IntegrationError
 from app.main import app
-from app.models import FoundItem, Kiosk, Locker, OwnershipAttempt, Registration, StorageAssignment, now
+from app.models import (DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, OwnershipAttempt, Registration,
+                        ReturnCode, StorageAssignment, now)
 
 
 class FakeAI:
@@ -111,6 +115,7 @@ def seed_matching_example(session):
 @pytest.fixture
 def ownership(database_engine):
     Base.metadata.create_all(database_engine)
+    photos = {}
     with Session(database_engine) as session:
         kiosk = Kiosk(name="보관 키오스크", location_description="체육관")
         session.add(kiosk)
@@ -118,6 +123,16 @@ def ownership(database_engine):
         first = add_item(session, kiosk, number=1, decoration="파란 원형 핀", mark="MJ")
         second = add_item(session, kiosk, number=2, decoration="빨간 사각 핀", mark="AB")
         add_item(session, kiosk, number=3, decoration="등록 중", mark="ST", stored=False)
+        for number, item_id in enumerate((first, second), start=1):
+            item = session.get(FoundItem, item_id)
+            capture = DeviceCommand(registration_id=item.registration_id, action="capture", shot_order=1,
+                                    status="succeeded", expires_at=now())
+            session.add(capture)
+            session.flush()
+            key = f"test/{item_id}.jpg"
+            photos[key] = (ASSETS / f"fake_capture_{number}.jpg").read_bytes()
+            session.add(ItemImage(registration_id=item.registration_id, capture_command_id=capture.command_id,
+                                  shot_order=1, object_key=key, byte_size=len(photos[key]), received_at=now()))
         session.commit()
 
     ai = FakeAI()
@@ -130,6 +145,7 @@ def ownership(database_engine):
 
     app.dependency_overrides.update({
         get_session: sessions, get_settings: lambda: settings, get_ownership_ai: lambda: ai,
+        get_store: lambda: SimpleNamespace(read=photos.__getitem__),
     })
     try:
         with TestClient(app) as client:
@@ -160,279 +176,18 @@ def result_for(env, view):
         return get_ownership_result(session, UUID(view["attempt_id"]))
 
 
-def test_hands_off_only_after_every_private_feature_matches(ownership):
-    first = begin(ownership)
-    assert first["initial_candidate_count"] == 2
-    assert result_for(ownership, first) is None
-    assert ownership.client.get(f'{BASE}/{first["attempt_id"]}').json() == first
-    assert set(first["question"]) == {"id", "text", "options"}
-    assert "파란 원형 핀" not in first["question"]["text"]
-    assert all(set(option) == {"id", "label"} for option in first["question"]["options"])
-    assert len({option["label"] for option in first["question"]["options"]}) == 5
-    assert {"파란 원형 핀", "빨간 사각 핀"} <= {option["label"] for option in first["question"]["options"]}
-    assert str(ownership.first) not in str(first)
-
-    second = submit(ownership, first, "파란 원형 핀").json()
-    assert second["status"] == "question"
-    assert second["initial_candidate_count"] == 2
-    assert result_for(ownership, second) is None
-    assert submit(ownership, first, "파란 원형 핀").status_code == 409
-
-    last = submit(ownership, second, "MJ").json()
-    assert last["status"] == "completed" and last["decision"] == "supported"
-    assert last["question"] is None
-    result = result_for(ownership, last)
-    assert result.item_id == ownership.first
-    assert result.matched_evidence_groups == 2
-    assert result.answered_questions == 2
-    assert result.policy_version == "development_v3"
+def photo_url(view):
+    return f'{BASE}/{view["attempt_id"]}/photo'
 
 
-def test_verified_attempt_issues_one_otp_for_the_matched_item(ownership):
-    ownership.settings.local_development = False
-    ownership.settings.business_api_enabled = True
-    first = begin(ownership)
-    path = f"/api/found-items/{ownership.first}/return-code"
-    body = {"attempt_id": first["attempt_id"]}
-    assert ownership.client.post(path).status_code == 422
-    assert ownership.client.post(path, json=body).status_code == 403
-    second = submit(ownership, first, "파란 원형 핀").json()
-    last = submit(ownership, second, "MJ").json()
-    assert last["found_item_id"] == str(ownership.first)
-    assert ownership.client.post(f"/api/found-items/{ownership.second}/return-code", json=body).status_code == 403
-    issued = ownership.client.post(path, json=body)
-    assert issued.status_code == 201
-    assert issued.headers["cache-control"] == "no-store"
-    assert len(issued.json()["code"]) == 8
-    assert issued.json()["kiosk_name"] == "보관 키오스크"
-    assert UUID(issued.json()["kiosk_id"])
-    assert ownership.client.post(path, json=body).json()["detail"]["code"] == "OWNERSHIP_RETURN_CODE_ALREADY_ISSUED"
-
-
-def test_two_photo_features_are_searchable_without_becoming_ownership_proof(ownership):
-    ownership.ai.clues = SearchClues(shape="직사각형", surface_texture="직조 표면", structure="측면 지퍼")
-    with Session(ownership.engine) as session:
-        item = session.get(FoundItem, ownership.first)
-        registration = session.get(Registration, item.registration_id)
-        registration.analysis_features = {
-            "category": "pencil_case", "color": ["navy"], "shape": "직사각형",
-            "surface_texture": "직조 표면", "brand": None, "visible_text": ["MJ"],
-            "structure": ["측면 지퍼"], "distinctive_features": ["파란 원형 핀"],
-        }
-        session.commit()
-    result = begin(ownership)
-    assert result["initial_candidate_count"] == 1
-    assert "색상" in result["question"]["text"]
-    result = submit(ownership, result, "navy").json()
-    assert result["decision"] == "insufficient_evidence"
-    path = f"/api/found-items/{ownership.first}/return-code"
-    assert ownership.client.post(path, json={"attempt_id": result["attempt_id"]}).status_code == 403
-
-
-def test_no_match_and_missing_clues_do_not_create_a_judgment(ownership):
-    ownership.ai.clues = SearchClues(category="우산", color="검은색")
-    missing = begin(ownership)
-    assert missing["status"] == "no_candidates" and missing["attempt_id"] is None
-    ownership.ai.clues = SearchClues()
-    assert begin(ownership)["status"] == "needs_clues"
-
-
-def test_semantic_search_rejects_model_ids_outside_the_supplied_batch(ownership):
-    def invalid_match(clues, items):
-        assert len(items) == 2
-        assert all("description" not in facts for facts in items.values())
-        return [SearchMatch(item=max(items) + 1, matched_fields=["category"])]
-
-    ownership.ai.similar_items = invalid_match
-    response = ownership.client.post(BASE, json={"description": "필통을 잃어버렸어요"})
-    assert response.status_code == 502
-    assert response.json() == {"detail": {"code": "OWNERSHIP_AI_INVALID_MATCHES"}}
-
-
-@pytest.mark.parametrize(("last_answer", "decision"), [("navy", "supported"), ("red", "insufficient_evidence")])
-def test_continues_past_two_matches_and_four_questions_until_exhausted(ownership, last_answer, decision):
-    ownership.ai.clues = SearchClues(category="필통")
-    with Session(ownership.engine) as session:
-        reg = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
-        raw = reg.analysis_features
-        reg.analysis_features = {
-            "data": {**raw["data"], "color": ["navy"], "material": "fabric", "brand": "Carhartt"},
-            "ownership_evidence": raw["ownership_evidence"] + [
-                {"feature_id": field, "field": field, "value": value, "group": field,
-                 "visibility": "private", "verified": True, "distinguishing": True}
-                for field, value in [("material", "fabric"), ("brand", "Carhartt"), ("color", "navy")]
-            ],
-        }
-        session.commit()
-
-    view = begin(ownership)
-    asked = {view["question"]["id"]}
-    for label in ("파란 원형 핀", "MJ", "fabric", "Carhartt"):
-        response = submit(ownership, view, label)
-        assert response.status_code == 200, response.text
-        view = response.json()
-        assert view["status"] == "question" and view["decision"] is None
-        assert view["question"]["id"] not in asked
-        asked.add(view["question"]["id"])
-        assert result_for(ownership, view) is None
-    assert len(asked) == 5
-
-    final = submit(ownership, view, last_answer).json()
-    assert final["status"] == "completed" and final["decision"] == decision
-    result = result_for(ownership, final)
-    assert result.answered_questions == 5
-    if decision == "supported":
-        assert result.item_id == ownership.first and result.matched_evidence_groups == 5
-
-
-def test_loss_location_is_compared_to_found_location_not_kiosk(ownership):
-    ownership.ai.clues = SearchClues(location="체육관")
-    assert begin(ownership)["status"] == "no_candidates"
-    ownership.ai.clues = SearchClues(location="도서관 근처")
-    assert begin(ownership)["initial_candidate_count"] == 2
-
-
-def test_two_independent_wrong_answers_eliminate_candidate(ownership):
-    view = begin(ownership)
-    next_question = submit(ownership, view, "노란 리본").json()
-    assert next_question["status"] == "question"
-    with Session(ownership.engine) as session:
-        attempt = session.get(OwnershipAttempt, UUID(view["attempt_id"]))
-        assert len(attempt.state["candidates"]) == 2
-    last = submit(ownership, next_question, "ZX").json()
-    assert last["status"] == "completed" and last["decision"] == "not_confirmed"
-
-
-def test_unverified_raw_features_are_not_proof(ownership):
-    with Session(ownership.engine) as session:
-        first = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
-        second = session.get(Registration, session.get(FoundItem, ownership.second).registration_id)
-        first.analysis_features = {**first.analysis_features, "ownership_evidence": [
-            {**ev, "verified": False} for ev in first.analysis_features["ownership_evidence"]]}
-        second.analysis_features = second.analysis_features["data"]
-        session.commit()
-    view = begin(ownership)
-    assert view["decision"] == "insufficient_evidence"
-    assert view["question"] is None
-    assert not any(call[0] == "distractors" for call in ownership.ai.calls)
-
-
-def test_public_difference_narrows_candidates_but_never_counts_as_ownership_proof(ownership):
-    with Session(ownership.engine) as session:
-        for item_id, material in [(ownership.first, "fabric"), (ownership.second, "plastic")]:
-            reg = session.get(Registration, session.get(FoundItem, item_id).registration_id)
-            reg.analysis_features = {**reg.analysis_features["data"], "material": material}
-        session.commit()
-    view = begin(ownership)
-    assert "재질" in view["question"]["text"]
-    assert {option["label"] for option in view["question"]["options"]} == {"fabric", "plastic", "종이", "금속", "고무"}
-    wrong = submit(ownership, view, "종이").json()
-    assert wrong["decision"] == "not_confirmed" and result_for(ownership, wrong).item_id is None
-    view = begin(ownership)
-    finished = submit(ownership, view, "fabric").json()
-    result = result_for(ownership, finished)
-    assert result.item_id == ownership.first
-    assert result.decision == "insufficient_evidence" and result.matched_evidence_groups == 0
-
-
-def test_mentioned_feature_is_not_asked_again(ownership):
-    ownership.ai.clues = SearchClues(category="필통", color="검은색", distinctive_features="파란 원형 핀")
-    view = begin(ownership)
-    assert view["initial_candidate_count"] == 1
-    assert "문구" in view["question"]["text"]
-    assert submit(ownership, view, "MJ").json()["decision"] == "supported"
-
-
-def test_only_eligible_private_feature_is_enough_when_it_all_matches(ownership):
-    ownership.ai.clues = SearchClues(category="필통", distinctive_features="파란 원형 핀")
-    with Session(ownership.engine) as session:
-        session.get(FoundItem, ownership.second).status = "awaiting_deposit"
-        session.commit()
-    view = begin(ownership)
-    assert "문구" in view["question"]["text"]
-    view = submit(ownership, view, "MJ").json()
-    assert "색상" in view["question"]["text"]
-    finished = submit(ownership, view, "black").json()
-    assert finished["decision"] == "supported"
-    assert result_for(ownership, finished).matched_evidence_groups == 1
-
-
-def test_same_group_does_not_count_as_two_independent_wrong_answers(ownership):
-    with Session(ownership.engine) as session:
-        reg = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
-        reg.analysis_features = {**reg.analysis_features, "ownership_evidence": [
-            {**ev, "group": "same_mark"} for ev in reg.analysis_features["ownership_evidence"]]}
-        session.commit()
-    first = begin(ownership)
-    second = submit(ownership, first, "노란 리본").json()
-    last = submit(ownership, second, "ZX").json()
-    assert last["decision"] == "insufficient_evidence"
-    assert result_for(ownership, last).item_id == ownership.first
-
-
-def test_provider_failure_during_next_question_does_not_consume_answer(ownership):
-    first = begin(ownership)
-    ownership.ai.broken_options = True
-    assert submit(ownership, first, "파란 원형 핀").json() == {"detail": {"code": "OWNERSHIP_AI_INVALID_OPTIONS"}}
-    assert ownership.client.get(f'{BASE}/{first["attempt_id"]}').json() == first
-    ownership.ai.broken_options = False
-    assert submit(ownership, first, "파란 원형 핀").json()["status"] == "question"
-
-
-def test_invalid_option_expired_attempt_and_production_gate(ownership):
-    view = begin(ownership)
-    url = f'{BASE}/{view["attempt_id"]}'
-    response = ownership.client.post(url + "/answers", json={"question_id": view["question"]["id"], "option_id": str(uuid4())})
-    assert response.status_code == 422
-    with Session(ownership.engine) as session:
-        row = session.get(OwnershipAttempt, UUID(view["attempt_id"]))
-        row.expires_at = now() - timedelta(seconds=1)
-        session.commit()
-    assert ownership.client.get(url).status_code == 410
-    ownership.settings.local_development = False
-    ownership.settings.business_api_enabled = True
-    assert ownership.client.post(BASE, json={"description": "필통"}).status_code == 200
-    ownership.settings.business_api_enabled = False
-    assert ownership.client.post(BASE, json={"description": "필통"}).status_code == 503
-
-
-def test_unavailable_item_cannot_be_consumed_as_supported(ownership):
-    first = begin(ownership)
-    second = submit(ownership, first, "파란 원형 핀").json()
-    last = submit(ownership, second, "MJ").json()
-    with Session(ownership.engine) as session:
-        session.get(FoundItem, ownership.first).status = "awaiting_deposit"
-        session.commit()
-    with pytest.raises(BusinessError, match="OWNERSHIP_ITEM_NO_LONGER_AVAILABLE"):
-        result_for(ownership, last)
-
-
-def test_changed_evidence_cannot_be_consumed_as_supported(ownership):
-    first = begin(ownership)
-    second = submit(ownership, first, "파란 원형 핀").json()
-    last = submit(ownership, second, "MJ").json()
-    with Session(ownership.engine) as session:
-        reg = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
-        reg.analysis_features = reg.analysis_features["data"]
-        session.commit()
-    with pytest.raises(BusinessError, match="OWNERSHIP_EVIDENCE_CHANGED"):
-        result_for(ownership, last)
-
-
-def test_gemini_extracts_only_literal_user_clues():
-    settings = GeminiSettings(_env_file=None, gemini_api_key="test-key", gemini_model="test-model")
-    replies = iter(['{"category":"필통","color":"검은색","location":"도서관"}', '{"brand":"Carhartt"}'])
-
-    def handler(request):
-        assert request.headers["x-goog-api-key"] == "test-key"
-        return httpx.Response(200, json={"candidates": [{"finishReason": "STOP",
-                              "content": {"parts": [{"text": next(replies)}]}}]})
-
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        ai = GeminiWorkflowAI(settings, client)
-        assert ai.extract("도서관에서 검은색 필통을 잃었어요").brand is None
-        with pytest.raises(IntegrationError, match="OWNERSHIP_UNGROUNDED_CLUE"):
-            ai.extract("검은색 필통")
+def confirm_photo(env, view):
+    assert view["status"] == "photo_confirmation" and view["decision"] is None
+    photo = env.client.get(photo_url(view))
+    assert photo.status_code == 200
+    response = env.client.post(photo_url(view) + "-confirmation",
+                               json={"confirmed": True, "photo_token": photo.headers["X-Ownership-Photo-Token"]})
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def test_missing_clues_keep_candidates_and_shape_question_partitions_them(ownership):
@@ -473,12 +228,394 @@ def test_single_candidate_is_asked_about_remaining_shape(ownership):
     assert view["initial_candidate_count"] == 1
     assert "형태" in view["question"]["text"]
     pending = submit(ownership, view, "직사각형").json()
-    assert pending["status"] == "completed" and pending["decision"] == "insufficient_evidence"
+    assert pending["status"] == "photo_confirmation"
+    assert result_for(ownership, pending) is None
+
+
+def test_hands_off_only_after_photo_confirmation(ownership):
+    first = begin(ownership)
+    assert first["initial_candidate_count"] == 2
+    assert result_for(ownership, first) is None
+    assert ownership.client.get(f'{BASE}/{first["attempt_id"]}').json() == first
+    assert set(first["question"]) == {"id", "text", "options"}
+    assert "파란 원형 핀" not in first["question"]["text"]
+    assert all(set(option) == {"id", "label"} for option in first["question"]["options"])
+    assert len({option["label"] for option in first["question"]["options"]}) == 5
+    assert {"파란 원형 핀", "빨간 사각 핀"} <= {option["label"] for option in first["question"]["options"]}
+    assert str(ownership.first) not in str(first)
+
+    second = submit(ownership, first, "파란 원형 핀").json()
+    assert second["status"] == "question"
+    assert second["initial_candidate_count"] == 2
+    assert result_for(ownership, second) is None
+    assert submit(ownership, first, "파란 원형 핀").status_code == 409
+
+    pending = submit(ownership, second, "MJ").json()
+    assert result_for(ownership, pending) is None
+    assert pending["found_item_id"] is None and pending["question"] is None
+    last = confirm_photo(ownership, pending)["attempt"]
+    assert last["status"] == "completed" and last["decision"] == "supported"
+    assert last["question"] is None
+    result = result_for(ownership, last)
+    assert result.item_id == ownership.first
+    assert result.failure_reason is None
+    assert result.matched_evidence_groups == 2
+    assert result.answered_questions == 2
+    assert result.policy_version == "development_v4"
+
+
+def test_verified_attempt_issues_one_otp_for_the_matched_item(ownership):
+    ownership.settings.local_development = False
+    ownership.settings.business_api_enabled = True
+    first = begin(ownership)
+    path = f"/api/found-items/{ownership.first}/return-code"
+    body = {"attempt_id": first["attempt_id"]}
+    assert ownership.client.post(path).status_code == 422
+    assert ownership.client.post(path, json=body).status_code == 403
+    second = submit(ownership, first, "파란 원형 핀").json()
+    pending = submit(ownership, second, "MJ").json()
+    assert pending["status"] == "photo_confirmation"
+    assert ownership.client.post(path, json=body).status_code == 403
+    url = photo_url(pending)
+    assert ownership.client.post(url + "-confirmation", json={"confirmed": True}).json()["detail"]["code"] == \
+        "OWNERSHIP_PHOTO_LOAD_REQUIRED"
+    photo = ownership.client.get(url)
+    assert photo.status_code == 200 and photo.headers["content-type"] == "image/jpeg"
+    assert photo.headers["cache-control"] == "no-store"
+    assert photo.content == (ASSETS / "fake_capture_1.jpg").read_bytes()
+    confirmation = {"confirmed": True, "photo_token": photo.headers["X-Ownership-Photo-Token"]}
+    issued = ownership.client.post(url + "-confirmation", json=confirmation)
+    assert issued.status_code == 200
+    assert issued.headers["cache-control"] == "no-store"
+    assert issued.json()["attempt"]["found_item_id"] == str(ownership.first)
+    code = issued.json()["return_code"]
+    assert len(code["code"]) == 8 and code["kiosk_name"] == "보관 키오스크"
+    assert UUID(code["kiosk_id"])
+    assert ownership.client.post(f"/api/found-items/{ownership.second}/return-code", json=body).status_code == 403
+    assert ownership.client.post(url + "-confirmation", json=confirmation).json()["detail"]["code"] == \
+        "OWNERSHIP_RETURN_CODE_ALREADY_ISSUED"
+    assert ownership.client.post(path, json=body).json()["detail"]["code"] == "OWNERSHIP_RETURN_CODE_ALREADY_ISSUED"
+
+
+@pytest.mark.parametrize("needs_color_question", [True, False])
+def test_automatic_photo_features_allow_photo_confirmation_and_otp(ownership, needs_color_question):
+    color = None if needs_color_question else "남색"
+    ownership.ai.clues = SearchClues(color=color, shape="직사각형", surface_texture="직조 표면", structure="측면 지퍼")
+    with Session(ownership.engine) as session:
+        item = session.get(FoundItem, ownership.first)
+        registration = session.get(Registration, item.registration_id)
+        registration.analysis_features = {
+            "category": "pencil_case", "color": ["navy"], "shape": "직사각형",
+            "surface_texture": "직조 표면", "brand": None, "visible_text": ["MJ"],
+            "structure": ["측면 지퍼"], "distinctive_features": ["파란 원형 핀"],
+        }
+        session.commit()
+    description = "직조 표면에 측면 지퍼가 달린 직사각형 필통을 잃어버렸어요."
+    pending = begin(ownership, description if color is None else f"{color} {description}")
+    assert pending["initial_candidate_count"] == 1
+    if needs_color_question:
+        assert "색상" in pending["question"]["text"]
+        pending = submit(ownership, pending, "navy").json()
+    assert pending["status"] == "photo_confirmation"
+    assert pending["found_item_id"] is None
+    assert result_for(ownership, pending) is None
+    path = f"/api/found-items/{ownership.first}/return-code"
+    assert ownership.client.post(path, json={"attempt_id": pending["attempt_id"]}).status_code == 403
+    confirmed = confirm_photo(ownership, pending)
+    assert confirmed["attempt"]["decision"] == "supported"
+    assert len(confirmed["return_code"]["code"]) == 8
+    assert result_for(ownership, confirmed["attempt"]).matched_evidence_groups == 0
+
+
+def test_no_match_and_missing_clues_do_not_create_a_judgment(ownership):
+    ownership.ai.clues = SearchClues(category="우산", color="검은색")
+    missing = begin(ownership)
+    assert missing["status"] == "no_candidates" and missing["attempt_id"] is None
+    ownership.ai.clues = SearchClues()
+    assert begin(ownership)["status"] == "needs_clues"
+
+
+def test_semantic_search_rejects_model_ids_outside_the_supplied_batch(ownership):
+    def invalid_match(clues, items):
+        assert len(items) == 2
+        assert all("description" not in facts for facts in items.values())
+        return [SearchMatch(item=max(items) + 1, matched_fields=["category"])]
+
+    ownership.ai.similar_items = invalid_match
+    response = ownership.client.post(BASE, json={"description": "필통을 잃어버렸어요"})
+    assert response.status_code == 502
+    assert response.json() == {"detail": {"code": "OWNERSHIP_AI_INVALID_MATCHES"}}
+
+
+@pytest.mark.parametrize(("last_answer", "matches"), [("navy", 5), ("red", 4)])
+def test_continues_past_two_matches_and_four_questions_until_exhausted(ownership, last_answer, matches):
+    ownership.ai.clues = SearchClues(category="필통")
+    with Session(ownership.engine) as session:
+        reg = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
+        raw = reg.analysis_features
+        reg.analysis_features = {
+            "data": {**raw["data"], "color": ["navy"], "material": "fabric", "brand": "Carhartt"},
+            "ownership_evidence": raw["ownership_evidence"] + [
+                {"feature_id": field, "field": field, "value": value, "group": field,
+                 "visibility": "private", "verified": True, "distinguishing": True}
+                for field, value in [("material", "fabric"), ("brand", "Carhartt"), ("color", "navy")]
+            ],
+        }
+        session.commit()
+
+    view = begin(ownership)
+    asked = {view["question"]["id"]}
+    for label in ("파란 원형 핀", "MJ", "fabric", "Carhartt"):
+        response = submit(ownership, view, label)
+        assert response.status_code == 200, response.text
+        view = response.json()
+        assert view["status"] == "question" and view["decision"] is None
+        assert view["question"]["id"] not in asked
+        asked.add(view["question"]["id"])
+        assert result_for(ownership, view) is None
+    assert len(asked) == 5
+
+    pending = submit(ownership, view, last_answer).json()
+    final = confirm_photo(ownership, pending)["attempt"]
+    assert final["status"] == "completed" and final["decision"] == "supported"
+    result = result_for(ownership, final)
+    assert result.answered_questions == 5
+    assert result.item_id == ownership.first and result.matched_evidence_groups == matches
+
+
+def test_loss_location_is_compared_to_found_location_not_kiosk(ownership):
+    ownership.ai.clues = SearchClues(location="체육관")
+    assert begin(ownership)["status"] == "no_candidates"
+    ownership.ai.clues = SearchClues(location="도서관 근처")
+    assert begin(ownership)["initial_candidate_count"] == 2
+
+
+def test_two_independent_wrong_answers_eliminate_candidate(ownership):
+    view = begin(ownership)
+    next_question = submit(ownership, view, "노란 리본").json()
+    assert next_question["status"] == "question"
+    with Session(ownership.engine) as session:
+        attempt = session.get(OwnershipAttempt, UUID(view["attempt_id"]))
+        assert len(attempt.state["candidates"]) == 2
+    last = submit(ownership, next_question, "ZX").json()
+    assert last["status"] == "completed" and last["decision"] == "not_confirmed"
+    assert "failure_reason" not in last
+    assert result_for(ownership, last).failure_reason == "wrong_evidence_limit"
+
+
+def test_unverified_raw_features_are_not_proof(ownership):
+    with Session(ownership.engine) as session:
+        first = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
+        second = session.get(Registration, session.get(FoundItem, ownership.second).registration_id)
+        first.analysis_features = {**first.analysis_features, "ownership_evidence": [
+            {**ev, "verified": False} for ev in first.analysis_features["ownership_evidence"]]}
+        second.analysis_features = second.analysis_features["data"]
+        session.commit()
+    view = begin(ownership)
+    assert view["decision"] == "not_confirmed"
+    assert result_for(ownership, view).failure_reason == "multiple_candidates"
+    assert view["question"] is None
+    assert not any(call[0] == "distractors" for call in ownership.ai.calls)
+
+
+def test_public_difference_narrows_candidates_before_photo_confirmation(ownership):
+    with Session(ownership.engine) as session:
+        for item_id, material in [(ownership.first, "fabric"), (ownership.second, "plastic")]:
+            reg = session.get(Registration, session.get(FoundItem, item_id).registration_id)
+            reg.analysis_features = {**reg.analysis_features["data"], "material": material}
+        session.commit()
+    view = begin(ownership)
+    assert "재질" in view["question"]["text"]
+    assert {option["label"] for option in view["question"]["options"]} == {"fabric", "plastic", "종이", "금속", "고무"}
+    wrong = submit(ownership, view, "종이").json()
+    assert wrong["decision"] == "not_confirmed" and result_for(ownership, wrong).item_id is None
+    assert result_for(ownership, wrong).failure_reason == "candidates_eliminated"
+    view = begin(ownership)
+    pending = submit(ownership, view, "fabric").json()
+    finished = confirm_photo(ownership, pending)["attempt"]
+    result = result_for(ownership, finished)
+    assert result.item_id == ownership.first
+    assert result.decision == "supported" and result.matched_evidence_groups == 0
+    assert result.failure_reason is None
+
+
+def test_mentioned_feature_is_not_asked_again(ownership):
+    ownership.ai.clues = SearchClues(category="필통", color="검은색", distinctive_features="파란 원형 핀")
+    view = begin(ownership)
+    assert view["initial_candidate_count"] == 1
+    assert "문구" in view["question"]["text"]
+    assert confirm_photo(ownership, submit(ownership, view, "MJ").json())["attempt"]["decision"] == "supported"
+
+
+def test_only_eligible_private_feature_is_enough_when_it_all_matches(ownership):
+    ownership.ai.clues = SearchClues(category="필통", distinctive_features="파란 원형 핀")
+    with Session(ownership.engine) as session:
+        session.get(FoundItem, ownership.second).status = "awaiting_deposit"
+        session.commit()
+    view = begin(ownership)
+    assert "문구" in view["question"]["text"]
+    view = submit(ownership, view, "MJ").json()
+    assert "색상" in view["question"]["text"]
+    finished = confirm_photo(ownership, submit(ownership, view, "black").json())["attempt"]
+    assert finished["decision"] == "supported"
+    assert result_for(ownership, finished).matched_evidence_groups == 1
+
+
+def test_same_group_does_not_count_as_two_independent_wrong_answers(ownership):
+    with Session(ownership.engine) as session:
+        reg = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
+        reg.analysis_features = {**reg.analysis_features, "ownership_evidence": [
+            {**ev, "group": "same_mark"} for ev in reg.analysis_features["ownership_evidence"]]}
+        session.commit()
+    first = begin(ownership)
+    second = submit(ownership, first, "노란 리본").json()
+    last = confirm_photo(ownership, submit(ownership, second, "ZX").json())["attempt"]
+    assert last["decision"] == "supported"
+    result = result_for(ownership, last)
+    assert result.item_id == ownership.first and result.matched_evidence_groups == 0
+
+
+def test_matching_all_answers_for_two_candidates_does_not_authorize_return(ownership):
+    with Session(ownership.engine) as session:
+        first = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
+        second = session.get(Registration, session.get(FoundItem, ownership.second).registration_id)
+        second.analysis_features = first.analysis_features
+        session.commit()
+
+    view = submit(ownership, begin(ownership), "파란 원형 핀").json()
+    finished = submit(ownership, view, "MJ").json()
+    assert finished["status"] == "completed" and finished["decision"] == "not_confirmed"
+    assert finished["found_item_id"] is None
+    assert result_for(ownership, finished).failure_reason == "multiple_candidates"
+    for item_id in (ownership.first, ownership.second):
+        response = ownership.client.post(f"/api/found-items/{item_id}/return-code",
+                                         json={"attempt_id": finished["attempt_id"]})
+        assert response.status_code == 403
+
+
+def test_legacy_completed_hold_is_returned_as_not_confirmed(ownership):
+    view = begin(ownership)
+    with Session(ownership.engine) as session:
+        attempt = session.get(OwnershipAttempt, UUID(view["attempt_id"]))
+        attempt.state = {**attempt.state, "policy_version": "development_v2",
+                         "current": None, "decision": "insufficient_evidence"}
+        session.commit()
+
+    response = ownership.client.get(f'{BASE}/{view["attempt_id"]}')
+    assert response.status_code == 200
+    finished = response.json()
+    assert finished["status"] == "completed" and finished["decision"] == "not_confirmed"
+    result = result_for(ownership, finished)
+    assert result.decision == "not_confirmed" and result.failure_reason is None
+
+
+def test_provider_failure_during_next_question_does_not_consume_answer(ownership):
+    first = begin(ownership)
+    ownership.ai.broken_options = True
+    assert submit(ownership, first, "파란 원형 핀").json() == {"detail": {"code": "OWNERSHIP_AI_INVALID_OPTIONS"}}
+    assert ownership.client.get(f'{BASE}/{first["attempt_id"]}').json() == first
+    ownership.ai.broken_options = False
+    assert submit(ownership, first, "파란 원형 핀").json()["status"] == "question"
+
+
+def test_invalid_option_expired_attempt_and_production_gate(ownership):
+    view = begin(ownership)
+    url = f'{BASE}/{view["attempt_id"]}'
+    response = ownership.client.post(url + "/answers", json={"question_id": view["question"]["id"], "option_id": str(uuid4())})
+    assert response.status_code == 422
+    with Session(ownership.engine) as session:
+        row = session.get(OwnershipAttempt, UUID(view["attempt_id"]))
+        row.expires_at = now() - timedelta(seconds=1)
+        session.commit()
+    assert ownership.client.get(url).status_code == 410
+    ownership.settings.local_development = False
+    ownership.settings.business_api_enabled = True
+    assert ownership.client.post(BASE, json={"description": "필통"}).status_code == 200
+    ownership.settings.business_api_enabled = False
+    assert ownership.client.post(BASE, json={"description": "필통"}).status_code == 503
+
+
+def test_unavailable_item_cannot_be_consumed_as_supported(ownership):
+    first = begin(ownership)
+    second = submit(ownership, first, "파란 원형 핀").json()
+    pending = submit(ownership, second, "MJ").json()
+    url = photo_url(pending)
+    token = ownership.client.get(url).headers["X-Ownership-Photo-Token"]
+    with Session(ownership.engine) as session:
+        session.get(FoundItem, ownership.first).status = "awaiting_deposit"
+        session.commit()
+    denied = ownership.client.post(url + "-confirmation", json={"confirmed": True, "photo_token": token})
+    assert denied.status_code == 404 and denied.json()["detail"]["code"] == "OWNERSHIP_PHOTO_UNAVAILABLE"
+    assert result_for(ownership, pending) is None
+
+
+def test_changed_evidence_rolls_back_photo_confirmation(ownership):
+    first = begin(ownership)
+    second = submit(ownership, first, "파란 원형 핀").json()
+    pending = submit(ownership, second, "MJ").json()
+    url = photo_url(pending)
+    token = ownership.client.get(url).headers["X-Ownership-Photo-Token"]
+    with Session(ownership.engine) as session:
+        reg = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
+        reg.analysis_features = reg.analysis_features["data"]
+        session.commit()
+    denied = ownership.client.post(url + "-confirmation", json={"confirmed": True, "photo_token": token})
+    assert denied.status_code == 409 and denied.json()["detail"]["code"] == "OWNERSHIP_EVIDENCE_CHANGED"
+    assert result_for(ownership, pending) is None
+    with Session(ownership.engine) as session:
+        assert session.scalars(select(ReturnCode)).all() == []
+
+
+def test_rejecting_photo_ends_attempt_without_otp(ownership):
+    first = begin(ownership)
+    assert ownership.client.get(photo_url(first)).status_code == 409
+    second = submit(ownership, first, "파란 원형 핀").json()
+    pending = submit(ownership, second, "MJ").json()
+    url = photo_url(pending)
+    token = ownership.client.get(url).headers["X-Ownership-Photo-Token"]
+    response = ownership.client.post(url + "-confirmation", json={"confirmed": False})
+    assert response.status_code == 200 and response.json()["return_code"] is None
+    finished = response.json()["attempt"]
+    assert finished["status"] == "completed" and finished["decision"] == "not_confirmed"
+    assert finished["found_item_id"] is None
+    assert result_for(ownership, finished).failure_reason == "photo_rejected"
+    assert ownership.client.post(url + "-confirmation", json={"confirmed": True, "photo_token": token}).status_code == 409
+    with Session(ownership.engine) as session:
+        assert session.scalars(select(ReturnCode)).all() == []
+
+
+def test_missing_registered_photo_prevents_success(ownership):
+    first = begin(ownership)
+    second = submit(ownership, first, "파란 원형 핀").json()
+    with Session(ownership.engine) as session:
+        item = session.get(FoundItem, ownership.first)
+        photo = session.scalar(select(ItemImage).where(ItemImage.registration_id == item.registration_id))
+        session.delete(photo)
+        session.commit()
+    finished = submit(ownership, second, "MJ").json()
+    assert finished["decision"] == "not_confirmed"
+    assert result_for(ownership, finished).failure_reason == "photo_unavailable"
 
 
 def gemini_json(result):
     return httpx.Response(200, json={"candidates": [{"finishReason": "STOP",
                           "content": {"parts": [{"text": json.dumps(result)}]}}]})
+
+
+def test_gemini_extracts_only_literal_user_clues():
+    settings = GeminiSettings(_env_file=None, gemini_api_key="test-key", gemini_model="test-model")
+    replies = iter(['{"category":"필통","color":"검은색","location":"도서관"}', '{"brand":"Carhartt"}'])
+
+    def handler(request):
+        assert request.headers["x-goog-api-key"] == "test-key"
+        return httpx.Response(200, json={"candidates": [{"finishReason": "STOP",
+                              "content": {"parts": [{"text": next(replies)}]}}]})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        ai = GeminiWorkflowAI(settings, client)
+        assert ai.extract("도서관에서 검은색 필통을 잃었어요").brand is None
+        with pytest.raises(IntegrationError, match="OWNERSHIP_UNGROUNDED_CLUE"):
+            ai.extract("검은색 필통")
 
 
 @pytest.mark.parametrize("mode", ["matched", "no_matches", "incomplete"])

@@ -14,8 +14,14 @@ FieldName = Literal[
 ]
 Clue = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 ChoiceLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
-Decision = Literal["supported", "not_confirmed", "insufficient_evidence"]
-PolicyVersion = Literal["development_v1", "development_v2", "development_v3"]
+Decision = Literal["supported", "not_confirmed"]
+FailureReason = Literal[
+    "candidates_eliminated", "wrong_evidence_limit", "multiple_candidates",
+    "verification_incomplete", "photo_unavailable", "photo_rejected",
+    # Previously completed attempts can still contain these reasons.
+    "no_verified_evidence", "verification_answers_mismatch",
+]
+PolicyVersion = Literal["development_v1", "development_v2", "development_v3", "development_v4"]
 
 
 class SearchRequest(Contract):
@@ -111,13 +117,26 @@ class AttemptState(Contract):
     policy_version: PolicyVersion = "development_v1"
     answers: list[RecordedAnswer] = Field(default_factory=list)
     current: Question | None = None
+    photo_id: UUID | None = None
+    photo_token: UUID | None = None
     decision: Decision | None = None
+    failure_reason: FailureReason | None = None
     return_code_issued: bool = False
+
+    @field_validator("decision", mode="before")
+    @classmethod
+    def read_legacy_decision(cls, value):
+        return "not_confirmed" if value == "insufficient_evidence" else value
 
 
 class AnswerRequest(Contract):
     question_id: UUID
     option_id: UUID
+
+
+class PhotoConfirmationRequest(Contract):
+    confirmed: bool = Field(strict=True)
+    photo_token: UUID | None = None
 
 
 class OptionView(Contract):
@@ -132,7 +151,9 @@ class QuestionView(Contract):
 
 
 class AttemptView(Contract):
-    status: Literal["needs_clues", "no_candidates", "refine_search", "search_limit", "question", "completed"]
+    status: Literal[
+        "needs_clues", "no_candidates", "refine_search", "search_limit", "question", "photo_confirmation", "completed",
+    ]
     attempt_id: UUID | None = None
     initial_candidate_count: int | None = None
     question: QuestionView | None = None
@@ -146,6 +167,7 @@ class OwnershipResult(Contract):
     attempt_id: UUID
     item_id: UUID | None
     decision: Decision
+    failure_reason: FailureReason | None = None
     policy_version: PolicyVersion = "development_v1"
     matched_evidence_groups: int
     answered_questions: int

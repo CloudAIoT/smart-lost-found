@@ -199,9 +199,15 @@ def pickup_view(session: Session, assignment) -> PickupView:
 
 @router.post("/found-items/{found_item_id}/return-code", response_model=ReturnCodeView, status_code=201)
 def create_return_code(found_item_id: UUID, body: ReturnCodeInput, response: Response, session: DB, settings: Config):
+    result = issue_ownership_return_code(found_item_id, body.attempt_id, session, settings)
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+def issue_ownership_return_code(found_item_id: UUID, attempt_id: UUID, session: Session, settings: Settings) -> ReturnCodeView:
     if not settings.return_code_ttl_seconds:
         raise IntegrationError("RETURN_CODE_NOT_CONFIGURED")
-    authorize_return_code(session, body.attempt_id, found_item_id)
+    authorize_return_code(session, attempt_id, found_item_id)
     assignment = services.latest_assignment(session, found_item_id)
     if assignment is None or assignment.status != "stored" or assignment.ended_at is not None:
         raise services.BusinessError("OWNERSHIP_ITEM_NO_LONGER_AVAILABLE")
@@ -210,8 +216,6 @@ def create_return_code(found_item_id: UUID, body: ReturnCodeInput, response: Res
     ).one()
     code, record = services.issue_return_code(session, found_item_id,
                                               ttl=settings.return_code_ttl_seconds)
-    # The plaintext code is delivered once here and never stored or returned again.
-    response.headers["Cache-Control"] = "no-store"
     return ReturnCodeView(found_item_id=found_item_id, code=code, expires_at=services.as_utc(record.expires_at),
                           kiosk_id=kiosk_id, kiosk_name=kiosk_name)
 

@@ -5,22 +5,22 @@ from datetime import timedelta, timezone
 from random import SystemRandom
 from uuid import UUID, uuid4
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.errors import BusinessError, IntegrationError
-from app.models import FoundItem, OwnershipAttempt, now
+from app.models import FoundItem, ItemImage, OwnershipAttempt, now
 from .search import PROOF_FIELDS, UNKNOWN, find_candidates, normalized, read_facts, stored_items
 from .workflow_ai import WorkflowAI
 from .workflow_schemas import (
     AnswerRequest, AttemptState, AttemptView, Candidate, Choice, Evidence, FieldName, OptionView,
-    OwnershipResult, Question, QuestionView, RecordedAnswer,
+    OwnershipResult, PhotoConfirmationRequest, Question, QuestionView, RecordedAnswer,
 )
 
 
 MAX_WRONG_GROUPS = 2
 OPTION_COUNT = 5
-POLICY_VERSION = "development_v3"
+POLICY_VERSION = "development_v4"
 ATTEMPT_TTL = timedelta(minutes=20)
 PROMPTS = {
     "distinctive_features": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
@@ -60,11 +60,48 @@ def select_distractors(field: FieldName, known_labels: dict[str, str], candidate
     raise IntegrationError("OWNERSHIP_AI_INVALID_OPTIONS")
 
 
-def advance(state: AttemptState, ai: WorkflowAI) -> None:
+def registered_photo(session: Session, item_id: UUID, photo_id: UUID | None = None) -> ItemImage | None:
+    stored = session.execute(stored_items().where(FoundItem.id == item_id)).first()
+    if stored is None:
+        return None
+    _, registration, _ = stored
+    photos = select(ItemImage).where(ItemImage.registration_id == registration.id)
+    if photo_id is not None:
+        photos = photos.where(ItemImage.id == photo_id)
+    return session.scalar(photos.order_by(ItemImage.shot_order).limit(1))
+
+
+def finish_questions(session: Session, state: AttemptState) -> None:
+    state.decision = "not_confirmed"
+    if len(state.candidates) > 1:
+        state.failure_reason = "multiple_candidates"
+        return
+
+    candidate = state.candidates[0]
+    required_fields = {evidence.field for evidence in candidate.proof}
+    answered_fields = {
+        answer.field for answer in state.answers if answer.purpose == "verification"
+        and (candidate.item_id in answer.matched_item_ids or candidate.item_id in answer.conflicting_item_ids)
+    }
+    if not required_fields <= answered_fields:
+        state.failure_reason = "verification_incomplete"
+        return
+
+    photo = registered_photo(session, candidate.item_id)
+    if photo is None:
+        state.failure_reason = "photo_unavailable"
+        return
+    state.decision = None
+    state.photo_id = photo.id
+    state.photo_token = uuid4()
+
+
+def advance(session: Session, state: AttemptState, ai: WorkflowAI) -> None:
     """Choose the next usable feature or decide from the recorded answers."""
     state.current = None
     if not state.candidates:
         state.decision = "not_confirmed"
+        state.failure_reason = state.failure_reason or "candidates_eliminated"
         return
     used_fields = set(state.mentioned_fields) | {answer.field for answer in state.answers}
     choices = []
@@ -90,13 +127,7 @@ def advance(state: AttemptState, ai: WorkflowAI) -> None:
         split = coverage - max(counts.values())
         choices.append(((split, coverage, verification), field, labels))
     if not choices:
-        state.decision = "insufficient_evidence"
-        if len(state.candidates) == 1:
-            candidate = state.candidates[0]
-            confirmed = {answer.field for answer in state.answers
-                         if answer.purpose == "verification" and candidate.item_id in answer.matched_item_ids}
-            if candidate.proof and all(evidence.field in confirmed for evidence in candidate.proof):
-                state.decision = "supported"
+        finish_questions(session, state)
         return
 
     rank, field, labels = max(choices, key=lambda entry: entry[0])
@@ -118,7 +149,7 @@ def start(session: Session, description: str, ai: WorkflowAI) -> AttemptView:
         return AttemptView(status=status)
     state = AttemptState(original_count=len(candidates), candidates=candidates, policy_version=POLICY_VERSION,
                          mentioned_fields=list(clues.model_dump(exclude_none=True)))
-    advance(state, ai)
+    advance(session, state, ai)
     attempt_id = uuid4()
     session.add(OwnershipAttempt(id=attempt_id, expires_at=now() + ATTEMPT_TTL, version=1,
                                  state=state.model_dump(mode="json")))
@@ -128,8 +159,13 @@ def start(session: Session, description: str, ai: WorkflowAI) -> AttemptView:
 
 def view(attempt_id: UUID, state: AttemptState) -> AttemptView:
     question = state.current
+    status = "question"
+    if state.decision:
+        status = "completed"
+    elif state.photo_id:
+        status = "photo_confirmation"
     return AttemptView(
-        status="completed" if state.decision else "question",
+        status=status,
         attempt_id=attempt_id, initial_candidate_count=state.original_count,
         decision=state.decision,
         found_item_id=state.candidates[0].item_id if state.decision == "supported" else None,
@@ -155,6 +191,45 @@ def get_view(session: Session, attempt_id: UUID) -> AttemptView:
     return view(attempt_id, AttemptState.model_validate(load_attempt(session, attempt_id).state))
 
 
+def pending_photo_attempt(session: Session, attempt_id: UUID) -> tuple[OwnershipAttempt, AttemptState]:
+    row = load_attempt(session, attempt_id)
+    state = AttemptState.model_validate(row.state)
+    if state.return_code_issued:
+        raise BusinessError("OWNERSHIP_RETURN_CODE_ALREADY_ISSUED")
+    if state.decision or not state.photo_id or not state.photo_token or len(state.candidates) != 1:
+        raise BusinessError("OWNERSHIP_PHOTO_NOT_PENDING")
+    return row, state
+
+
+def pending_photo(session: Session, state: AttemptState) -> ItemImage:
+    photo = registered_photo(session, state.candidates[0].item_id, state.photo_id)
+    if photo is None:
+        raise BusinessError("OWNERSHIP_PHOTO_UNAVAILABLE", 404)
+    return photo
+
+
+def confirm_photo(session: Session, attempt_id: UUID, body: PhotoConfirmationRequest) -> AttemptView:
+    row, state = pending_photo_attempt(session, attempt_id)
+    if body.confirmed:
+        if body.photo_token != state.photo_token:
+            raise BusinessError("OWNERSHIP_PHOTO_LOAD_REQUIRED")
+        pending_photo(session, state)
+        state.decision = "supported"
+    else:
+        state.decision = "not_confirmed"
+        state.failure_reason = "photo_rejected"
+
+    changed = session.execute(update(OwnershipAttempt).where(
+        OwnershipAttempt.id == attempt_id, OwnershipAttempt.version == row.version, OwnershipAttempt.expires_at > now()
+    ).values(version=row.version + 1, state=state.model_dump(mode="json"))
+      .execution_options(synchronize_session=False))
+    if changed.rowcount != 1:
+        session.rollback()
+        pending_photo_attempt(session, attempt_id)
+        raise BusinessError("OWNERSHIP_PHOTO_NOT_PENDING")
+    return view(attempt_id, state)
+
+
 def record_answer(state: AttemptState, answer: AnswerRequest) -> None:
     question = state.current
     if not question or state.decision or question.id != answer.question_id:
@@ -163,6 +238,7 @@ def record_answer(state: AttemptState, answer: AnswerRequest) -> None:
     if choice is None:
         raise BusinessError("OWNERSHIP_OPTION_NOT_FOUND", 422)
     survivors, matched, conflicting = [], [], []
+    reached_wrong_limit = False
     for candidate in state.candidates:
         evidence, expected = question_values(candidate, question.field)
         if choice.value is None or not expected:
@@ -181,7 +257,11 @@ def record_answer(state: AttemptState, answer: AnswerRequest) -> None:
                 wrong_groups = {ev.group for ev in candidate.proof if ev.field in wrong_fields}
                 if len(wrong_groups) < MAX_WRONG_GROUPS:
                     survivors.append(candidate)
+                else:
+                    reached_wrong_limit = True
     state.candidates = survivors
+    if not survivors and reached_wrong_limit:
+        state.failure_reason = "wrong_evidence_limit"
     state.answers.append(RecordedAnswer(question_id=question.id, field=question.field, option_id=choice.id,
                                         purpose=question.purpose,
                                         outcome="unknown" if choice.value is None else "answered",
@@ -193,10 +273,11 @@ def answer(session: Session, attempt_id: UUID, body: AnswerRequest, ai: Workflow
     version, state = row.version, AttemptState.model_validate(row.state)
     record_answer(state, body)
     session.rollback()
-    advance(state, ai)
+    advance(session, state, ai)
     changed = session.execute(update(OwnershipAttempt).where(
         OwnershipAttempt.id == attempt_id, OwnershipAttempt.version == version, OwnershipAttempt.expires_at > now()
-    ).values(version=version + 1, state=state.model_dump(mode="json")))
+    ).values(version=version + 1, state=state.model_dump(mode="json"))
+      .execution_options(synchronize_session=False))
     if changed.rowcount != 1:
         session.rollback()
         load_attempt(session, attempt_id)
@@ -223,12 +304,11 @@ def _ownership_result(session: Session, attempt: OwnershipAttempt) -> OwnershipR
             raise BusinessError("OWNERSHIP_ITEM_NO_LONGER_AVAILABLE")
         _, registration, category = item
         _, current_proof, _ = read_facts(registration, category)
-        matched_fields = {entry.field for entry in state.answers
-                          if entry.purpose == "verification" and candidate.item_id in entry.matched_item_ids}
-        if any(ev not in current_proof for ev in candidate.proof if ev.field in matched_fields):
+        if any(ev not in current_proof for ev in candidate.proof):
             raise BusinessError("OWNERSHIP_EVIDENCE_CHANGED")
     return OwnershipResult(attempt_id=attempt.id, item_id=candidate.item_id if candidate else None,
-                           decision=state.decision, policy_version=state.policy_version,
+                           decision=state.decision, failure_reason=state.failure_reason,
+                           policy_version=state.policy_version,
                            matched_evidence_groups=len(candidate.matched_groups) if candidate else 0,
                            answered_questions=len(state.answers))
 
@@ -241,6 +321,8 @@ def authorize_return_code(session: Session, attempt_id: UUID, item_id: UUID) -> 
         raise BusinessError("OWNERSHIP_REQUIRED", 403)
     if attempt.state.get("return_code_issued"):
         raise BusinessError("OWNERSHIP_RETURN_CODE_ALREADY_ISSUED")
+    if not attempt.state.get("photo_id"):
+        raise BusinessError("OWNERSHIP_ATTEMPT_RESTART_REQUIRED")
     changed = session.execute(update(OwnershipAttempt).where(
         OwnershipAttempt.id == attempt_id, OwnershipAttempt.version == attempt.version,
         OwnershipAttempt.expires_at > now(),

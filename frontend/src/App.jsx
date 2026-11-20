@@ -137,6 +137,9 @@ const ERROR_MESSAGES = {
   OWNERSHIP_ATTEMPT_RESTART_REQUIRED: '소유 확인 방식이 업데이트됐습니다. 검색을 다시 시작해 주세요.',
   OWNERSHIP_RETURN_CODE_ALREADY_ISSUED: '이 소유 확인에서 이미 OTP가 발급됐습니다.',
   OWNERSHIP_ITEM_NO_LONGER_AVAILABLE: '이 물건은 현재 수령할 수 없습니다.',
+  OWNERSHIP_PHOTO_NOT_PENDING: '사진 확인이 끝났거나 아직 시작되지 않았습니다.',
+  OWNERSHIP_PHOTO_UNAVAILABLE: '확인할 등록 사진을 찾을 수 없습니다.',
+  OWNERSHIP_PHOTO_LOAD_REQUIRED: '등록 사진을 불러온 다음 다시 확인해 주세요.',
   OWNERSHIP_AI_NOT_CONFIGURED: '분실물 검색 또는 이미지 분석 서비스가 설정되지 않았습니다.',
   OWNERSHIP_AI_RATE_LIMITED: 'AI 요청이 많습니다. 잠시 후 다시 시도해 주세요.',
   RETURN_CODE_NOT_CONFIGURED: 'OTP 기능이 설정되지 않았습니다.',
@@ -470,15 +473,49 @@ function WebOwner({ onBack, onResult }) {
   const [description, setDescription] = useState('');
   const [attempt, setAttempt] = useState(null);
   const [optionId, setOptionId] = useState('');
+  const [photo, setPhoto] = useState(null);
+  const [photoReady, setPhotoReady] = useState(false);
+  const [photoError, setPhotoError] = useState(false);
+  const [photoRetry, setPhotoRetry] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const photoAttemptId = attempt?.status === 'photo_confirmation' ? attempt.attempt_id : null;
+
+  useEffect(() => {
+    if (!photoAttemptId) return;
+    const controller = new AbortController();
+    let url;
+    setPhoto(null);
+    setPhotoReady(false);
+    setPhotoError(false);
+    const loadPhoto = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/ownership/attempts/${photoAttemptId}/photo`, {
+          signal: controller.signal,
+        });
+        const token = response.headers.get('X-Ownership-Photo-Token');
+        if (!response.ok || !token) throw new Error('Photo unavailable');
+        const jpeg = await response.blob();
+        if (controller.signal.aborted) return;
+        url = URL.createObjectURL(jpeg);
+        setPhoto({ url, token });
+      } catch {
+        if (!controller.signal.aborted) setPhotoError(true);
+      }
+    };
+    loadPhoto();
+    return () => {
+      controller.abort();
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [photoAttemptId, photoRetry]);
 
   const accept = (result) => {
     setOptionId('');
-    if (result.status === 'question' || result.decision === 'supported') {
+    if (result.status === 'question' || result.status === 'photo_confirmation' || result.decision === 'supported') {
       setAttempt(result);
     } else if (result.status === 'no_candidates' || result.status === 'completed') {
-      onResult({ status: result.decision || 'not_found' });
+      onResult({ status: result.status === 'no_candidates' ? 'not_found' : 'not_confirmed' });
     } else {
       setError(result.status === 'search_limit'
         ? '검색 가능한 물품 수를 초과했습니다. 잠시 후 다시 시도해 주세요.'
@@ -486,18 +523,23 @@ function WebOwner({ onBack, onResult }) {
     }
   };
 
-  const submit = async (event) => {
+  const submit = async (event, confirmed = true) => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || verified || (photoAttemptId && confirmed && (!photoReady || photoError))) return;
     setBusy(true);
     setError('');
     try {
-      if (attempt?.decision === 'supported') {
-        const code = await api(`/found-items/${attempt.found_item_id}/return-code`, {
+      if (photoAttemptId) {
+        const result = await api(`/ownership/attempts/${photoAttemptId}/photo-confirmation`, {
           method: 'POST',
-          body: { attempt_id: attempt.attempt_id },
+          body: confirmed ? { confirmed, photo_token: photo.token } : { confirmed },
         });
-        onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name });
+        const code = result.return_code;
+        if (code) {
+          onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name });
+        } else {
+          accept(result.attempt);
+        }
       } else if (attempt?.question) {
         const result = await api(`/ownership/attempts/${attempt.attempt_id}/answers`, {
           method: 'POST',
@@ -527,6 +569,9 @@ function WebOwner({ onBack, onResult }) {
   const restart = () => {
     setAttempt(null);
     setOptionId('');
+    setPhoto(null);
+    setPhotoReady(false);
+    setPhotoError(false);
     setError('');
   };
 
@@ -542,7 +587,23 @@ function WebOwner({ onBack, onResult }) {
 
       <form onSubmit={submit} className="space-y-4 max-w-xl mx-auto py-2 w-full">
         {verified ? (
-          <p className="text-sm text-emerald-300">소유 확인이 완료됐습니다. 수령용 OTP를 발급받으세요.</p>
+          <p className="text-sm text-emerald-300">이미 완료된 소유 확인입니다. 새 OTP가 필요하면 검색을 다시 시작해 주세요.</p>
+        ) : photoAttemptId ? (
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold text-white">사진 속 물건이 본인 물건인가요?</h2>
+            {photo && !photoError && (
+              <img src={photo.url} alt="보관 중인 후보 물품의 등록 사진"
+                className="mx-auto max-h-80 w-full rounded-xl bg-slate-950 object-contain"
+                onLoad={() => setPhotoReady(true)} onError={() => setPhotoError(true)} />
+            )}
+            {photoError ? (
+              <div className="flex items-center gap-3 text-sm text-rose-300">
+                <p role="alert">등록 사진을 불러오지 못했습니다.</p>
+                <button type="button" disabled={busy} onClick={() => setPhotoRetry((count) => count + 1)}
+                  className="font-semibold text-slate-200 underline">사진 다시 불러오기</button>
+              </div>
+            ) : !photoReady && <p role="status" className="text-sm text-slate-400">사진을 불러오는 중입니다.</p>}
+          </div>
         ) : question ? (
           <fieldset disabled={busy} key={question.id} className="space-y-2">
             <legend className="text-sm font-semibold text-white mb-3">{question.text}</legend>
@@ -571,12 +632,20 @@ function WebOwner({ onBack, onResult }) {
 
         {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
 
-        <button
-          type="submit" disabled={busy || (!verified && (question ? !optionId : !description.trim()))}
-          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
-        >
-          {busy ? '처리 중...' : verified ? '수령용 OTP 발급' : question ? '답변 제출' : '분실물 검색'}
-        </button>
+        {!verified && (
+          <button
+            type="submit" disabled={busy || (photoAttemptId ? !photoReady || photoError : question ? !optionId : !description.trim())}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
+          >
+            {busy ? '처리 중...' : photoAttemptId ? '맞아요 · OTP 받기' : question ? '답변 제출' : '분실물 검색'}
+          </button>
+        )}
+        {photoAttemptId && (
+          <button type="button" disabled={busy} onClick={(event) => submit(event, false)}
+            className="w-full rounded-xl bg-slate-700 py-3 text-sm font-bold text-white hover:bg-slate-600 disabled:opacity-60">
+            아니에요 · 종료
+          </button>
+        )}
         {attempt && (
           <button type="button" disabled={busy} onClick={restart} className="text-sm text-slate-300 hover:text-white">
             검색 다시 시작
@@ -629,8 +698,7 @@ function WebOwnerSuccess({ result, onGoKiosk }) {
 function WebOwnerNotice({ kind, onRetry, onHome }) {
   const messages = {
     not_found: ['찾고 있는 분실물이 없습니다', '설명과 일치하는 보관 물품을 찾지 못했습니다.'],
-    not_confirmed: ['소유를 확인할 수 없습니다', '선택한 답변이 등록된 특징과 일치하지 않습니다.'],
-    insufficient_evidence: ['소유 확인 보류', '현재 확인할 수 있는 특징으로는 물건의 소유를 판단하기 어렵습니다.'],
+    not_confirmed: ['소유 확인에 실패했습니다', '입력한 정보와 답변으로 수령할 물품을 확인하지 못했습니다.'],
   };
   const [title, description] = messages[kind];
   return (
@@ -729,7 +797,7 @@ function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
         <WebOwner onBack={() => setStep('type')} onResult={handleOwnerResult} />
       )}
       {step === 'success' && ownerResult && <WebOwnerSuccess result={ownerResult} onGoKiosk={onGoKiosk} />}
-      {['not_found', 'not_confirmed', 'insufficient_evidence'].includes(step) && (
+      {['not_found', 'not_confirmed'].includes(step) && (
         <WebOwnerNotice kind={step} onRetry={() => setStep('owner')} onHome={() => setStep('type')} />
       )}
     </div>

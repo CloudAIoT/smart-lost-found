@@ -101,6 +101,12 @@ jobs:
       GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
       IMAGE_ANALYSIS_TIMEOUT_SECONDS: ${{ vars.IMAGE_ANALYSIS_TIMEOUT_SECONDS || '90' }}
       DEV_FAKE_DEVICE: ${{ vars.DEV_FAKE_DEVICE }}
+      MQTT_HOST: ${{ vars.MQTT_HOST }}
+      MQTT_PORT: ${{ vars.MQTT_PORT }}
+      MQTT_USERNAME: ${{ vars.MQTT_USERNAME }}
+      MQTT_CLIENT_ID: ${{ vars.MQTT_CLIENT_ID }}
+      MQTT_ALERT_RETENTION_DAYS: ${{ vars.MQTT_ALERT_RETENTION_DAYS }}
+      MQTT_BIND_ADDRESS: ${{ vars.MQTT_BIND_ADDRESS }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -133,4 +139,5 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           PI_DEVICES: ${{ secrets.PI_DEVICES }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
         run: python deploy/publish.py

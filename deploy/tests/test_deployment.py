@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import sys
 
 import pytest
@@ -141,3 +142,17 @@ def test_photo_timeout_fits_proxy_deadline(tmp_path, timeout):
     with pytest.raises(ValueError):
         render({**payload(), "IMAGE_ANALYSIS_TIMEOUT_SECONDS": timeout}, tmp_path)
     assert not (tmp_path / "backend.env").exists()
+
+
+def test_every_published_setting_is_passed_by_the_workflow():
+    """publish.py reads os.environ, so a setting the workflow never maps is silently skipped.
+
+    Adding a key to publish.py alone leaves it absent from SSM and from backend.env, with no
+    error anywhere. This compares the two lists so the omission fails here instead of on EC2.
+    """
+    source = (ROOT / "publish.py").read_text(encoding="utf-8")
+    optional = set(re.findall(r'"([A-Z][A-Z0-9_]+)"', source.split("payload[\"BUSINESS_API_ENABLED\"]")[1]))
+    workflow = (ROOT.parent / ".github/workflows/backend.yml").read_text(encoding="utf-8")
+    mapped = set(re.findall(r"^\s+([A-Z][A-Z0-9_]+):\s+\$\{\{\s*(?:vars|secrets)\.", workflow, re.M))
+    missing = sorted(key for key in optional if key not in mapped)
+    assert missing == [], f"워크플로 env에 없는 설정: {missing}"

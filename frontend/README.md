@@ -22,11 +22,13 @@ EC2 백엔드(`http://52.78.12.168`)에 넘긴다. 로컬 백엔드를 쓸 때�
 
 ## 배포
 
-별도 서버가 없다. `deploy/Dockerfile`이 백엔드 이미지를 만들 때 `npm ci && npm run build`로
-`dist/`를 만들어 함께 넣고, EC2의 nginx가 `/`에서 정적 파일을, `/api/`는 백엔드로 넘긴다.
-프론트와 API가 같은 주소이므로 운영에서도 CORS가 필요 없다. 자세한 내용은 [deploy/README.md](../deploy/README.md).
+프론트엔드는 Vercel에 배포한다. 접속 주소: "https://smart-lost-found-nu.vercel.app/"
 
-`main`에 병합되면 기존 배포 워크플로가 백엔드와 함께 배포한다. 접속 주소: `http://52.78.12.168/`
+- `frontend/vercel.json`의 rewrite 규칙이 `/api/*` 요청을 EC2 백엔드(`http://52.78.12.168/api/*`)로 넘긴다. 브라우저는 Vercel 주소의 `/api`만 호출하므로 백엔드에 CORS 설정이 없어도 된다.
+- 프론트 정적 파일은 Vercel이 제공한다. 이전에 설명하던 EC2 nginx의 `/` 서빙과 `deploy/Dockerfile`의 프론트 빌드 포함은 프론트 배포 경로에서 더 이상 쓰지 않는다. (deploy/ 문서는 별도로 확인이 필요하다.)
+- `main` 병합 시 프론트엔드는 해당 상태로 자동 배포된다.
+- 배포 주소가 HTTPS이므로 현재 위치(지도) 기능은 이 주소에서 사용할 수 있다.
+- 로컬 개발은 기존과 같이 `npm run dev`를 쓴다. 개발 서버는 `/api`를 같은 방식으로 백엔드에 넘긴다.
 
 ## 현재 제한
 

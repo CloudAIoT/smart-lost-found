@@ -7,7 +7,9 @@ raised, because one bad message must not stop the subscriber from reading the ne
 What arrives is observation, not authority. Deposit and pickup completion still need the user's
 confirmation and the HTTP door check (D03, D06); nothing here advances a registration. Completion
 does read one value through `locker_item`: a locker that contradicts what the user just declared
-holds the completion back. A sensor can stop a completion, never make one.
+holds the completion back. The one incident exception is ITEM_MISSING: after a forced opening,
+the Pi is the only party that can report that a stored item disappeared, so the alert closes that
+assignment as missing. It records a loss; it never completes a user workflow.
 """
 
 import json
@@ -16,11 +18,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models import DeviceAlert, DeviceState
+from app.models import DeviceAlert, DeviceState, FoundItem, Locker, ReturnCode, StorageAssignment
 
 log = logging.getLogger("app.mqtt")
 
@@ -188,14 +190,55 @@ def store_alert(session: Session, kiosk_id: UUID, body: dict) -> str:
     if code not in ALERT_CODES:
         log.warning("규약에 없는 경고 코드를 받았습니다: %s", code)
     detail = body.get("detail")
-    session.add(DeviceAlert(
+    alert = DeviceAlert(
         kiosk_id=kiosk_id, code=code, severity=severity, device=device,
         locker_number=locker_number(body.get("locker_id")),
         message=text(body.get("message"), 500),
         detail=detail if isinstance(detail, dict) else None,
         reported_at=reported_at,
-    ))
+    )
+    session.add(alert)
+    # Force the unique report key to be checked before changing business state. A broker replay
+    # raises here; apply_message rolls the transaction back and the incident is not applied twice.
+    session.flush()
+    if code == "ITEM_MISSING" and device == "locker" and alert.locker_number is not None:
+        mark_stored_item_missing(session, kiosk_id, alert.locker_number)
     return "alert"
+
+
+def mark_stored_item_missing(session: Session, kiosk_id: UUID, number: int) -> bool:
+    """Close the stored assignment for a locker whose item disappeared after forced entry.
+
+    ITEM_MISSING is an incident, not a completion: the registration history stays `stored`, while
+    the physical item and its assignment become `missing`. Ending the assignment releases the
+    locker, and revoking unspent codes prevents a stale authorization from opening it later.
+    """
+    row = session.execute(
+        select(StorageAssignment, FoundItem)
+        .join(Locker, Locker.id == StorageAssignment.locker_id)
+        .join(FoundItem, FoundItem.id == StorageAssignment.found_item_id)
+        .where(
+            Locker.kiosk_id == kiosk_id,
+            Locker.locker_number == number,
+            StorageAssignment.status == "stored",
+            StorageAssignment.ended_at.is_(None),
+            FoundItem.status == "stored",
+        )
+        .with_for_update()
+    ).one_or_none()
+    if row is None:
+        return False
+    assignment, item = row
+    assignment.status = "missing"
+    assignment.ended_at = datetime.now(timezone.utc)
+    item.status = "missing"
+    session.execute(
+        update(ReturnCode)
+        .where(ReturnCode.found_item_id == item.id,
+               ReturnCode.status.in_(("active", "opening")))
+        .values(status="revoked")
+    )
+    return True
 
 
 def prune_alerts(session: Session, retention_days: int) -> int:

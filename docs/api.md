@@ -121,7 +121,7 @@ ORDER BY l.kiosk_id, l.locker_number;
 SQL
 ```
 
-수령 완료 후에는 이 현재 배정 조회에서 해당 칸이 `available`이 된다. 종료된 기록 자체는 DB에 남는다. 특정 등록의 이력을 확인하려면 물품·배정을 연결해 조회한다.
+수령 완료나 `ITEM_MISSING` 사고 처리 후에는 이 현재 배정 조회에서 해당 칸이 `available`이 된다. 종료된 기록 자체는 DB에 남는다. 특정 등록의 이력을 확인하려면 물품·배정을 연결해 조회한다.
 
 ```sql
 SELECT r.id AS registration_id, r.status AS registration_status,
@@ -136,7 +136,7 @@ WHERE r.id = 'REGISTRATION_ID'::uuid
 ORDER BY a.created_at;
 ```
 
-수령 완료는 `item_status=retrieved`, `assignment_status=retrieved`, `ended_at` 존재로 확인한다. 등록 상태 `stored`는 수령 후에도 유지된다.
+수령 완료는 `item_status=retrieved`, `assignment_status=retrieved`, `ended_at` 존재로 확인한다. 강제 개방 뒤 도난은 `item_status=missing`, `assignment_status=missing`, `ended_at` 존재로 확인한다. 등록 상태 `stored`는 두 경우 모두 이력으로 유지된다.
 
 ## 개발 확인용 보관 물품 10건
 
@@ -197,16 +197,16 @@ sudo docker exec smart-lost-found-prod-backend-1 python -m app.seed_demo_items
 - 코드 평문은 발급 응답에서 한 번만 받는다. 서버는 SHA-256 해시를 저장한다. 코드를 잃어버리면 새 소유 확인을 거쳐 발급받는다. 재발급은 이전 코드를 `revoked`로 만든다.
 - 코드는 8자리 Base32(A~Z, 2~7)다. 입력의 공백·하이픈·소문자는 서버가 정규화하므로 FE가 맞출 필요는 없다.
 - 문답을 통과하면 `photo_confirmation` 단계에서 등록 사진을 사용자에게 보여 주고 승인을 받아야 `decision=supported`와 `found_item_id`가 나온다. 사진 확인 응답이 코드까지 함께 주므로 FE는 보조 경로를 따로 호출하지 않는다. 백엔드는 요청의 확인 시도와 물품이 일치하는지, 사진 확인을 거쳤는지, 근거가 유효하고 물건이 보관 중인지 확인한다. 한 확인 시도에서 코드를 한 번 발급한다. [소유 확인 워크플로](../backend/app/ai_ownership_verification/workflow.md)
-- 물건 상태는 `stored → retrieved`, 배정 상태는 `stored → awaiting_pickup → retrieved`다. 등록(`registrations`) 상태는 수령으로 바뀌지 않는다.
+- 정상 수령에서 물건 상태는 `stored → retrieved`, 배정 상태는 `stored → awaiting_pickup → retrieved`다. 강제 개방 뒤 `ITEM_MISSING` 사고에서는 물건·배정이 `stored → missing`으로 바뀐다. 등록(`registrations`) 상태는 두 경우 모두 바뀌지 않는다.
 - 개방 성공 시 코드를 `used`로 처리한다. 완료된 개방을 재요청하면 문을 다시 열지 않고 같은 결과를 반환하므로 FE의 중복 클릭·새로고침은 안전하다.
 - 명확한 장치 실패는 코드를 그대로 두어 다시 시도할 수 있다. 통신 단절 등 결과 불명은 문이 이미 열렸을 수 있어 코드를 `locked`로 두고 같은 코드의 재개방을 막는다. 운영 복구 API는 아직 없다.
 - 완료는 `confirmed=true`와 센서 `closed`를 함께 확인한다. 완료 시 배정이 종료되어 해당 칸이 즉시 다시 배정 가능해진다.
-- 백엔드는 물건을 꺼냈는지 확인하지 않는다. 문 센서는 개폐만 알리므로, 물건을 두고 문만 닫은 뒤 완료를 누르면 그 칸이 빈 칸으로 반납된다. Pi는 가상 무게 센서로 `ITEM_NOT_TAKEN`·`ITEM_NOT_DEPOSITED`를 MQTT로 발행하지만([MQTT 규약](mqtt-protocol.md)) 백엔드에 구독·조회 경로가 없어 이 업무 API의 판정에는 반영되지 않는다. `confirmed=true`가 사용자 선언이며 FE 완료 화면이 이를 분명히 물어야 한다. 투입 완료도 같은 한계를 갖지만, 잘못된 수령 완료는 물건이 남은 칸을 재배정한다는 점에서 영향이 더 크다. 보관함 내부 감지 수단은 하드웨어 협의 대상이다.
+- 백엔드는 사용자 완료와 별개로 이번 개방 이후의 가상 무게 상태를 확인한다. 보관인데 `empty`, 수령인데 `present`면 완료를 거절하며, 사용자는 물건을 바로잡고 같은 칸을 다시 열 수 있다. 일반 센서 상태가 완료를 대신하지는 않는다. 단, 강제 개방 뒤 물건이 사라진 `ITEM_MISSING`은 사용자 완료 선언이 있을 수 없는 사고이므로 물품·배정을 `missing`으로 종료하고 미사용 반환 코드를 폐기한다.
 - 코드의 대상 키오스크가 요청의 `kiosk_id`와 다르면 거절한다. 이는 대상 검사이고 호출자 인증이 아니다. 키오스크 세션은 여전히 미구현이다.
 
 ## 장치 상태와 경고 (MQTT 수신분)
 
-Pi가 [MQTT 규약](mqtt-protocol.md)으로 보낸 센서 상태와 이상 상황을 백엔드가 구독해 저장하고, 아래 두 경로로 읽혀 준다. 이 값은 화면 표시용이다. 완료 판정은 사용자 확인과 문 조회가 하고(D03·D06), 센서는 완료를 **막을 수만 있다**. 보관 완료는 그 칸의 `item`이 `empty`면 409 `ITEM_NOT_DETECTED`, 수령 완료는 `present`면 409 `ITEM_STILL_INSIDE`로 거절한다. 이번 개방 이후 받은 값이고 그 키오스크의 locker 장치가 `online`일 때만 본다. 그 밖(행 없음·오래된 값·`offline`·MQTT 미설정)은 예전처럼 문 닫힘만으로 완료한다.
+Pi가 [MQTT 규약](mqtt-protocol.md)으로 보낸 센서 상태와 이상 상황을 백엔드가 구독해 저장하고, 아래 두 경로로 읽혀 준다. 일반 상태의 완료 판정은 사용자 확인과 문 조회가 하고(D03·D06), 센서는 완료를 **막을 수만 있다**. 보관 완료는 그 칸의 `item`이 `empty`면 409 `ITEM_NOT_DETECTED`, 수령 완료는 `present`면 409 `ITEM_STILL_INSIDE`로 거절한다. 이번 개방 이후 받은 값이고 그 키오스크의 locker 장치가 `online`일 때만 본다. 그 밖(행 없음·오래된 값·`offline`·MQTT 미설정)은 예전처럼 문 닫힘만으로 완료한다. 예외적으로 `ITEM_MISSING`은 해당 칸의 보관 물품·배정을 `missing`으로 종료하고 미사용 반환 코드를 폐기한다. 활성 보관 배정이 없거나 같은 경고가 재전송되면 업무 상태를 다시 바꾸지 않는다.
 
 | 메서드 | 경로 | 입력·출력 |
 | --- | --- | --- |

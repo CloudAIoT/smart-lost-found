@@ -2,7 +2,7 @@
 
 A bad message must be ignored rather than raised: the subscriber runs on paho's thread, where an
 exception stops every later message. These tests pin that, the retained-state upsert, the replay
-drop, and that telemetry never decides a business outcome.
+drop, ordinary telemetry's non-authority, and ITEM_MISSING's narrow incident transition.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -11,13 +11,19 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai_ownership_verification.search import stored_items
 from app.config import Settings, get_settings
 from app.db import Base, get_session
 from app.device_telemetry import apply_message, parse_topic, prune_alerts
+from app.errors import BusinessError
 from app.main import app
-from app.models import DeviceAlert, DeviceState, Kiosk
+from app.models import DeviceAlert, DeviceState, FoundItem, Kiosk, Registration, ReturnCode, StorageAssignment
+from app.services import issue_return_code, search_stored_items
+
+from test_registration import env, ready  # noqa: F401  (shared integration harness)
 
 KIOSK = "00000000-0000-0000-0000-000000000001"
 KIOSK_ID = UUID(KIOSK)
@@ -106,6 +112,93 @@ def test_alert_is_stored_and_a_replay_is_dropped(telemetry):
     alert = session.query(DeviceAlert).one()
     assert (alert.code, alert.severity, alert.locker_number) == ("ITEM_NOT_TAKEN", "warning", 2)
     assert alert.detail == {"before_g": 150.0, "after_g": 150.0}
+
+
+@pytest.mark.parametrize("code_status", ["active", "opening"])
+def test_item_missing_closes_the_assignment_and_revokes_unspent_codes(env, code_status):
+    """A forced-entry loss is an incident transition, not a user-declared completion."""
+    registration_id = ready(env)
+    base = f"/api/registrations/{registration_id}"
+    assert env.client.post(base + "/deposit/open").status_code == 200
+    assert env.client.post(base + "/deposit/complete", json={"confirmed": True}).status_code == 200
+
+    with Session(env.engine) as session:
+        item = session.scalar(select(FoundItem))
+        item_id = item.id
+        code, record = issue_return_code(session, item_id, ttl=env.settings.return_code_ttl_seconds)
+        if code_status == "opening":
+            record.status = "opening"
+            session.commit()
+
+        body = ('{"code": "ITEM_MISSING", "severity": "alarm", "device": "locker",'
+                ' "locker_id": 1, "message": "보관 물품이 사라졌습니다.",'
+                ' "detail": {"before_g": 150.0, "after_g": 0.0}, "at": "%s"}' % AT)
+        assert message(session, f"slf/{env.kiosk_id}/alerts", body) == "alert"
+
+        assignment = session.scalar(select(StorageAssignment))
+        ended_at = assignment.ended_at
+        assert (session.get(FoundItem, item_id).status, assignment.status) == ("missing", "missing")
+        assert ended_at is not None
+        assert session.get(Registration, UUID(registration_id)).status == "stored"
+        assert session.scalar(select(ReturnCode)).status == "revoked"
+        assert search_stored_items(session) == []
+        assert session.execute(stored_items()).all() == []
+        with pytest.raises(BusinessError, match="ITEM_NOT_STORED"):
+            issue_return_code(session, item_id, ttl=env.settings.return_code_ttl_seconds)
+
+        # QoS 1 replay: the alert unique key rejects the whole transaction, including any
+        # attempted incident transition. The original terminal timestamp stays untouched.
+        assert message(session, f"slf/{env.kiosk_id}/alerts", body) == "duplicate"
+        session.expire_all()
+        assert session.scalar(select(StorageAssignment)).ended_at == ended_at
+        assert session.query(DeviceAlert).count() == 1
+
+    refused = env.client.post("/api/pickup/open", json={"code": code, "kiosk_id": env.kiosk_id})
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["code"] == "ITEM_NOT_STORED"
+
+    # ended_at releases the partial unique slot, so the next deposit gets locker 1 again.
+    next_registration = ready(env)
+    opened = env.client.post(f"/api/registrations/{next_registration}/deposit/open")
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["locker_number"] == 1
+
+
+def test_item_missing_without_a_stored_assignment_only_records_the_alert(telemetry):
+    body = ('{"code": "ITEM_MISSING", "severity": "alarm", "device": "locker",'
+            ' "locker_id": 2, "detail": {"before_g": 150.0, "after_g": 0.0},'
+            ' "at": "%s"}' % AT)
+    assert message(telemetry.session, f"slf/{KIOSK}/alerts", body) == "alert"
+    assert telemetry.session.query(DeviceAlert).count() == 1
+    assert telemetry.session.query(FoundItem).count() == 0
+    assert telemetry.session.query(StorageAssignment).count() == 0
+
+
+def test_item_missing_wins_over_an_inflight_pickup(env):
+    registration_id = ready(env)
+    base = f"/api/registrations/{registration_id}"
+    assert env.client.post(base + "/deposit/open").status_code == 200
+    assert env.client.post(base + "/deposit/complete", json={"confirmed": True}).status_code == 200
+    with Session(env.engine) as session:
+        item_id = session.scalar(select(FoundItem.id))
+        code, _ = issue_return_code(session, item_id, ttl=env.settings.return_code_ttl_seconds)
+
+    def report_theft_while_open_waits():
+        env.gateway.on_open = None
+        body = ('{"code": "ITEM_MISSING", "severity": "alarm", "device": "locker",'
+                ' "locker_id": 1, "detail": {"before_g": 150.0, "after_g": 0.0},'
+                ' "at": "2026-11-19T19:25:27+09:00"}')
+        with Session(env.engine) as other:
+            assert message(other, f"slf/{env.kiosk_id}/alerts", body) == "alert"
+
+    env.gateway.on_open = report_theft_while_open_waits
+    refused = env.client.post("/api/pickup/open", json={"code": code, "kiosk_id": env.kiosk_id})
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["code"] == "ITEM_NOT_STORED"
+    with Session(env.engine) as session:
+        assert session.get(FoundItem, item_id).status == "missing"
+        assert session.scalar(select(StorageAssignment)).status == "missing"
+        assert session.scalar(select(ReturnCode)).status == "revoked"
 
 
 def test_capture_alert_without_a_locker_number(telemetry):
@@ -203,10 +296,11 @@ def test_read_apis_expose_state_and_alerts(telemetry):
 
 
 def test_telemetry_does_not_change_business_state(telemetry):
-    """D03·D06: sensors inform the screen. They never complete a deposit or a pickup.
+    """D03·D06: ordinary sensors inform the screen. They never complete a deposit or pickup.
 
     A locker that reports an item can hold a pickup completion back (test_pickup), but no message
-    on its own moves a registration, an item or an assignment."""
+    on its own moves a registration, an item or an assignment. ITEM_MISSING is separately tested
+    as the forced-entry incident exception."""
     session = telemetry.session
     message(session, f"slf/{KIOSK}/alerts",
             '{"code": "ITEM_NOT_TAKEN", "severity": "warning", "device": "locker", "locker_id": 1, "at": "%s"}' % AT)

@@ -112,7 +112,7 @@ cp .env.example .env && chmod 600 .env          # 아래 표대로 고친다
 | `PI_MQTT_HOST`, `PI_MQTT_USERNAME`, `PI_MQTT_PASSWORD` | 브로커의 Tailscale 주소와 촬영 Pi 계정 | 같은 브로커와 보관함 Pi 계정 |
 | `PI_SENSOR_STATE_FILE` | `/home/pi/.slf-pi/sensors.json` | 같음 |
 
-가상 센서와 MQTT 설정의 뜻은 [README](../README.md#가상-센서와-mqtt)와 [MQTT 규약](../../docs/mqtt-protocol.md)에 있다. 이미 설치한 Pi는 `git pull` 뒤 `.venv/bin/pip install -r requirements.txt`로 MQTT 라이브러리(paho-mqtt)를 더 깔고, `.env`에 위 값을 더한 뒤 서비스를 다시 켠다.
+가상 센서와 MQTT 설정의 뜻은 [README](../README.md#가상-센서와-mqtt)와 [MQTT 규약](../../docs/mqtt-protocol.md)에 있다. 이미 설치한 Pi는 `git pull` 뒤 `.venv/bin/pip install -r requirements.txt`로 MQTT 라이브러리(paho-mqtt)를 더 깔고, `.env`에 위 값을 더한 뒤 서비스를 다시 켠다. 브로커에 붙으면 서비스 로그(`journalctl -u slf-pi -n 30`)에 `INFO: MQTT 연결됨: <브로커 주소>:1883`이 보인다.
 
 전원을 켜면 저절로 실행되도록 서비스로 등록한다. 프로그램이 오류로 꺼지면 5초 뒤 다시 실행된다.
 

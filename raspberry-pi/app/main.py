@@ -58,9 +58,21 @@ def make_publisher(settings: Settings) -> Publisher:
     return MqttPublisher(settings)
 
 
+def show_pi_logs() -> None:
+    # uvicorn은 자기 로거만 설정해서, 그대로 두면 pi 로거의 INFO("MQTT 연결됨" 등)가 버려진다.
+    # pi 로거에 출력을 하나 달아 서비스 로그(journalctl)에 INFO부터 보이게 한다.
+    if log.handlers:
+        return  # create_app이 여러 번 불려도 한 번만 단다
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+
+
 def create_app(settings: Settings | None = None, camera: Camera | None = None,
                lockers: Lockers | None = None, publisher: Publisher | None = None,
                scheduler: Scheduler | None = None) -> FastAPI:
+    show_pi_logs()
     settings = settings or get_settings()
     publisher = publisher or make_publisher(settings)
     scheduler = scheduler or ThreadScheduler()

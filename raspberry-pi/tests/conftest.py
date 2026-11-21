@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -9,6 +10,15 @@ from app.main import create_app
 
 API_KEY = "test-api-key"
 HEADERS = {"X-API-Key": API_KEY}
+
+
+@pytest.fixture(autouse=True)
+def fresh_pi_log_output():
+    # create_app이 pi 로거에 다는 출력을 테스트마다 떼어 다음 테스트에 남지 않게 한다
+    yield
+    logger = logging.getLogger("pi")
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
 
 
 def make_settings(role: str, **values) -> Settings:

@@ -128,13 +128,20 @@ sudo mkdir -p /opt/smart-lost-found/mosquitto
 #   scp -i <키> deploy/mosquitto/mosquitto.conf deploy/mosquitto/acl ubuntu@<주소>:~/
 sudo mv ~/mosquitto.conf ~/acl /opt/smart-lost-found/mosquitto/
 
-# 계정 3개. -c는 첫 계정에만 쓴다(기존 파일을 지운다). 비밀번호는 대화형으로 입력한다.
+# 계정 3개. 비밀번호는 대화형으로 두 번씩 입력한다.
 # --user root가 없으면 이미지의 mosquitto 사용자가 root 소유 디렉터리에 파일을 만들지 못한다.
-for account in capture-pi locker-pi backend; do
-  sudo docker run --rm -it --user root -v /opt/smart-lost-found/mosquitto:/work \
-    eclipse-mosquitto:2.0 mosquitto_passwd \
-    $([ "$account" = capture-pi ] && echo -c) /work/passwords "$account"
-done
+#
+# 한 번에 세 줄을 붙여넣지 않는다. mosquitto_passwd가 붙여넣기 버퍼에 남은 다음 줄을
+# 비밀번호로 읽어, 틀렸다는 말도 없이 엉뚱한 값이 등록된다. 한 줄씩 실행하고 끝까지 기다린다.
+# -c는 첫 계정에만 쓴다. 두 번째부터 쓰면 앞의 계정이 지워진다.
+sudo docker run --rm -it --user root -v /opt/smart-lost-found/mosquitto:/work \
+  eclipse-mosquitto:2.0 mosquitto_passwd -c /work/passwords capture-pi
+
+sudo docker run --rm -it --user root -v /opt/smart-lost-found/mosquitto:/work \
+  eclipse-mosquitto:2.0 mosquitto_passwd /work/passwords locker-pi
+
+sudo docker run --rm -it --user root -v /opt/smart-lost-found/mosquitto:/work \
+  eclipse-mosquitto:2.0 mosquitto_passwd /work/passwords backend
 
 # 컨테이너의 mosquitto 사용자(uid 1883)가 읽을 수 있어야 한다.
 sudo chown 1883:1883 mosquitto.conf acl passwords

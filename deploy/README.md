@@ -64,6 +64,10 @@ Pi 설정 6종은 모두 선택값이다. 전부 비우면 지금처럼 Pi·수�
 확인할 때만 켜고, 실제 물건을 보관하는 운영에서는 끈다. 장치 호출이 실패했다고 자동으로 가짜 장치로
 넘어가지는 않는다.
 
+`DEV_FAKE_DEVICE=true`를 켠 상태에서 FE 질문 화면용 보관 물품 10건을 만들거나 보관 상태로 되돌리려면
+`sudo docker exec smart-lost-found-prod-backend-1 python -m app.seed_demo_items`를 실행한다. 내용과 되돌리기
+규칙은 [개발 확인용 보관 물품](../docs/api.md#개발-확인용-보관-물품-10건)에 있다.
+
 Variables/Secrets 변경만으로 배포 이벤트가 발생하지 않는다. 저장소 Actions → Backend CI and EC2 deployment → Run workflow → **main**으로 재배포한다. `.env`나 장기 AWS 액세스 키를 Git에 올리지 않는다. 이미지 안에도 비밀값을 넣지 않는다.
 
 DB 비밀번호는 변경 전에 PostgreSQL 역할의 비밀번호 변경 절차를 먼저 계획해야 한다. 기존 DB와 다른 값이 들어오면 배포 스크립트가 중단한다. 단순 Secret 수정은 PostgreSQL 역할의 비밀번호를 바꾸지 않는다. 현재 자동 회전 API는 없다.

@@ -44,6 +44,14 @@ class Settings(GeminiSettings):
     return_code_ttl_seconds: int | None = Field(default=None, gt=0)
     # Per-kiosk device routing stays in server configuration, never FE input.
     pi_devices: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Device telemetry over MQTT (docs/mqtt-protocol.md). An empty host leaves the subscriber off.
+    mqtt_host: str = ""
+    mqtt_port: int = Field(default=1883, ge=1, le=65535)
+    mqtt_username: str = ""
+    mqtt_password: SecretStr = SecretStr("")
+    # A stable client id is what lets the broker queue QoS 1 alerts across a deployment.
+    mqtt_client_id: str = Field(default="slf-backend", pattern=r"^[A-Za-z0-9._-]{1,64}$")
+    mqtt_alert_retention_days: int = Field(default=14, ge=1, le=365)
 
     @property
     def database_url(self) -> URL:

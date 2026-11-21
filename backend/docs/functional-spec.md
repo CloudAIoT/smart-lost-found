@@ -62,7 +62,7 @@
 
 ### 2.3 공개 엔드포인트 전체
 
-이 표의 19개가 업무 FE와 상태 확인에 제공되는 전체 라우트다. Swagger 자체·OpenAPI 문서 경로는 제외한다.
+이 표의 21개가 업무 FE와 상태 확인에 제공되는 전체 라우트다. Swagger 자체·OpenAPI 문서 경로는 제외한다.
 
 | 메서드 | 경로 | 기능 | 성공 |
 | --- | --- | --- | --- |
@@ -70,6 +70,8 @@
 | GET | `/ready` | F02 DB 준비 상태 | 200 |
 | GET | `/api/kiosks` | F03 키오스크 목록 | 200 |
 | GET | `/api/categories` | F04 등록용 카테고리 목록 | 200 |
+| GET | `/api/kiosks/{kiosk_id}/device-status` | F14 장치·칸 최신 상태 | 200 |
+| GET | `/api/alerts` | F14 장치 경고 목록 | 200 |
 | POST | `/api/registrations` | F05 등록 생성 | 201 |
 | GET | `/api/registrations/{registration_id}` | F05 등록 조회 | 200 |
 | POST | `/api/registrations/{registration_id}/shots/{shot_order}` | F06 촬영·저장 | 200 |
@@ -562,6 +564,73 @@ FE는 본문을 `Blob`으로 읽어 화면에 띄우고 토큰은 메모리에�
 
 409 `PICKUP_NOT_OPENED`/`DOOR_NOT_CLOSED`, 404 `ITEM_NOT_FOUND`, 장치 조회 실패 502/503을 처리한다. 문 상태만으로 투입·수령 완료를 자동 요청하지 않는다. 물건 유무 센서는 없으므로 사용자 확인 없이 `confirmed=true`를 자동 전송하지 않는다.
 
+### 8-1. F14 장치 상태와 경고
+
+Pi가 가상 센서로 본 상태와 이상 상황은 HTTP가 아니라 MQTT로 백엔드에 온다([MQTT 규약](../../docs/mqtt-protocol.md)). FE는 그 결과만 아래 두 경로로 읽는다. 브로커에 직접 붙지 않는다.
+
+**이 값으로 업무를 진행시키지 않는다.** 보관·수령 완료는 그대로 F12의 사용자 확인과 서버의 문 조회로 끝낸다(D03·D06). 센서가 "물건이 없다"고 해도 완료 요청을 막거나 자동으로 보내지 않고, 안내 문구만 띄운다.
+
+`GET /api/kiosks/{kiosk_id}/device-status`
+
+~~~json
+[
+  {"device": "locker", "locker_number": null, "connection": "online", "door": null,
+   "weight_g": null, "item": null, "reported_at": "2026-11-19T19:24:26+09:00",
+   "updated_at": "2026-11-19T10:24:26Z"},
+  {"device": "locker", "locker_number": 2, "connection": null, "door": "closed",
+   "weight_g": 150.0, "item": "present", "reported_at": "2026-11-19T19:24:27+09:00",
+   "updated_at": "2026-11-19T10:24:27Z"}
+]
+~~~
+
+| 필드 | 의미 |
+| --- | --- |
+| `device` | `locker` 또는 `capture` |
+| `locker_number` | 정수면 그 칸, `null`이면 장치 자체 |
+| `connection` | 장치 행에만 있는 `online`/`offline`. 칸 행은 `null` |
+| `door` | 칸의 `open`/`closed`. 서버가 Pi에 직접 묻는 F12의 문 조회와 다른 값이며 더 오래된 값일 수 있다 |
+| `weight_g` / `item` | 가상 무게와 `present`/`empty`. 10g 초과를 `present`로 본다 |
+| `reported_at` | Pi가 보낸 시각 |
+| `updated_at` | 백엔드가 저장한 시각. 둘의 차이가 크면 장치나 구독이 끊겼을 수 있다 |
+
+없는 키오스크는 404 `KIOSK_NOT_FOUND`. 아직 받은 메시지가 없으면 빈 배열이며, 이것은 "장치 정상"이 아니라 "상태 모름"이다. 브로커 미설정 서버에서도 빈 배열이 정상 응답이다.
+
+`GET /api/alerts`
+
+| 쿼리 | 타입 | 기본값 | 제약 |
+| --- | --- | --- | --- |
+| `kiosk_id` | UUID | 없음 | 생략하면 전체 키오스크 |
+| `severity` | string | 없음 | `alarm` 또는 `warning`. 그 외는 422 |
+| `since` | ISO 8601 | 없음 | 이 시각 이후만 |
+| `limit` | integer | 50 | 1~200 |
+| `offset` | integer | 0 | 0 이상 |
+
+~~~json
+[
+  {"id": "99999999-9999-4999-8999-999999999999",
+   "kiosk_id": "00000000-0000-0000-0000-000000000001",
+   "code": "ITEM_NOT_TAKEN", "severity": "warning", "device": "locker", "locker_number": 2,
+   "message": "2번 보관함에 물건이 남아 있습니다.",
+   "detail": {"before_g": 150.0, "after_g": 150.0},
+   "reported_at": "2026-11-19T19:24:29+09:00"}
+]
+~~~
+
+규약 4절의 `code` 6종과 화면 처리는 다음과 같다.
+
+| `code` | `severity` | FE 처리 |
+| --- | --- | --- |
+| `FORCED_OPEN` | `alarm` | 관리 화면 경보. 개방 명령 없이 문이 열렸다 |
+| `ITEM_MISSING` | `alarm` | 관리 화면 경보. 강제 개방된 칸에서 물건이 사라졌다 |
+| `TAMPER` | `warning` | 관리 화면 표시. 닫힌 칸에 강한 충격 |
+| `ITEM_NOT_DEPOSITED` | `warning` | 보관 완료 뒤 "물건을 넣고 문을 닫아 주세요" 안내 |
+| `ITEM_NOT_TAKEN` | `warning` | 수령 완료 뒤 "보관함에 물건이 남아 있어요" 안내 |
+| `CAPTURE_ITEM_LEFT` | `warning` | 등록 중 "촬영 상자에 물건이 남아 있어요" 안내 |
+
+`code`를 이 6종으로 가정하지 않는다. Pi에 새 상황이 생기면 모르는 `code`가 오고, 그때는 `message`를 그대로 보여 준다. `locker_number`는 촬영 경고에서 `null`이다.
+
+경고는 서버가 밀어 주지 않으므로 FE가 주기적으로 조회한다. 키오스크 완료 화면에서는 완료 응답을 받은 뒤 해당 키오스크의 최근 경고를 한 번 더 조회해 띄우는 식이면 충분하다. 짧은 주기로 반복 조회하지 않는다. 보관 기간(기본 14일)이 지난 경고는 사라지며, 경고를 해소 처리하는 API는 없다.
+
 ## 9. F13 오류·지연·중복 요청 처리
 
 ### 9.1 오류 응답 형식
@@ -705,7 +774,9 @@ FE는 DB에 직접 접속하지 않는다. 이 표는 API 응답이 어떤 기�
 | 반환 코드 평문 재조회 | 없음. 유실 시 새 소유 확인·발급 필요 |
 | 물품 상세/수령 상태 GET | 별도 공개 API 없음. 수령 작업 응답 사용 |
 | 진행 중 작업의 브라우저 재시작 복구 | FE-K01은 키오스크 ID만 기억. 업무 ID 보존·복구 UX는 별도 설계 |
-| Pi 물건 유무 감지 | Pi가 가상 무게 센서로 판단해 MQTT로 `ITEM_NOT_DEPOSITED`·`ITEM_NOT_TAKEN` 등을 발행한다([MQTT 규약](../../docs/mqtt-protocol.md)). 백엔드에는 구독·저장·조회 API가 없어 FE가 받을 경로는 아직 없다. 보관·수령 완료 판정은 여전히 사용자 선언과 문 닫힘 확인 조합이다 |
+| Pi 물건 유무 감지 | Pi가 가상 무게 센서로 판단해 MQTT로 발행하고, 백엔드가 구독해 8-1의 두 경로로 읽혀 준다. 완료 판정 자체는 여전히 사용자 선언과 문 닫힘 확인 조합이다(D03·D06) |
+| 경고 실시간 푸시·해소 처리 | 없음. FE가 8-1을 조회한다. WebSocket·SSE와 경고 해소 API는 후속 범위 |
+| 장치 명령과 센서의 교차 검증 | 없음. 경고는 저장·표시만 하고 배정 기록과 자동 대조하지 않는다 |
 | 후보 검색 확장 | 전체 대상 보관 물품 500건 제한. 인덱스 검색·키오스크 필터·검색 페이지네이션 없음 |
 
 운영 기기 인증 후속 범위는 [FE-K01의 인증 경계](../../docs/web-structure.md#편의-설정과-기기-인증의-경계)를 따른다. 프론트에 인증 헤더나 새로운 요청 필드를 임의로 추가하지 않는다.
@@ -736,13 +807,15 @@ FE는 DB에 직접 접속하지 않는다. 이 표는 API 응답이 어떤 기�
 | FE-18 | 반환 후 등록 GET·같은 칸 재사용 | 200, 기존 사진·분석 유지, `locker_number=null` |
 | FE-19 | 장치 통신 단절·비JSON 오류 | 요청 유실/실패 구분 안내, 자동 재개방 금지 |
 | FE-20 | 공개 데이터 확인 | 특징 원문·정답·비밀 키·코드 로그 노출 없음 |
+| FE-21 | 장치 상태 없음·offline·모르는 경고 코드 | 빈 배열을 정상으로 표시, offline 구분, 모르는 `code`는 `message`로 안내 |
 
-실제 EC2 확인 시에는 19개 API를 모두 기계적으로 호출하지 말고, 위 두 업무 흐름에 필요한 요청을 순서대로 수행한다. 촬영·개방은 실제 장치 동작이며 물건·사물함 앞에서 수행한다.
+실제 EC2 확인 시에는 21개 API를 모두 기계적으로 호출하지 말고, 위 두 업무 흐름에 필요한 요청을 순서대로 수행한다. 촬영·개방은 실제 장치 동작이며 물건·사물함 앞에서 수행한다.
 
 ## 13. 구현 근거
 
 - [등록·반환 라우터와 DTO](../app/api.py), [업무 상태·DB 처리](../app/services.py), [ORM 모델](../app/models.py).
 - [상태 확인·오류 응답](../app/main.py), [Pi·S3 어댑터](../app/integrations.py), [사진 분석 연결](../app/photo_analysis.py).
+- [MQTT 메시지 해석·저장](../app/device_telemetry.py), [구독자](../app/mqtt_listener.py), [장치 상태 테스트](../tests/test_device_telemetry.py), [MQTT 규약](../../docs/mqtt-protocol.md).
 - [소유 확인 라우터](../app/ai_ownership_verification/api.py), [공개 응답 모델](../app/ai_ownership_verification/workflow_schemas.py), [검색](../app/ai_ownership_verification/search.py), [문답·승인 정책](../app/ai_ownership_verification/workflow.py).
 - [등록 테스트](../tests/test_registration.py), [반환 테스트](../tests/test_pickup.py), [소유 확인 테스트](../tests/test_ownership_workflow.py).
 - [FE 실행·배포](../../frontend/README.md), [LED·버튼 시제품 결정](../../raspberry-pi/docs/decisions/0002-locker-led-button.md).

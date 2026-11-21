@@ -27,6 +27,13 @@ def registration(session: Session, registration_id: UUID) -> Registration:
     return value
 
 
+def kiosk(session: Session, kiosk_id: UUID) -> Kiosk:
+    value = session.get(Kiosk, kiosk_id)
+    if value is None:
+        raise BusinessError("KIOSK_NOT_FOUND", 404)
+    return value
+
+
 def images(session: Session, registration_id: UUID) -> list[ItemImage]:
     return list(session.scalars(select(ItemImage).where(ItemImage.registration_id == registration_id).order_by(ItemImage.shot_order)))
 
@@ -43,8 +50,7 @@ def claim(session: Session, registration_id: UUID, allowed: tuple[str, ...], tar
 
 def create_registration(session: Session, kiosk_id: UUID, category_id: UUID | None, description: str | None,
                         *, found_location: str | None = None) -> Registration:
-    if session.get(Kiosk, kiosk_id) is None:
-        raise BusinessError("KIOSK_NOT_FOUND", 404)
+    kiosk(session, kiosk_id)
     if category_id is not None and session.get(Category, category_id) is None:
         raise BusinessError("CATEGORY_NOT_FOUND", 404)
     value = Registration(kiosk_id=kiosk_id, primary_category_id=category_id, secondary_description=description,

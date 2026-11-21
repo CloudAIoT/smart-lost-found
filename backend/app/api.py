@@ -14,6 +14,7 @@ from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.dev_device import FakeDeviceGateway
+from app.device_telemetry import kiosk_device_states, recent_alerts
 from app.integrations import IntegrationError, PiGateway, UnconfiguredAnalyzer, make_store
 from app.models import Category, FoundItem, Kiosk, Locker, Registration
 from app.photo_analysis import GeminiPhotoAnalyzer
@@ -102,6 +103,26 @@ def list_kiosks(session: DB, limit: Annotated[int, Query(ge=1, le=100)] = 20,
     rows = session.scalars(select(Kiosk).order_by(Kiosk.name, Kiosk.id).limit(limit).offset(offset))
     return [{"id": row.id, "name": row.name, "location_description": row.location_description,
              "latitude": row.latitude, "longitude": row.longitude} for row in rows]
+
+
+@router.get("/kiosks/{kiosk_id}/device-status")
+def kiosk_device_status(kiosk_id: UUID, session: DB):
+    """Latest MQTT-reported state for one kiosk. Reports observation, never a business decision."""
+    services.kiosk(session, kiosk_id)
+    return kiosk_device_states(session, kiosk_id)
+
+
+@router.get("/alerts")
+def list_alerts(session: DB, kiosk_id: UUID | None = None,
+                severity: Annotated[Literal["alarm", "warning"] | None, Query()] = None,
+                since: Annotated[datetime | None, Query()] = None,
+                limit: Annotated[int, Query(ge=1, le=200)] = 50,
+                offset: Annotated[int, Query(ge=0)] = 0):
+    """Alerts received from the devices, newest first. Older than the retention window are gone."""
+    if kiosk_id is not None:
+        services.kiosk(session, kiosk_id)
+    return recent_alerts(session, kiosk_id=kiosk_id, severity=severity, since=since,
+                         limit=limit, offset=offset)
 
 
 @router.get("/categories")

@@ -28,6 +28,7 @@ class DeviceTelemetryListener:
 
         self.host = settings.mqtt_host
         self.port = settings.mqtt_port
+        self.client_id = settings.mqtt_client_id
         self.retention_days = settings.mqtt_alert_retention_days
         self.sessions = sessions
         self.client = client or mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
@@ -41,11 +42,15 @@ class DeviceTelemetryListener:
         self.client.reconnect_delay_set(min_delay=1, max_delay=30)
 
     def start(self) -> None:
-        # Never block startup on the broker; paho's thread owns connecting and reconnecting.
+        # Said first, before any work that could fail: paho retries a down broker quietly, so
+        # this line is the only proof the subscriber was asked to run at all.
+        log.info("장치 상태 MQTT 구독 시작: %s:%s (client_id=%s)",
+                 self.host, self.port, self.client_id)
         with self.sessions() as session:
             removed = prune_alerts(session, self.retention_days)
         if removed:
             log.info("보관 기간이 지난 경고 %d건을 지웠습니다", removed)
+        # Never block startup on the broker; paho's thread owns connecting and reconnecting.
         self.client.connect_async(self.host, self.port, keepalive=KEEPALIVE_SECONDS)
         self.client.loop_start()
 

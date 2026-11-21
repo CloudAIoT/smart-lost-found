@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -16,11 +17,23 @@ from app.errors import BusinessError, IntegrationError
 from app.mqtt_listener import make_listener
 
 
+log = logging.getLogger("app")
+
+# uvicorn configures only its own loggers, so without a root handler this package's INFO lines
+# are dropped and only WARNING and above reach stderr. An operator could then not tell a running
+# MQTT subscriber from one that never started. Added without a format so uvicorn's own output,
+# which sets propagate=False, keeps its usual shape.
+logging.basicConfig(level=logging.INFO)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Device telemetry is optional: without a broker address the API runs exactly as before.
     listener = await run_in_threadpool(make_listener, get_settings())
-    if listener is not None:
+    if listener is None:
+        # Said once at startup so the absence of telemetry is visible, not guessed from silence.
+        log.info("장치 상태 MQTT 구독을 시작하지 않습니다 (MQTT_HOST 미설정)")
+    else:
         await run_in_threadpool(listener.start)
     try:
         yield

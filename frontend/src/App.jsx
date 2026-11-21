@@ -115,6 +115,8 @@ const ERROR_MESSAGES = {
   DEPOSIT_NOT_OPENED: '보관함이 아직 열리지 않았습니다.',
   DOOR_NOT_CLOSED: '보관함 문이 닫히지 않았습니다. 문을 닫은 뒤 다시 눌러주세요.',
   ITEM_NOT_STORED: '보관 중인 상태의 물건이 아닙니다.',
+  ITEM_NOT_DETECTED: '물건이 감지되지 않았어요. 다시 넣어 주세요.',
+  ITEM_STILL_INSIDE: '보관함에 물건이 남아 있어요. 다시 열어 꺼내 주세요.',
   PICKUP_NOT_OPENED: '보관함이 아직 열리지 않았습니다.',
   RETURN_CODE_EXPIRED: 'OTP 유효기간이 지났습니다. 웹에서 다시 발급받아 주세요.',
   RETURN_CODE_ALREADY_USED: '이미 사용된 OTP입니다.',
@@ -1023,7 +1025,14 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
         setPickup(data);
         setStep('pickup-done');
       },
-      { inline: true },
+      {
+        inline: true,
+        // 남아 있는 물건을 알릴 때는 어느 칸인지 같이 말해 주는 편이 찾기 쉽다.
+        mapError: (err) =>
+          err?.code === 'ITEM_STILL_INSIDE'
+            ? `${pickup.locker_number}번 보관함에 물건이 남아 있어요. 다시 열어 꺼내 주세요. (ITEM_STILL_INSIDE)`
+            : errorText(err),
+      },
     );
   };
 

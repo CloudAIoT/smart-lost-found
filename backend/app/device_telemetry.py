@@ -5,7 +5,9 @@ treats a message as untrusted input: a malformed topic or payload is reported as
 raised, because one bad message must not stop the subscriber from reading the next one.
 
 What arrives is observation, not authority. Deposit and pickup completion still need the user's
-confirmation and the HTTP door check (D03, D06); these rows only drive warnings and displays.
+confirmation and the HTTP door check (D03, D06); nothing here advances a registration. Completion
+does read one value through `locker_item`: a locker that contradicts what the user just declared
+holds the completion back. A sensor can stop a completion, never make one.
 """
 
 import json
@@ -217,6 +219,33 @@ def kiosk_device_states(session: Session, kiosk_id: UUID) -> list[dict]:
              "connection": row.connection, "door": row.door,
              "weight_g": row.weight_g, "item": row.item,
              "reported_at": row.reported_at, "updated_at": row.updated_at} for row in rows]
+
+
+def locker_item(session: Session, kiosk_id: UUID, locker_number: int, *,
+                since: datetime | None = None) -> str | None:
+    """`present`/`empty` for one locker, or None when no reading may be trusted to answer.
+
+    Three things have to hold. The controller must be online now, or what it last said is
+    whatever happened to be true when it went away. The row must exist and carry an item value.
+    And with `since` given, the reading must be newer than that moment: a row left from an
+    earlier session describes a different session. Anything else is None, never "empty" -
+    silence must not read as an answer, because the caller turns an answer into a refusal.
+    """
+    device = session.get(DeviceState, (kiosk_id, "locker", DEVICE_TARGET))
+    if device is None or device.connection != "online":
+        return None
+    row = session.get(DeviceState, (kiosk_id, "locker", locker_number))
+    if row is None or row.item is None:
+        return None
+    if since is not None and received_at(row) < since:
+        return None
+    return row.item
+
+
+def received_at(row: DeviceState) -> datetime:
+    """When this server stored the reading. Not the device clock, which it cannot check."""
+    # SQLite returns naive values even for timezone-aware columns.
+    return row.updated_at if row.updated_at.tzinfo else row.updated_at.replace(tzinfo=timezone.utc)
 
 
 def recent_alerts(session: Session, *, kiosk_id: UUID | None = None, severity: str | None = None,

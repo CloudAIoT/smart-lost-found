@@ -26,7 +26,8 @@ FE의 최초 키오스크 선택·저장·복원은 [FE-K01](web-structure.md#fe
 | GET | `/api/registrations/{id}/shots/{1 또는 2}/preview` | `{"url":"..."}` 비공개 S3 임시 서명 URL |
 | POST | `/api/registrations/{id}/analysis` | 두 사진의 특징 추출 요청·결과 저장 |
 | POST | `/api/registrations/{id}/deposit/open` | 분석 성공 확인·빈 칸 배정·개방 |
-| POST | `/api/registrations/{id}/deposit/complete` | `{"confirmed":true}` 사용자 완료 확인 → 문 조회 → 보관 완료 |
+| POST | `/api/registrations/{id}/deposit/complete` | `{"confirmed":true}` 사용자 완료 확인 → 문 조회 → 칸 상태 확인 → 보관 완료 |
+| POST | `/api/registrations/{id}/deposit/reopen` | 본문 없음. `ITEM_NOT_DETECTED`로 막힌 뒤 같은 칸을 다시 연다 |
 
 등록 입력:
 
@@ -178,7 +179,8 @@ sudo docker exec smart-lost-found-prod-backend-1 python -m app.seed_demo_items
 | POST | `/api/ownership/attempts/{attempt_id}/photo-confirmation` | `{"confirmed":true,"photo_token":"UUID"}` → `{"attempt","return_code"}`. **반환 코드를 받는 정상 경로** |
 | POST | `/api/found-items/{found_item_id}/return-code` | 보조 경로. `{"attempt_id":"UUID"}` → 201 `{"found_item_id","code","expires_at","kiosk_id","kiosk_name"}` |
 | POST | `/api/pickup/open` | `{"code":"...","kiosk_id":"UUID"}` → 코드 확인·보관함 개방 |
-| POST | `/api/pickup/{found_item_id}/complete` | `{"confirmed":true}` → 문 조회 → 수령 완료 |
+| POST | `/api/pickup/{found_item_id}/complete` | `{"confirmed":true}` → 문 조회 → 칸 상태 확인 → 수령 완료 |
+| POST | `/api/pickup/{found_item_id}/reopen` | 본문 없음. `ITEM_STILL_INSIDE`로 막힌 뒤 같은 칸을 다시 연다. 반환 코드는 쓰지 않는다 |
 
 개방·완료의 공통 응답:
 
@@ -204,7 +206,7 @@ sudo docker exec smart-lost-found-prod-backend-1 python -m app.seed_demo_items
 
 ## 장치 상태와 경고 (MQTT 수신분)
 
-Pi가 [MQTT 규약](mqtt-protocol.md)으로 보낸 센서 상태와 이상 상황을 백엔드가 구독해 저장하고, 아래 두 경로로 읽혀 준다. 이 값은 화면 표시용이고 보관·수령 완료 판정에는 쓰지 않는다(D03·D06).
+Pi가 [MQTT 규약](mqtt-protocol.md)으로 보낸 센서 상태와 이상 상황을 백엔드가 구독해 저장하고, 아래 두 경로로 읽혀 준다. 이 값은 화면 표시용이다. 완료 판정은 사용자 확인과 문 조회가 하고(D03·D06), 센서는 완료를 **막을 수만 있다**. 보관 완료는 그 칸의 `item`이 `empty`면 409 `ITEM_NOT_DETECTED`, 수령 완료는 `present`면 409 `ITEM_STILL_INSIDE`로 거절한다. 이번 개방 이후 받은 값이고 그 키오스크의 locker 장치가 `online`일 때만 본다. 그 밖(행 없음·오래된 값·`offline`·MQTT 미설정)은 예전처럼 문 닫힘만으로 완료한다.
 
 | 메서드 | 경로 | 입력·출력 |
 | --- | --- | --- |
@@ -246,7 +248,7 @@ Pi가 [MQTT 규약](mqtt-protocol.md)으로 보낸 센서 상태와 이상 상�
 | --- | --- |
 | 403 | `OWNERSHIP_REQUIRED` |
 | 404 | `KIOSK_NOT_FOUND`, `CATEGORY_NOT_FOUND`, `REGISTRATION_NOT_FOUND`, `IMAGE_NOT_FOUND`, `ITEM_NOT_FOUND`, `RETURN_CODE_NOT_FOUND`, `OWNERSHIP_PHOTO_UNAVAILABLE` |
-| 409 | `OWNERSHIP_PHOTO_NOT_PENDING`, `OWNERSHIP_PHOTO_LOAD_REQUIRED`, `INVALID_REGISTRATION_STATE`, `SHOT_OUT_OF_ORDER`, `TWO_IMAGES_REQUIRED`, `ANALYSIS_REQUIRED`, `NO_AVAILABLE_LOCKER`, `ALLOCATION_CONFLICT`, `DEPOSIT_NOT_OPENED`, `DOOR_NOT_CLOSED`, `ITEM_NOT_STORED`, `PICKUP_NOT_OPENED`, `RETURN_CODE_EXPIRED`, `RETURN_CODE_ALREADY_USED`, `RETURN_CODE_UNUSABLE`, `RETURN_CODE_IN_PROGRESS`, `RETURN_CODE_WRONG_KIOSK`, `RETURN_CODE_CONFLICT` |
+| 409 | `OWNERSHIP_PHOTO_NOT_PENDING`, `OWNERSHIP_PHOTO_LOAD_REQUIRED`, `INVALID_REGISTRATION_STATE`, `SHOT_OUT_OF_ORDER`, `TWO_IMAGES_REQUIRED`, `ANALYSIS_REQUIRED`, `NO_AVAILABLE_LOCKER`, `ALLOCATION_CONFLICT`, `DEPOSIT_NOT_OPENED`, `DOOR_NOT_CLOSED`, `ITEM_NOT_DETECTED`, `ITEM_STILL_INSIDE`, `ITEM_NOT_STORED`, `PICKUP_NOT_OPENED`, `RETURN_CODE_EXPIRED`, `RETURN_CODE_ALREADY_USED`, `RETURN_CODE_UNUSABLE`, `RETURN_CODE_IN_PROGRESS`, `RETURN_CODE_WRONG_KIOSK`, `RETURN_CODE_CONFLICT` |
 | 502 | `DEVICE_UNREACHABLE`, `INVALID_DEVICE_RESPONSE`, `DEVICE_ROLE_MISMATCH`, `DEVICE_RESPONSE_TOO_LARGE`, `INVALID_IMAGE`, `IMAGE_STORAGE_FAILED`, `INVALID_ANALYSIS_RESULT`, 규약의 Pi 오류 code |
 | 503 | `BUSINESS_API_DISABLED`, `AI_NOT_CONFIGURED`, `DEVICE_NOT_CONFIGURED`, `CAPTURE_NOT_CONFIGURED`, `IMAGE_STORAGE_NOT_CONFIGURED`, `RETURN_CODE_NOT_CONFIGURED` |
 

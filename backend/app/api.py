@@ -173,6 +173,15 @@ def open_deposit(registration_id: UUID, session: DB, gateway: Gateway, settings:
     return registration_view(session, services.registration(session, registration_id))
 
 
+@router.post("/registrations/{registration_id}/deposit/reopen", response_model=RegistrationView)
+def reopen_deposit(registration_id: UUID, session: DB, gateway: Gateway, settings: Config):
+    """Open the assigned locker again when a completion was refused for an empty locker."""
+    if not settings.command_ttl_seconds:
+        raise IntegrationError("DEVICE_NOT_CONFIGURED")
+    services.reopen_deposit(session, registration_id, gateway, ttl=settings.command_ttl_seconds)
+    return registration_view(session, services.registration(session, registration_id))
+
+
 class CompletionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirmed: Literal[True]
@@ -247,6 +256,16 @@ def open_pickup(body: PickupInput, session: DB, gateway: Gateway, settings: Conf
         raise IntegrationError("DEVICE_NOT_CONFIGURED")
     assignment = services.open_pickup(session, body.code, body.kiosk_id, gateway,
                                       ttl=settings.command_ttl_seconds)
+    return pickup_view(session, assignment)
+
+
+@router.post("/pickup/{found_item_id}/reopen", response_model=PickupView)
+def reopen_pickup(found_item_id: UUID, session: DB, gateway: Gateway, settings: Config):
+    """Open the same locker again after a refused pickup. The return code stays spent."""
+    if not settings.command_ttl_seconds:
+        raise IntegrationError("DEVICE_NOT_CONFIGURED")
+    assignment = services.reopen_pickup(session, found_item_id, gateway,
+                                        ttl=settings.command_ttl_seconds)
     return pickup_view(session, assignment)
 
 

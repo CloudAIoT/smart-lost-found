@@ -203,7 +203,10 @@ def test_read_apis_expose_state_and_alerts(telemetry):
 
 
 def test_telemetry_does_not_change_business_state(telemetry):
-    """D03·D06: sensors inform the screen. They never complete a deposit or a pickup."""
+    """D03·D06: sensors inform the screen. They never complete a deposit or a pickup.
+
+    A locker that reports an item can hold a pickup completion back (test_pickup), but no message
+    on its own moves a registration, an item or an assignment."""
     session = telemetry.session
     message(session, f"slf/{KIOSK}/alerts",
             '{"code": "ITEM_NOT_TAKEN", "severity": "warning", "device": "locker", "locker_id": 1, "at": "%s"}' % AT)

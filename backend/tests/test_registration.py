@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 import base64
@@ -22,7 +23,8 @@ from app.db import Base, get_session
 from app.integrations import AnalysisResult, IntegrationError, S3ImageStore
 from app.inspect_analysis import inspect_analysis
 from app.main import app
-from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, StorageAssignment
+from app.models import (Category, DeviceCommand, DeviceState, FoundItem, ItemImage, Kiosk, Locker,
+                        Registration, StorageAssignment)
 from app.services import BusinessError, complete_deposit, open_deposit, search_stored_items
 
 
@@ -552,3 +554,69 @@ def test_postgres_concurrent_completion_preserves_first_timestamp(env):
     with ThreadPoolExecutor(max_workers=2) as pool:
         timestamps = list(pool.map(complete, [1, 2]))
     assert timestamps[0] == timestamps[1]
+
+
+def report_locker(env, item, *, locker_number=1, seconds_ago=0.0, online=True):
+    """Write what the locker told the server over MQTT, exactly as the subscriber would.
+
+    The controller row (locker_number 0) carries the connection; without an online controller a
+    locker reading is too old to trust, so tests that expect a decision must write both.
+    """
+    moment = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
+    with Session(env.engine) as session:
+        session.merge(DeviceState(kiosk_id=UUID(env.kiosk_id), device="locker", locker_number=0,
+                                  connection="online" if online else "offline",
+                                  reported_at=moment, updated_at=moment))
+        if item is not None:
+            session.merge(DeviceState(kiosk_id=UUID(env.kiosk_id), device="locker",
+                                      locker_number=locker_number, door="closed",
+                                      weight_g=120.0 if item == "present" else 0.0, item=item,
+                                      reported_at=moment, updated_at=moment))
+        session.commit()
+
+
+def test_deposit_waits_until_the_locker_reports_the_item(env):
+    """An empty locker contradicts the deposit the user declared, and the device says so a second
+    later as ITEM_NOT_DEPOSITED. The completion is refused until the item is actually in there."""
+    value = ready(env)
+    base = f"/api/registrations/{value}"
+    assert env.client.post(base + "/deposit/open").status_code == 200
+
+    report_locker(env, "empty")
+    blocked = env.client.post(base + "/deposit/complete", json={"confirmed": True})
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["detail"]["code"] == "ITEM_NOT_DETECTED"
+    assert env.client.get(base).json()["status"] == "awaiting_deposit"
+    with Session(env.engine) as session:
+        # Refusing wrote nothing: the locker is still held for this registration.
+        assignment = session.scalar(select(StorageAssignment))
+        assert (assignment.status, assignment.deposited_at) == ("awaiting_deposit", None)
+        assert session.scalar(select(FoundItem)).status == "awaiting_deposit"
+
+    # The door is shut, so the user needs it opened again before the item can go in.
+    opens_before = len(env.gateway.opens)
+    reopened = env.client.post(base + "/deposit/reopen")
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["locker_number"] == 1
+    assert len(env.gateway.opens) == opens_before + 1
+
+    report_locker(env, "present")
+    done = env.client.post(base + "/deposit/complete", json={"confirmed": True})
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "stored"
+
+
+@pytest.mark.parametrize("reading", ["none", "older_than_the_open", "controller_offline"])
+def test_completion_ignores_a_reading_that_cannot_answer(env, reading):
+    """No row, a reading older than the open, or an offline controller all leave the old rule in
+    place: the user's confirmation plus a closed door. MQTT being absent must change nothing."""
+    if reading == "older_than_the_open":
+        report_locker(env, "empty", seconds_ago=600)
+    value = ready(env)
+    base = f"/api/registrations/{value}"
+    assert env.client.post(base + "/deposit/open").status_code == 200
+    if reading == "controller_offline":
+        report_locker(env, "empty", online=False)
+    done = env.client.post(base + "/deposit/complete", json={"confirmed": True})
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "stored"

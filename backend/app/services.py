@@ -11,6 +11,7 @@ from sqlalchemy import exists, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.device_telemetry import locker_item
 from app.integrations import (AnalysisInput, AnalysisResult, DeviceGateway, FeatureAnalyzer, ImageStore,
                               IntegrationError, validate_jpeg)
 from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, ReturnCode, StorageAssignment, now
@@ -208,6 +209,11 @@ def complete_deposit(session: Session, registration_id: UUID, gateway: DeviceGat
     door = gateway.door(reg.kiosk_id, locker.locker_number)
     if door != "closed":
         raise BusinessError("DOOR_NOT_CLOSED")
+    # An empty locker contradicts the deposit the user just declared. The device says so again a
+    # second later as ITEM_NOT_DEPOSITED, which would otherwise land behind a finished screen.
+    # Nothing is written: the registration stays awaiting_deposit and reopen_deposit can run.
+    if reported_item(session, locker, assignment) == "empty":
+        raise BusinessError("ITEM_NOT_DETECTED")
     # The API call itself is the explicit user confirmation. A sensor poll never completes a deposit.
     # Reload under a row lock after the sensor call. Two completion requests must
     # preserve the first deposited_at rather than overwrite it from stale objects.
@@ -336,6 +342,87 @@ def open_pickup(session: Session, code: str, kiosk_id: UUID, gateway: DeviceGate
     return assignment
 
 
+def last_open_at(session: Session, assignment_id: UUID) -> datetime | None:
+    """When this assignment's locker door was last opened. None when no open ever succeeded.
+
+    Both deposit (`open`) and pickup (`pickup_open`) count, and a reopen counts as the newest:
+    what the locker reported before the door last opened describes a moment the user has
+    already been told to correct.
+    """
+    value = session.scalar(select(DeviceCommand.created_at)
+                           .where(DeviceCommand.storage_assignment_id == assignment_id,
+                                  DeviceCommand.action.in_(("open", "pickup_open")),
+                                  DeviceCommand.status == "succeeded")
+                           .order_by(DeviceCommand.created_at.desc()).limit(1))
+    return None if value is None else as_utc(value)
+
+
+def reported_item(session: Session, locker: Locker, assignment: StorageAssignment) -> str | None:
+    """What this locker says it holds right now, or None when no reading may answer (D03/D06)."""
+    return locker_item(session, locker.kiosk_id, locker.locker_number,
+                       since=last_open_at(session, assignment.id))
+
+
+def open_command(session: Session, registration_id: UUID, assignment: StorageAssignment,
+                 action: str, *, ttl: int) -> tuple[DeviceCommand, datetime]:
+    """Persist the intent to open before the device is touched, as every open path does."""
+    expires_at = now() + timedelta(seconds=ttl)
+    command = DeviceCommand(command_id=str(uuid4()), registration_id=registration_id, action=action,
+                            storage_assignment_id=assignment.id, expires_at=expires_at)
+    session.add(command)
+    session.commit()
+    return command, expires_at
+
+
+def send_open(session: Session, command: DeviceCommand, locker: Locker, expires_at: datetime,
+              gateway: DeviceGateway) -> None:
+    """Open one locker for a command already committed, recording how the attempt ended.
+
+    Business state is left exactly as it was: the user is still mid-deposit or mid-pickup, and
+    a failed reopen must leave them able to ask again rather than stranding the assignment.
+    """
+    try:
+        gateway.open(locker.kiosk_id, locker.locker_number, command.command_id, expires_at)
+    except IntegrationError as error:
+        command.status = "unknown" if error.uncertain else "failed"
+        command.error_code = error.code
+        session.commit()
+        raise
+    command.status = "succeeded"
+    session.commit()
+
+
+def reopen_deposit(session: Session, registration_id: UUID, gateway: DeviceGateway, *,
+                   ttl: int) -> StorageAssignment:
+    """Open the same locker again so the user can put the item in after a refused completion."""
+    reg = registration(session, registration_id)
+    assignment = assignment_for(session, registration_id)
+    if reg.status != "awaiting_deposit" or assignment is None or assignment.status != "awaiting_deposit":
+        raise BusinessError("DEPOSIT_NOT_OPENED")
+    locker = session.get(Locker, assignment.locker_id)
+    command, expires_at = open_command(session, registration_id, assignment, "open", ttl=ttl)
+    send_open(session, command, locker, expires_at, gateway)
+    return assignment
+
+
+def reopen_pickup(session: Session, found_item_id: UUID, gateway: DeviceGateway, *,
+                  ttl: int) -> StorageAssignment:
+    """Open the same locker again after a refused pickup completion.
+
+    The return code is not involved: it was spent on the first open and stays spent. Only an
+    assignment already waiting for this pickup can be reopened, so a used code cannot be
+    replayed through here.
+    """
+    item = found_item(session, found_item_id)
+    assignment = latest_assignment(session, found_item_id)
+    if assignment is None or assignment.status != "awaiting_pickup":
+        raise BusinessError("PICKUP_NOT_OPENED")
+    locker = session.get(Locker, assignment.locker_id)
+    command, expires_at = open_command(session, item.registration_id, assignment, "pickup_open", ttl=ttl)
+    send_open(session, command, locker, expires_at, gateway)
+    return assignment
+
+
 def complete_pickup(session: Session, found_item_id: UUID, gateway: DeviceGateway) -> StorageAssignment:
     item = found_item(session, found_item_id)
     assignment = latest_assignment(session, found_item_id)
@@ -347,6 +434,11 @@ def complete_pickup(session: Session, found_item_id: UUID, gateway: DeviceGatewa
     door = gateway.door(locker.kiosk_id, locker.locker_number)
     if door != "closed":
         raise BusinessError("DOOR_NOT_CLOSED")
+    # The item is still in there, which the device repeats a second later as ITEM_NOT_TAKEN.
+    # Nothing is written, so the assignment stays awaiting_pickup and reopen_pickup can open the
+    # same locker again without reissuing the code.
+    if reported_item(session, locker, assignment) == "present":
+        raise BusinessError("ITEM_STILL_INSIDE")
     # The API call itself is the explicit user confirmation. Reload under a row lock
     # after the sensor call so two completions cannot both end the assignment.
     item = session.scalar(select(FoundItem).where(FoundItem.id == found_item_id)

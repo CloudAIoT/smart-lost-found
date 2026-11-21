@@ -12,7 +12,7 @@ from app.integrations import IntegrationError
 from app.models import DeviceCommand, FoundItem, ReturnCode, StorageAssignment
 from app.services import hash_return_code, issue_return_code, search_stored_items
 
-from test_registration import env, ready  # noqa: F401  (shared harness)
+from test_registration import env, ready, report_locker  # noqa: F401  (shared harness)
 
 
 def stored(env):
@@ -185,3 +185,64 @@ def test_code_is_refused_before_the_item_is_stored(env):
     with pytest.raises(BusinessError, match="ITEM_NOT_FOUND"):
         issue(env, str(uuid4()))
     assert env.client.post(f"/api/pickup/{uuid4()}/complete", json={"confirmed": True}).status_code == 404
+
+
+def test_pickup_waits_until_the_locker_reports_the_item_gone(env):
+    """The device repeats this as ITEM_NOT_TAKEN a second after the door closes. Completing first
+    would put that warning behind a finished screen and release a locker that is not empty."""
+    item_id = stored(env)
+    code = issue(env, item_id)
+    assert env.client.post("/api/pickup/open", json={"code": code, "kiosk_id": env.kiosk_id}).status_code == 200
+    opens_after_first = len(env.gateway.opens)
+
+    report_locker(env, "present")
+    blocked = env.client.post(f"/api/pickup/{item_id}/complete", json={"confirmed": True})
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["detail"]["code"] == "ITEM_STILL_INSIDE"
+    with Session(env.engine) as session:
+        # Refusing wrote nothing. The locker is still held and the code is still spent.
+        assignment = session.scalar(select(StorageAssignment))
+        assert (assignment.status, assignment.ended_at) == ("awaiting_pickup", None)
+        assert session.scalar(select(FoundItem)).status == "stored"
+        assert session.scalar(select(ReturnCode)).status == "used"
+
+    # The door is shut with the item inside, so it has to be opened again. The same spent code
+    # is not reissued or replayed; the open runs off the assignment that is already waiting.
+    reopened = env.client.post(f"/api/pickup/{item_id}/reopen")
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["locker_number"] == 1
+    assert len(env.gateway.opens) == opens_after_first + 1
+    replay = env.client.post("/api/pickup/open", json={"code": code, "kiosk_id": env.kiosk_id})
+    assert replay.status_code == 200 and replay.json()["assignment_status"] == "awaiting_pickup"
+    assert len(env.gateway.opens) == opens_after_first + 1  # the replay opened nothing
+
+    report_locker(env, "empty")
+    done = env.client.post(f"/api/pickup/{item_id}/complete", json={"confirmed": True})
+    assert done.status_code == 200, done.text
+    assert done.json()["item_status"] == "retrieved"
+    with Session(env.engine) as session:
+        assert search_stored_items(session) == []
+    # A finished pickup is not something to reopen.
+    assert env.client.post(f"/api/pickup/{item_id}/reopen").status_code == 409
+
+
+def test_a_reading_older_than_the_open_does_not_block_a_pickup(env):
+    """A row left from deposit time describes a different session and decides nothing."""
+    item_id = stored(env)
+    code = issue(env, item_id)
+    report_locker(env, "present", seconds_ago=600)
+    assert env.client.post("/api/pickup/open", json={"code": code, "kiosk_id": env.kiosk_id}).status_code == 200
+    done = env.client.post(f"/api/pickup/{item_id}/complete", json={"confirmed": True})
+    assert done.status_code == 200, done.text
+    assert done.json()["item_status"] == "retrieved"
+
+
+def test_an_offline_controller_does_not_block_a_pickup(env):
+    """Its last word is from whenever it went away, so it cannot speak for this pickup."""
+    item_id = stored(env)
+    code = issue(env, item_id)
+    assert env.client.post("/api/pickup/open", json={"code": code, "kiosk_id": env.kiosk_id}).status_code == 200
+    report_locker(env, "present", online=False)
+    done = env.client.post(f"/api/pickup/{item_id}/complete", json={"confirmed": True})
+    assert done.status_code == 200, done.text
+    assert done.json()["item_status"] == "retrieved"

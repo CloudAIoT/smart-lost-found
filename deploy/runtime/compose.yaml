@@ -49,7 +49,9 @@ services:
       - /opt/smart-lost-found/mosquitto/acl:/mosquitto/config/acl:ro
       # 끊긴 백엔드 세션에 쌓인 QoS 1 경고가 브로커 재시작에도 남아야 한다.
       - mosquitto_data:/mosquitto/data
-    mem_limit: 48m
+    # 유휴 브로커는 10MB 미만이고, 큐가 가득 차도(1000건 × 4KB 상한) 여기에 들어간다.
+    # t3.micro에는 여유가 없으므로 넉넉히 주지 않는다.
+    mem_limit: 24m
     security_opt:
       - no-new-privileges:true
     logging: *logging

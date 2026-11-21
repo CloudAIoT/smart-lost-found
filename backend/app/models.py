@@ -146,3 +146,57 @@ class ItemImage(Entity, Base):
         CheckConstraint("byte_size > 0", name="image_size"),
         CheckConstraint("content_type = 'image/jpeg'", name="image_type"),
     )
+
+
+class DeviceState(Base):
+    """Latest device and locker state reported over MQTT.
+
+    State topics are retained, so one row per target is enough: the broker replays the current
+    value whenever the subscriber reconnects. `locker_number` 0 names the device itself, which is
+    where a controller's online/offline and the capture box sensors are kept. There is no foreign
+    key to `kiosks`: telemetry arrives from outside this service and an unknown kiosk id must be
+    recorded or dropped, never raise inside the subscriber.
+    """
+
+    __tablename__ = "device_states"
+    kiosk_id: Mapped[UUID] = mapped_column(primary_key=True)
+    device: Mapped[str] = mapped_column(String(20), primary_key=True)
+    locker_number: Mapped[int] = mapped_column(primary_key=True)
+    connection: Mapped[str | None] = mapped_column(String(20))
+    door: Mapped[str | None] = mapped_column(String(10))
+    weight_g: Mapped[float | None]
+    item: Mapped[str | None] = mapped_column(String(10))
+    reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        CheckConstraint("device IN ('capture','locker')", name="device_state_device"),
+        CheckConstraint("locker_number >= 0", name="device_state_target"),
+        CheckConstraint("connection IS NULL OR connection IN ('online','offline')", name="device_state_connection"),
+        CheckConstraint("door IS NULL OR door IN ('open','closed')", name="device_state_door"),
+        CheckConstraint("item IS NULL OR item IN ('present','empty')", name="device_state_item"),
+    )
+
+
+class DeviceAlert(Entity, Base):
+    """One received alert. Alerts are not retained by the broker, so each one is kept as a row.
+
+    A persistent subscriber session can redeliver a queued QoS 1 alert after a restart, hence the
+    unique key over the reported identity: a replay is dropped instead of counted twice.
+    """
+
+    __tablename__ = "device_alerts"
+    kiosk_id: Mapped[UUID]
+    code: Mapped[str] = mapped_column(String(40))
+    severity: Mapped[str] = mapped_column(String(10))
+    device: Mapped[str] = mapped_column(String(20))
+    locker_number: Mapped[int | None]
+    message: Mapped[str | None] = mapped_column(String(500))
+    detail: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("severity IN ('alarm','warning')", name="device_alert_severity"),
+        CheckConstraint("device IN ('capture','locker')", name="device_alert_device"),
+        CheckConstraint("locker_number IS NULL OR locker_number > 0", name="device_alert_locker"),
+        UniqueConstraint("kiosk_id", "code", "locker_number", "reported_at", name="uq_device_alert_report"),
+        Index("ix_device_alerts_recent", "kiosk_id", "reported_at"),
+    )

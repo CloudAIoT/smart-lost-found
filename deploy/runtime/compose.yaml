@@ -33,6 +33,26 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    # 호스트에 설정 파일이 있을 때만 켠다. 없는 파일을 bind mount하면 Docker가 빈
+    # 디렉터리를 만들어 브로커가 죽고, 그러면 무관한 배포까지 실패한다.
+    profiles: ["telemetry"]
+    ports:
+      # Pi만 닿아야 한다. 기본값 127.0.0.1은 값이 빠졌을 때 1883이 공개되지 않게 막는다.
+      # 실제 값은 EC2의 Tailscale 주소이며 SSM 설정에서 온다(deploy.sh가 넣는다).
+      - "${MQTT_BIND_ADDRESS:-127.0.0.1}:1883:1883"
+    volumes:
+      - /opt/smart-lost-found/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - /opt/smart-lost-found/mosquitto/passwords:/mosquitto/config/passwords:ro
+      - /opt/smart-lost-found/mosquitto/acl:/mosquitto/config/acl:ro
+      # 끊긴 백엔드 세션에 쌓인 QoS 1 경고가 브로커 재시작에도 남아야 한다.
+      - mosquitto_data:/mosquitto/data
+    mem_limit: 48m
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
   db:
     image: postgres:17-bookworm
     restart: unless-stopped
@@ -70,3 +90,5 @@ services:
 volumes:
   postgres_data:
     name: smart-lost-found-postgres-production
+  mosquitto_data:
+    name: smart-lost-found-mosquitto-production

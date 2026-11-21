@@ -12,7 +12,10 @@ import boto3
 REQUIRED = {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "S3_BUCKET", "S3_REGION"}
 OPTIONAL = {"BUSINESS_API_ENABLED", "COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES",
             "PREVIEW_TTL_SECONDS", "RETURN_CODE_TTL_SECONDS", "PI_DEVICES", "GEMINI_API_KEY", "GEMINI_MODEL",
-            "IMAGE_ANALYSIS_TIMEOUT_SECONDS", "DEV_FAKE_DEVICE"}
+            "IMAGE_ANALYSIS_TIMEOUT_SECONDS", "DEV_FAKE_DEVICE",
+            # 장치 상태 구독 (docs/mqtt-protocol.md). MQTT_HOST가 없으면 구독을 시작하지 않는다.
+            "MQTT_HOST", "MQTT_PORT", "MQTT_USERNAME", "MQTT_PASSWORD", "MQTT_CLIENT_ID",
+            "MQTT_ALERT_RETENTION_DAYS", "MQTT_BIND_ADDRESS"}
 
 
 def render(payload: dict, output: Path) -> None:
@@ -39,9 +42,17 @@ def render(payload: dict, output: Path) -> None:
         if not re.fullmatch(r"[0-9]{1,2}", timeout) or not 5 <= int(timeout) <= 90:
             raise ValueError("IMAGE_ANALYSIS_TIMEOUT_SECONDS must be between 5 and 90")
     for key in ("COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES", "PREVIEW_TTL_SECONDS",
-               "RETURN_CODE_TTL_SECONDS"):
+               "RETURN_CODE_TTL_SECONDS", "MQTT_PORT", "MQTT_ALERT_RETENTION_DAYS"):
         if key in payload and not re.fullmatch(r"[1-9][0-9]{0,9}", payload[key]):
             raise ValueError(f"{key} must be a positive integer")
+    # 두 백엔드가 같은 client id를 쓰면 서로의 구독 세션을 끊는다.
+    if "MQTT_CLIENT_ID" in payload and not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", payload["MQTT_CLIENT_ID"]):
+        raise ValueError("Invalid MQTT client id")
+    # 브로커 포트를 공개할 주소. 0.0.0.0을 막아 평문 MQTT가 인터넷에 열리지 않게 한다.
+    if "MQTT_BIND_ADDRESS" in payload:
+        address = payload["MQTT_BIND_ADDRESS"]
+        if not re.fullmatch(r"(?:[0-9]{1,3}\.){3}[0-9]{1,3}", address) or address.startswith("0."):
+            raise ValueError("MQTT_BIND_ADDRESS must be a specific IPv4 address on this host")
     if "PI_DEVICES" in payload:
         try:
             devices = json.loads(payload["PI_DEVICES"])

@@ -8,16 +8,26 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
+from app.config import get_settings
 from app.db import engine, get_session
 from app.api import router
 from app.ai_ownership_verification.api import router as ownership_router
 from app.errors import BusinessError, IntegrationError
+from app.mqtt_listener import make_listener
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
-    await run_in_threadpool(engine.dispose)
+    # Device telemetry is optional: without a broker address the API runs exactly as before.
+    listener = await run_in_threadpool(make_listener, get_settings())
+    if listener is not None:
+        await run_in_threadpool(listener.start)
+    try:
+        yield
+    finally:
+        if listener is not None:
+            await run_in_threadpool(listener.stop)
+        await run_in_threadpool(engine.dispose)
 
 
 app = FastAPI(title="Smart Lost Found", lifespan=lifespan)

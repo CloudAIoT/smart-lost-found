@@ -1,6 +1,6 @@
 # 웹 → 백엔드 API 계약
 
-2026-11-21 현재 구현 기준. 화면별 흐름, 전체 19개 API의 요청·응답 필드, 상태 전이, 오류·중복 요청 처리와 FE 인수 기준은 [프론트 연동을 위한 백엔드 기능 명세](../backend/docs/functional-spec.md)를 따른다. 이 문서는 API 빠른 참조와 운영자 DB 확인 방법을 제공한다. Pi에 보내는 요청은 [장치 규약](device-protocol.md)을 따른다.
+2026-11-21 현재 구현 기준. 화면별 흐름, 전체 21개 API의 요청·응답 필드, 상태 전이, 오류·중복 요청 처리와 FE 인수 기준은 [프론트 연동을 위한 백엔드 기능 명세](../backend/docs/functional-spec.md)를 따른다. 이 문서는 API 빠른 참조와 운영자 DB 확인 방법을 제공한다. Pi에 보내는 요청은 [장치 규약](device-protocol.md)을 따른다.
 
 업무 API는 모두 `/api` 아래에 있다. 로컬에서는 `LOCAL_DEVELOPMENT=true`, EC2에서는 `BUSINESS_API_ENABLED=true`로 활성화한다. 둘 다 false면 503을 반환한다. 현재 로그인·키오스크 인증은 없으며, 활성화하면 인증 없이 호출할 수 있다. `/health`, `/ready`는 이 설정과 무관하다.
 
@@ -172,6 +172,42 @@ ORDER BY a.created_at;
 - 완료는 `confirmed=true`와 센서 `closed`를 함께 확인한다. 완료 시 배정이 종료되어 해당 칸이 즉시 다시 배정 가능해진다.
 - 백엔드는 물건을 꺼냈는지 확인하지 않는다. 문 센서는 개폐만 알리므로, 물건을 두고 문만 닫은 뒤 완료를 누르면 그 칸이 빈 칸으로 반납된다. Pi는 가상 무게 센서로 `ITEM_NOT_TAKEN`·`ITEM_NOT_DEPOSITED`를 MQTT로 발행하지만([MQTT 규약](mqtt-protocol.md)) 백엔드에 구독·조회 경로가 없어 이 업무 API의 판정에는 반영되지 않는다. `confirmed=true`가 사용자 선언이며 FE 완료 화면이 이를 분명히 물어야 한다. 투입 완료도 같은 한계를 갖지만, 잘못된 수령 완료는 물건이 남은 칸을 재배정한다는 점에서 영향이 더 크다. 보관함 내부 감지 수단은 하드웨어 협의 대상이다.
 - 코드의 대상 키오스크가 요청의 `kiosk_id`와 다르면 거절한다. 이는 대상 검사이고 호출자 인증이 아니다. 키오스크 세션은 여전히 미구현이다.
+
+## 장치 상태와 경고 (MQTT 수신분)
+
+Pi가 [MQTT 규약](mqtt-protocol.md)으로 보낸 센서 상태와 이상 상황을 백엔드가 구독해 저장하고, 아래 두 경로로 읽혀 준다. 이 값은 화면 표시용이고 보관·수령 완료 판정에는 쓰지 않는다(D03·D06).
+
+| 메서드 | 경로 | 입력·출력 |
+| --- | --- | --- |
+| GET | `/api/kiosks/{kiosk_id}/device-status` | 그 키오스크의 최신 장치·칸 상태 배열. 없는 키오스크는 404 |
+| GET | `/api/alerts` | `kiosk_id`·`severity`(`alarm`/`warning`)·`since`·`limit`(1~200, 기본 50)·`offset` 쿼리. 최근 경고부터 |
+
+```json
+[
+  {"device": "locker", "locker_number": null, "connection": "online", "door": null,
+   "weight_g": null, "item": null, "reported_at": "2026-11-19T19:24:26+09:00",
+   "updated_at": "2026-11-19T10:24:26Z"},
+  {"device": "locker", "locker_number": 1, "connection": null, "door": "closed",
+   "weight_g": 150.0, "item": "present", "reported_at": "2026-11-19T19:24:27+09:00",
+   "updated_at": "2026-11-19T10:24:27Z"}
+]
+```
+
+- `locker_number`가 `null`인 행은 칸이 아니라 장치 자체이고, `connection`이 그 컨트롤러의 online/offline이다. Pi가 갑자기 끊기면 브로커가 유언 메시지로 `offline`을 보낸다.
+- 칸 행에는 `door`·`weight_g`·`item`이 있고 `connection`은 `null`이다. 촬영 상자는 `device=capture`, `locker_number=null` 한 행에 연결 상태와 무게가 함께 담긴다.
+- 아직 아무 메시지도 받지 못한 키오스크는 빈 배열이다. 장치가 꺼져 있는 것과 구분되지 않으므로 "상태 없음"으로 표시한다.
+
+```json
+[
+  {"id": "...", "kiosk_id": "...", "code": "ITEM_NOT_TAKEN", "severity": "warning",
+   "device": "locker", "locker_number": 2, "message": "2번 보관함에 물건이 남아 있습니다.",
+   "detail": {"before_g": 150.0, "after_g": 150.0}, "reported_at": "2026-11-19T19:24:29+09:00"}
+]
+```
+
+- `code`는 규약 4절의 6종이지만 그 밖의 값도 올 수 있다. 모르는 `code`는 `message`를 그대로 보여 준다.
+- 보관 기간(기본 14일)이 지난 경고는 지워진다. 경고를 해소 처리하는 API는 없다.
+- `MQTT_HOST`를 설정하지 않은 서버에서는 두 경로가 정상 응답하지만 내용이 비어 있다.
 
 ## 오류
 

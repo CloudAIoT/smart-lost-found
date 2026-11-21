@@ -143,9 +143,11 @@ sudo docker run --rm -it --user root -v /opt/smart-lost-found/mosquitto:/work \
 sudo docker run --rm -it --user root -v /opt/smart-lost-found/mosquitto:/work \
   eclipse-mosquitto:2.0 mosquitto_passwd /work/passwords backend
 
-# 컨테이너의 mosquitto 사용자(uid 1883)가 읽을 수 있어야 한다.
-sudo chown 1883:1883 mosquitto.conf acl passwords
-sudo chmod 0400 mosquitto.conf acl passwords
+# 컨테이너의 mosquitto 사용자(uid 1883)가 읽을 수 있어야 한다. 빠뜨리면 브로커가 뜨다 죽는다.
+# 배포 디렉터리는 root 전용이라 cd로 들어갈 수 없다(sudo cd도 쉘 빌트인이라 안 된다). 절대 경로로 쓴다.
+sudo chown 1883:1883 /opt/smart-lost-found/mosquitto/{mosquitto.conf,acl,passwords}
+sudo chmod 0400 /opt/smart-lost-found/mosquitto/{mosquitto.conf,acl,passwords}
+sudo ls -l /opt/smart-lost-found/mosquitto   # -r-------- 1 1883 1883 세 줄
 ```
 
 그다음 GitHub production에 위 표의 `MQTT_*`를 넣고 main에서 워크플로를 재실행한다. `MQTT_BIND_ADDRESS`는 이 서버의 Tailscale 주소이고 `MQTT_HOST`는 `mqtt`다. 둘을 바꿔 넣으면 Pi가 닿지 못하거나 포트가 잘못 열린다.

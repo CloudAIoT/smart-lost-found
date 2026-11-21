@@ -1,8 +1,15 @@
-# 웹 → 백엔드 API: 개발용 계약
+# 웹 → 백엔드 API 계약
 
-2026-10-12 사용자 확인을 반영한 최초 구현이다. FE·AI·Pi 전체 팀의 최종 합의로 간주하지 않는다. Pi에 보내는 요청은 [장치 규약](device-protocol.md)을 따른다.
+2026-11-21 현재 구현 기준. 화면별 흐름, 전체 19개 API의 요청·응답 필드, 상태 전이, 오류·중복 요청 처리와 FE 인수 기준은 [프론트 연동을 위한 백엔드 기능 명세](../backend/docs/functional-spec.md)를 따른다. 이 문서는 API 빠른 참조와 운영자 DB 확인 방법을 제공한다. Pi에 보내는 요청은 [장치 규약](device-protocol.md)을 따른다.
 
 업무 API는 모두 `/api` 아래에 있다. 로컬에서는 `LOCAL_DEVELOPMENT=true`, EC2에서는 `BUSINESS_API_ENABLED=true`로 활성화한다. 둘 다 false면 503을 반환한다. 현재 로그인·키오스크 인증은 없으며, 활성화하면 인증 없이 호출할 수 있다. `/health`, `/ready`는 이 설정과 무관하다.
+
+Pi가 없는 환경에서는 `DEV_FAKE_DEVICE=true`로 촬영·개방·문 조회를 개발용 가짜 장치가 대신한다. 촬영 응답은
+더미 JPEG 2장이고 문은 항상 `closed`다. 나머지 상태 전이·S3 저장·미리보기 URL은 실제와 같으므로 FE는 계약을
+그대로 따라갈 수 있다. 사진 분석은 이 더미 사진을 그대로 읽으므로 분석 결과도 더미 사진의 내용이 된다.
+설정은 [EC2 배포](../deploy/README.md)에 있다.
+
+FE의 최초 키오스크 선택·저장·복원은 [FE-K01](web-structure.md#fe-k01-키오스크-최초-1회-설정)을 따른다. 검증·확정된 선택값을 등록 생성과 수령 개방 요청의 기존 `kiosk_id`에 사용하며 API 필드는 추가하지 않는다. 브라우저의 선택값은 호출자 인증 근거가 아니고, 서버→Pi 인증 키를 FE에 전달하지 않는다. 기기 페어링·인증 API는 후속 설계 범위다.
 
 ## 등록과 조회
 
@@ -90,10 +97,43 @@ EC2에서 실제 저장 JSON을 확인하려면 등록 분석 요청 후 운영�
 curl --fail-with-body --max-time 120 -X POST \
   http://127.0.0.1/api/registrations/REGISTRATION_ID/analysis
 
-cd /opt/smart-lost-found/current
-docker compose --project-name smart-lost-found-prod --env-file compose.env -f compose.yaml \
-  exec -T backend python -m app.inspect_analysis REGISTRATION_ID --require-succeeded
+sudo docker exec smart-lost-found-prod-backend-1 \
+  python -m app.inspect_analysis REGISTRATION_ID --require-succeeded
 ```
+
+배포 디렉터리는 root 전용이므로 위 명령은 디렉터리 이동 없이 실행한다. `REGISTRATION_ID`를 실제 UUID로 바꾼다. 사물함 배정과 수령 결과도 운영자 DB에서 조회할 수 있다. 아래 쿼리는 모든 키오스크의 현재 점유 상태를 읽으며 장치를 동작시키지 않는다.
+
+```bash
+sudo docker exec -i smart-lost-found-prod-db-1 \
+  sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -P pager=off' <<'SQL'
+SELECT l.kiosk_id, l.locker_number,
+       COALESCE(a.status, 'available') AS locker_status,
+       f.registration_id, f.status AS item_status,
+       a.deposited_at
+FROM lockers l
+LEFT JOIN storage_assignments a
+  ON a.locker_id = l.id AND a.ended_at IS NULL
+LEFT JOIN found_items f ON f.id = a.found_item_id
+ORDER BY l.kiosk_id, l.locker_number;
+SQL
+```
+
+수령 완료 후에는 이 현재 배정 조회에서 해당 칸이 `available`이 된다. 종료된 기록 자체는 DB에 남는다. 특정 등록의 이력을 확인하려면 물품·배정을 연결해 조회한다.
+
+```sql
+SELECT r.id AS registration_id, r.status AS registration_status,
+       r.analysis_status, f.id AS found_item_id, f.status AS item_status,
+       l.locker_number, a.status AS assignment_status,
+       a.deposited_at, a.ended_at
+FROM registrations r
+LEFT JOIN found_items f ON f.registration_id = r.id
+LEFT JOIN storage_assignments a ON a.found_item_id = f.id
+LEFT JOIN lockers l ON l.id = a.locker_id
+WHERE r.id = 'REGISTRATION_ID'::uuid
+ORDER BY a.created_at;
+```
+
+수령 완료는 `item_status=retrieved`, `assignment_status=retrieved`, `ended_at` 존재로 확인한다. 등록 상태 `stored`는 수령 후에도 유지된다.
 
 ## 수령 (분실자)
 
@@ -103,8 +143,11 @@ docker compose --project-name smart-lost-found-prod --env-file compose.env -f co
 | 메서드 | 경로 | 입력·출력 |
 | --- | --- | --- |
 | POST | `/api/ownership/attempts` | `{"description":"도서관에서 남색 필통을 잃어버렸어요"}` → 질문 또는 검색 결과 |
-| POST | `/api/ownership/attempts/{attempt_id}/answers` | `{"question_id":"UUID","option_id":"UUID"}` → 다음 질문 또는 최종 판정 |
-| POST | `/api/found-items/{found_item_id}/return-code` | `{"attempt_id":"UUID"}` → 소유 확인에 성공한 해당 물품에 201 `{"found_item_id","code","expires_at","kiosk_name"}` |
+| GET | `/api/ownership/attempts/{attempt_id}` | 저장된 현재 질문 또는 완료 판정. 만료·이전 질문 제출 후 상태 확인 |
+| POST | `/api/ownership/attempts/{attempt_id}/answers` | `{"question_id":"UUID","option_id":"UUID"}` → 다음 질문, `photo_confirmation`, 또는 최종 판정 |
+| GET | `/api/ownership/attempts/{attempt_id}/photo` | 확인용 등록 사진 `image/jpeg`. 응답 헤더 `X-Ownership-Photo-Token`을 다음 요청에 쓴다 |
+| POST | `/api/ownership/attempts/{attempt_id}/photo-confirmation` | `{"confirmed":true,"photo_token":"UUID"}` → `{"attempt","return_code"}`. **반환 코드를 받는 정상 경로** |
+| POST | `/api/found-items/{found_item_id}/return-code` | 보조 경로. `{"attempt_id":"UUID"}` → 201 `{"found_item_id","code","expires_at","kiosk_id","kiosk_name"}` |
 | POST | `/api/pickup/open` | `{"code":"...","kiosk_id":"UUID"}` → 코드 확인·보관함 개방 |
 | POST | `/api/pickup/{found_item_id}/complete` | `{"confirmed":true}` → 문 조회 → 수령 완료 |
 
@@ -122,12 +165,12 @@ docker compose --project-name smart-lost-found-prod --env-file compose.env -f co
 
 - 코드 평문은 발급 응답에서 한 번만 받는다. 서버는 SHA-256 해시를 저장한다. 코드를 잃어버리면 새 소유 확인을 거쳐 발급받는다. 재발급은 이전 코드를 `revoked`로 만든다.
 - 코드는 8자리 Base32(A~Z, 2~7)다. 입력의 공백·하이픈·소문자는 서버가 정규화하므로 FE가 맞출 필요는 없다.
-- `found_item_id`는 소유 확인 응답의 `decision=supported`에서 받는다. 백엔드는 요청의 확인 시도와 물품이 일치하는지, 근거가 유효하고 물건이 보관 중인지 확인한다. 한 확인 시도에서 코드를 한 번 발급한다. [소유 확인 워크플로](../backend/app/ai_ownership_verification/workflow.md)
+- 문답을 통과하면 `photo_confirmation` 단계에서 등록 사진을 사용자에게 보여 주고 승인을 받아야 `decision=supported`와 `found_item_id`가 나온다. 사진 확인 응답이 코드까지 함께 주므로 FE는 보조 경로를 따로 호출하지 않는다. 백엔드는 요청의 확인 시도와 물품이 일치하는지, 사진 확인을 거쳤는지, 근거가 유효하고 물건이 보관 중인지 확인한다. 한 확인 시도에서 코드를 한 번 발급한다. [소유 확인 워크플로](../backend/app/ai_ownership_verification/workflow.md)
 - 물건 상태는 `stored → retrieved`, 배정 상태는 `stored → awaiting_pickup → retrieved`다. 등록(`registrations`) 상태는 수령으로 바뀌지 않는다.
 - 개방 성공 시 코드를 `used`로 처리한다. 완료된 개방을 재요청하면 문을 다시 열지 않고 같은 결과를 반환하므로 FE의 중복 클릭·새로고침은 안전하다.
 - 명확한 장치 실패는 코드를 그대로 두어 다시 시도할 수 있다. 통신 단절 등 결과 불명은 문이 이미 열렸을 수 있어 코드를 `locked`로 두고 같은 코드의 재개방을 막는다. 운영 복구 API는 아직 없다.
 - 완료는 `confirmed=true`와 센서 `closed`를 함께 확인한다. 완료 시 배정이 종료되어 해당 칸이 즉시 다시 배정 가능해진다.
-- 물건을 꺼냈는지는 확인하지 않는다. 문 센서는 개폐만 알리므로, 물건을 두고 문만 닫은 뒤 완료를 누르면 그 칸이 빈 칸으로 반납된다. `confirmed=true`가 사용자 선언이며 FE 완료 화면이 이를 분명히 물어야 한다. 투입 완료도 같은 한계를 갖지만, 잘못된 수령 완료는 물건이 남은 칸을 재배정한다는 점에서 영향이 더 크다. 보관함 내부 감지 수단은 하드웨어 협의 대상이다.
+- 백엔드는 물건을 꺼냈는지 확인하지 않는다. 문 센서는 개폐만 알리므로, 물건을 두고 문만 닫은 뒤 완료를 누르면 그 칸이 빈 칸으로 반납된다. Pi는 가상 무게 센서로 `ITEM_NOT_TAKEN`·`ITEM_NOT_DEPOSITED`를 MQTT로 발행하지만([MQTT 규약](mqtt-protocol.md)) 백엔드에 구독·조회 경로가 없어 이 업무 API의 판정에는 반영되지 않는다. `confirmed=true`가 사용자 선언이며 FE 완료 화면이 이를 분명히 물어야 한다. 투입 완료도 같은 한계를 갖지만, 잘못된 수령 완료는 물건이 남은 칸을 재배정한다는 점에서 영향이 더 크다. 보관함 내부 감지 수단은 하드웨어 협의 대상이다.
 - 코드의 대상 키오스크가 요청의 `kiosk_id`와 다르면 거절한다. 이는 대상 검사이고 호출자 인증이 아니다. 키오스크 세션은 여전히 미구현이다.
 
 ## 오류
@@ -136,9 +179,12 @@ docker compose --project-name smart-lost-found-prod --env-file compose.env -f co
 
 | HTTP | 주요 code |
 | --- | --- |
-| 404 | `KIOSK_NOT_FOUND`, `CATEGORY_NOT_FOUND`, `REGISTRATION_NOT_FOUND`, `IMAGE_NOT_FOUND`, `ITEM_NOT_FOUND`, `RETURN_CODE_NOT_FOUND` |
-| 409 | `INVALID_REGISTRATION_STATE`, `SHOT_OUT_OF_ORDER`, `TWO_IMAGES_REQUIRED`, `ANALYSIS_REQUIRED`, `NO_AVAILABLE_LOCKER`, `ALLOCATION_CONFLICT`, `DEPOSIT_NOT_OPENED`, `DOOR_NOT_CLOSED`, `ITEM_NOT_STORED`, `PICKUP_NOT_OPENED`, `RETURN_CODE_EXPIRED`, `RETURN_CODE_ALREADY_USED`, `RETURN_CODE_UNUSABLE`, `RETURN_CODE_IN_PROGRESS`, `RETURN_CODE_WRONG_KIOSK`, `RETURN_CODE_CONFLICT` |
+| 403 | `OWNERSHIP_REQUIRED` |
+| 404 | `KIOSK_NOT_FOUND`, `CATEGORY_NOT_FOUND`, `REGISTRATION_NOT_FOUND`, `IMAGE_NOT_FOUND`, `ITEM_NOT_FOUND`, `RETURN_CODE_NOT_FOUND`, `OWNERSHIP_PHOTO_UNAVAILABLE` |
+| 409 | `OWNERSHIP_PHOTO_NOT_PENDING`, `OWNERSHIP_PHOTO_LOAD_REQUIRED`, `INVALID_REGISTRATION_STATE`, `SHOT_OUT_OF_ORDER`, `TWO_IMAGES_REQUIRED`, `ANALYSIS_REQUIRED`, `NO_AVAILABLE_LOCKER`, `ALLOCATION_CONFLICT`, `DEPOSIT_NOT_OPENED`, `DOOR_NOT_CLOSED`, `ITEM_NOT_STORED`, `PICKUP_NOT_OPENED`, `RETURN_CODE_EXPIRED`, `RETURN_CODE_ALREADY_USED`, `RETURN_CODE_UNUSABLE`, `RETURN_CODE_IN_PROGRESS`, `RETURN_CODE_WRONG_KIOSK`, `RETURN_CODE_CONFLICT` |
 | 502 | `DEVICE_UNREACHABLE`, `INVALID_DEVICE_RESPONSE`, `DEVICE_ROLE_MISMATCH`, `DEVICE_RESPONSE_TOO_LARGE`, `INVALID_IMAGE`, `IMAGE_STORAGE_FAILED`, `INVALID_ANALYSIS_RESULT`, 규약의 Pi 오류 code |
 | 503 | `BUSINESS_API_DISABLED`, `AI_NOT_CONFIGURED`, `DEVICE_NOT_CONFIGURED`, `CAPTURE_NOT_CONFIGURED`, `IMAGE_STORAGE_NOT_CONFIGURED`, `RETURN_CODE_NOT_CONFIGURED` |
 
-공개 검색·질문/답변 API는 제공하지 않는다. 반환 코드·수령은 위 절에 있으나 코드 발급의 승인 근거가 되는 소유 확인 평가는 미구현이다. 현재 발급은 인증·소유 확인 없이 호출된다. 내부 `search_stored_items`만 보관 완료 물건의 카테고리·현재 키오스크 정확 필터와 페이지네이션을 시험할 수 있다. 이 반환 구조를 공개 필드 합의로 해석하지 않는다.
+소유 확인의 만료 410, 현재 질문 충돌 409, 검토 근거 변경, AI 오류 등 전체 오류와 FE 처리 규칙은 [기능 명세의 오류 계약](../backend/docs/functional-spec.md#9-f13-오류지연중복-요청-처리)에 정리한다. 사진 분석에서도 공통 호출기의 `OWNERSHIP_AI_*` 오류가 올 수 있다.
+
+자연어 검색·질문·답변은 `/api/ownership/attempts` 흐름으로 제공한다. 반환 코드는 성공한 동일 물품의 소유 확인이 있어야 발급한다. 별도 물품 검색 목록 API나 `search_stored_items` 공개 API는 없다. 후보 검색은 전체 대상 보관 물품 500건 제한이며, 질문용 검토 근거 등록과 키오스크 기기 인증은 별도 후속 범위다.

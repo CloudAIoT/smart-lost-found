@@ -68,7 +68,9 @@ class FoundItem(Entity, Base):
     __tablename__ = "found_items"
     registration_id: Mapped[UUID] = mapped_column(ForeignKey("registrations.id"), unique=True)
     status: Mapped[str] = mapped_column(default="awaiting_deposit")
-    __table_args__ = (CheckConstraint("status IN ('awaiting_deposit','stored','retrieved')", name="item_status"),)
+    __table_args__ = (
+        CheckConstraint("status IN ('awaiting_deposit','stored','retrieved','missing')", name="item_status"),
+    )
 
 
 class OwnershipAttempt(Entity, Base):
@@ -86,8 +88,8 @@ class StorageAssignment(Entity, Base):
     deposited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (
-        CheckConstraint("status IN ('reserved','awaiting_deposit','stored','awaiting_pickup','retrieved','cancelled')", name="assignment_status"),
-        CheckConstraint("(status IN ('cancelled','retrieved')) = (ended_at IS NOT NULL)", name="assignment_end"),
+        CheckConstraint("status IN ('reserved','awaiting_deposit','stored','awaiting_pickup','retrieved','cancelled','missing')", name="assignment_status"),
+        CheckConstraint("(status IN ('cancelled','retrieved','missing')) = (ended_at IS NOT NULL)", name="assignment_end"),
         Index("uq_active_locker", "locker_id", unique=True, postgresql_where=text("ended_at IS NULL"), sqlite_where=text("ended_at IS NULL")),
         Index("uq_active_item", "found_item_id", unique=True, postgresql_where=text("ended_at IS NULL"), sqlite_where=text("ended_at IS NULL")),
     )

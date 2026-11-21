@@ -300,6 +300,10 @@ def open_pickup(session: Session, code: str, kiosk_id: UUID, gateway: DeviceGate
     # A completed open is replayed rather than opening the door a second time.
     if assignment.status == "awaiting_pickup":
         return assignment
+    # ITEM_MISSING revokes unspent codes. Report the business reason before the generic code
+    # state so a stolen item is consistently refused as no longer stored.
+    if item.status == "missing" or assignment.status == "missing":
+        raise BusinessError("ITEM_NOT_STORED")
     if record.status == "used":
         raise BusinessError("RETURN_CODE_ALREADY_USED")
     if record.status in ("locked", "revoked"):
@@ -334,6 +338,16 @@ def open_pickup(session: Session, code: str, kiosk_id: UUID, gateway: DeviceGate
             record.failed_attempts += 1
         session.commit()
         raise
+    # The device call ran outside the transaction. ITEM_MISSING may have closed this assignment
+    # and revoked its opening code while we were waiting, so refresh before writing the success
+    # path. A stale ORM object must never resurrect a stolen item as awaiting_pickup.
+    session.refresh(item)
+    session.refresh(assignment)
+    session.refresh(record)
+    if item.status == "missing" or assignment.status == "missing":
+        command.status = "succeeded"
+        session.commit()
+        raise BusinessError("ITEM_NOT_STORED")
     command.status = "succeeded"
     record.status = "used"
     record.used_at = now()

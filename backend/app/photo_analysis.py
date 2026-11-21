@@ -2,11 +2,29 @@
 
 from base64 import b64encode
 from io import BytesIO
+import logging
 from uuid import UUID
 
 from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
 from app.errors import IntegrationError
 from app.integrations import AnalysisInput, AnalysisResult
+
+
+logger = logging.getLogger(__name__)
+
+# Image analysis normally uses the configured model first. These known multimodal models keep a
+# transient provider/model failure from forcing the user to restart the registration flow.
+PHOTO_ANALYSIS_FALLBACK_MODELS = ("gemini-3.1-flash-lite", "gemini-2.5-flash-lite")
+RETRYABLE_PROVIDER_ERRORS = frozenset({
+    "OWNERSHIP_AI_MODEL_UNAVAILABLE",
+    "OWNERSHIP_AI_RATE_LIMITED",
+    "OWNERSHIP_AI_REQUEST_FAILED",
+    "OWNERSHIP_AI_RESPONSE_TOO_LARGE",
+    "OWNERSHIP_AI_TIMEOUT",
+    "OWNERSHIP_AI_UNREACHABLE",
+    "OWNERSHIP_AI_INVALID_RESPONSE",
+})
+RETRYABLE_OUTPUT_ERRORS = frozenset({"INVALID_MODEL_OUTPUT", "INSUFFICIENT_VISUAL_FEATURES"})
 
 
 class GeminiPhotoAnalyzer:
@@ -30,8 +48,25 @@ class GeminiPhotoAnalyzer:
                         photo.save(jpeg, format="JPEG")
                         parts.append({"inline_data": {"mime_type": "image/jpeg",
                                                       "data": b64encode(jpeg.getvalue()).decode("ascii")}})
-                raw = self.gemini.generate_json_text(parts, prepared.response_schema)
-                result = parse_item_output(prepared, raw)
+                configured = self.gemini.settings.gemini_model
+                models = tuple(dict.fromkeys((configured, *PHOTO_ANALYSIS_FALLBACK_MODELS)))
+                models = tuple(model for model in models if model)
+                for index, model in enumerate(models):
+                    last = index == len(models) - 1
+                    try:
+                        raw = self.gemini.generate_json_text(parts, prepared.response_schema, model=model)
+                        result = parse_item_output(prepared, raw)
+                        break
+                    except IntegrationError as error:
+                        if last or error.code not in RETRYABLE_PROVIDER_ERRORS:
+                            raise
+                        logger.warning("Gemini photo analysis via %s failed (%s), trying the next model",
+                                       model, error.code)
+                    except ServiceError as error:
+                        if last or error.code not in RETRYABLE_OUTPUT_ERRORS:
+                            raise
+                        logger.warning("Gemini photo analysis via %s returned unusable output (%s), "
+                                       "trying the next model", model, error.code)
             finally:
                 for photo in prepared.images:
                     photo.close()

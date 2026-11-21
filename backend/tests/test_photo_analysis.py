@@ -5,11 +5,22 @@ from uuid import uuid4
 
 import httpx
 from PIL import Image
+import pytest
 
 from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
 from app.config import GeminiSettings
+from app.errors import IntegrationError
 from app.integrations import AnalysisInput
-from app.photo_analysis import GeminiPhotoAnalyzer
+from app.photo_analysis import GeminiPhotoAnalyzer, PHOTO_ANALYSIS_FALLBACK_MODELS
+
+
+def sample_photos():
+    values = []
+    for color in ("red", "blue"):
+        with Image.new("RGB", (40, 25), color=color) as photo, BytesIO() as jpeg:
+            photo.save(jpeg, format="JPEG")
+            values.append(AnalysisInput(uuid4(), jpeg.getvalue()))
+    return tuple(values)
 
 
 def test_analyzer_sends_both_photos_in_order_and_stores_validated_fields():
@@ -42,3 +53,21 @@ def test_analyzer_sends_both_photos_in_order_and_stores_validated_fields():
         result = GeminiPhotoAnalyzer(GeminiWorkflowAI(settings, client), "필통").analyze(uuid4(), tuple(photos))
     assert result.image_ids == tuple(photo.image_id for photo in photos)
     assert result.features == features
+
+
+@pytest.mark.parametrize("status, expected_calls", [(503, 3), (401, 1)])
+def test_analyzer_retries_only_recoverable_provider_failures(status, expected_calls):
+    calls = []
+
+    def respond(request):
+        calls.append(request.url.path)
+        return httpx.Response(status, json={"error": {"message": "must stay private"}})
+
+    settings = GeminiSettings(_env_file=None, gemini_api_key="test-key", gemini_model="configured-model")
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(IntegrationError):
+            GeminiPhotoAnalyzer(GeminiWorkflowAI(settings, client), "필통").analyze(uuid4(), sample_photos())
+
+    assert len(calls) == expected_calls
+    expected_models = ("configured-model", *PHOTO_ANALYSIS_FALLBACK_MODELS)[:expected_calls]
+    assert calls == [f"/v1beta/models/{model}:generateContent" for model in expected_models]

@@ -263,12 +263,6 @@ def test_registration_api_reads_two_s3_photos_and_persists_gemini_json(env, monk
     app.dependency_overrides[get_store] = lambda: S3ImageStore(S3(), "test-bucket", 60, 1024 * 1024)
 
     response = env.client.post(base + "/analysis")
-    if first_failure:
-        assert response.status_code == 502
-        with Session(env.engine) as session:
-            row = session.get(Registration, UUID(value))
-            assert (row.status, row.analysis_status, row.analysis_features) == ("draft", "failed", None)
-        response = env.client.post(base + "/analysis")
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "ready"
     assert response.json()["analysis_status"] == "succeeded"
@@ -282,10 +276,13 @@ def test_registration_api_reads_two_s3_photos_and_persists_gemini_json(env, monk
         keys = list(session.scalars(select(ItemImage.object_key).where(
             ItemImage.registration_id == UUID(value)).order_by(ItemImage.shot_order)))
     call_count = 2 if first_failure else 1
-    assert reads == keys * call_count
+    # Provider/model retries reuse the same S3 bytes and preprocessed images.
+    assert reads == keys
+    expected_models = ["test-model"] + (["gemini-3.1-flash-lite"] if first_failure else [])
+    assert [request.url.path.split("/")[-1].removesuffix(":generateContent") for request in requests] == expected_models
     assert env.client.post(base + "/analysis").status_code == 200
     assert len(requests) == call_count
-    assert len(reads) == 2 * call_count
+    assert len(reads) == 2
     assert env.settings.gemini_timeout_seconds == 30
 
 

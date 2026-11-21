@@ -123,19 +123,18 @@ AWS 쪽에서 **바꿀 것이 없다.** Pi와 EC2가 같은 tailnet에 있으므
 ssh -i ~/.ssh/smart-lost-found.pem ubuntu@100.73.97.89
 
 sudo mkdir -p /opt/smart-lost-found/mosquitto
-cd /opt/smart-lost-found/mosquitto
 
-# 저장소의 두 파일을 그대로 올린다(scp로 보내거나 내용을 붙여 넣는다).
-sudo tee mosquitto.conf >/dev/null   # deploy/mosquitto/mosquitto.conf 내용
-sudo tee acl >/dev/null              # deploy/mosquitto/acl 내용
+# 저장소의 두 파일을 올린다. 워크스테이션에서 홈으로 scp한 뒤 옮긴다.
+#   scp -i <키> deploy/mosquitto/mosquitto.conf deploy/mosquitto/acl ubuntu@<주소>:~/
+sudo mv ~/mosquitto.conf ~/acl /opt/smart-lost-found/mosquitto/
 
 # 계정 3개. -c는 첫 계정에만 쓴다(기존 파일을 지운다). 비밀번호는 대화형으로 입력한다.
-sudo docker run --rm -it -v /opt/smart-lost-found/mosquitto:/work eclipse-mosquitto:2.0 \
-  mosquitto_passwd -c /work/passwords capture-pi
-sudo docker run --rm -it -v /opt/smart-lost-found/mosquitto:/work eclipse-mosquitto:2.0 \
-  mosquitto_passwd /work/passwords locker-pi
-sudo docker run --rm -it -v /opt/smart-lost-found/mosquitto:/work eclipse-mosquitto:2.0 \
-  mosquitto_passwd /work/passwords backend
+# --user root가 없으면 이미지의 mosquitto 사용자가 root 소유 디렉터리에 파일을 만들지 못한다.
+for account in capture-pi locker-pi backend; do
+  sudo docker run --rm -it --user root -v /opt/smart-lost-found/mosquitto:/work \
+    eclipse-mosquitto:2.0 mosquitto_passwd \
+    $([ "$account" = capture-pi ] && echo -c) /work/passwords "$account"
+done
 
 # 컨테이너의 mosquitto 사용자(uid 1883)가 읽을 수 있어야 한다.
 sudo chown 1883:1883 mosquitto.conf acl passwords
@@ -143,6 +142,8 @@ sudo chmod 0400 mosquitto.conf acl passwords
 ```
 
 그다음 GitHub production에 위 표의 `MQTT_*`를 넣고 main에서 워크플로를 재실행한다. `MQTT_BIND_ADDRESS`는 이 서버의 Tailscale 주소이고 `MQTT_HOST`는 `mqtt`다. 둘을 바꿔 넣으면 Pi가 닿지 못하거나 포트가 잘못 열린다.
+
+`mqtt` 서비스와 브로커 분기는 이미지에 담겨 배포된다. 그래서 **브로커를 추가한 커밋이 main에 들어간 뒤에 재배포해야** 한다. 그 전에 설정만 넣고 배포하면 브로커 없이 백엔드가 재접속만 반복한다.
 
 점검:
 

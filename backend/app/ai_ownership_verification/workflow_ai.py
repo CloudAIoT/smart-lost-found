@@ -180,7 +180,7 @@ class GeminiWorkflowAI:
             raise IntegrationError("OWNERSHIP_AI_INVALID_RESPONSE") from None
 
     def generate_json_text(self, parts: list[dict], schema: dict, *, instruction: str | None = None,
-                           model: str | None = None) -> str:
+                           model: str | None = None, timeout_seconds: float | None = None) -> str:
         key = self.settings.gemini_api_key
         requested_model = model if model is not None else self.settings.gemini_model
         if not key or not key.get_secret_value().strip() or not requested_model:
@@ -200,7 +200,9 @@ class GeminiWorkflowAI:
         try:
             with self.client.stream("POST", f"{API_ROOT}/{requested_model}:generateContent",
                                     json=payload, headers={"x-goog-api-key": key.get_secret_value()},
-                                    timeout=self.settings.gemini_timeout_seconds, follow_redirects=False) as response:
+                                    timeout=(timeout_seconds if timeout_seconds is not None
+                                             else self.settings.gemini_timeout_seconds),
+                                    follow_redirects=False) as response:
                 if response.status_code != 200:
                     code = {401: "AUTHENTICATION_FAILED", 403: "AUTHENTICATION_FAILED", 404: "MODEL_UNAVAILABLE",
                             429: "RATE_LIMITED"}.get(response.status_code, "REQUEST_FAILED")

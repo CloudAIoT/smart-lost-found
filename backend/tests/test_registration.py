@@ -234,7 +234,7 @@ def test_registration_api_reads_two_s3_photos_and_persists_gemini_json(env, monk
 
     def respond(request):
         requests.append(request)
-        assert request.extensions["timeout"]["read"] == 90
+        assert 0 < request.extensions["timeout"]["read"] <= 90
         parts = json.loads(request.content)["contents"][0]["parts"]
         assert len(parts) == 3
         for part, channel in zip(parts[1:], (0, 2)):

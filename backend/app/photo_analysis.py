@@ -3,6 +3,7 @@
 from base64 import b64encode
 from io import BytesIO
 import logging
+from time import monotonic
 from uuid import UUID
 
 from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
@@ -51,18 +52,28 @@ class GeminiPhotoAnalyzer:
                 configured = self.gemini.settings.gemini_model
                 models = tuple(dict.fromkeys((configured, *PHOTO_ANALYSIS_FALLBACK_MODELS)))
                 models = tuple(model for model in models if model)
+                deadline = monotonic() + self.gemini.settings.gemini_timeout_seconds
+                last_error: IntegrationError | ServiceError | None = None
                 for index, model in enumerate(models):
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        assert last_error is not None
+                        raise last_error
                     last = index == len(models) - 1
                     try:
-                        raw = self.gemini.generate_json_text(parts, prepared.response_schema, model=model)
+                        raw = self.gemini.generate_json_text(
+                            parts, prepared.response_schema, model=model, timeout_seconds=remaining,
+                        )
                         result = parse_item_output(prepared, raw)
                         break
                     except IntegrationError as error:
+                        last_error = error
                         if last or error.code not in RETRYABLE_PROVIDER_ERRORS:
                             raise
                         logger.warning("Gemini photo analysis via %s failed (%s), trying the next model",
                                        model, error.code)
                     except ServiceError as error:
+                        last_error = error
                         if last or error.code not in RETRYABLE_OUTPUT_ERRORS:
                             raise
                         logger.warning("Gemini photo analysis via %s returned unusable output (%s), "

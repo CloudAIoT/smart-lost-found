@@ -1,5 +1,11 @@
 # 백엔드 구현 현황
 
+## 2026-11-18 프론트 연동 계약 정리
+
+현재 구현된 등록→두 사진 분석→보관과 자연어 검색→질문·소유 확인→사진 확인→반환 코드→수령 흐름의 FE 계약을 [전체 기능 명세](functional-spec.md)에 정리했다. 공개 API 19개, 요청·응답 필드, 오류·중복 요청 처리, DB 상태와 인수 기준을 포함한다. 반환 후 등록 조회는 200과 `locker_number=null`을 반환하도록 수정되어 있다. 문서 갱신은 코드 배포 완료를 의미하지 않는다.
+
+키오스크 최초 선택·localStorage 복원은 [FE-K01](../../docs/web-structure.md#fe-k01-키오스크-최초-1회-설정)의 FE 구현 과제다. 기기 인증과 질문용 검토 근거 등록 API는 미구현이다. 아래 과거 기록의 “소유 확인 없이 반환 코드 발급” 설명은 당시 상태이며, 현재 발급에는 소유 확인 성공이 필요하다.
+
 ## 2026-11-18 등록 사진 분석 API 확인
 
 현재 `POST /api/registrations/{id}/analysis`는 등록에 연결된 S3 사진 2장을 읽어 `GeminiPhotoAnalyzer`로 전처리·분석하고, 검증된 8개 특징을 `registrations.analysis_features`에 직접 저장한다. 입력 사진 ID와 순서는 `analysis_input_image_ids`에 기록한다. 사진 분석 대기 시간은 기본 90초, Nginx API 대기 시간은 120초다.

@@ -2,6 +2,7 @@
 
 백엔드 로컬 개발 환경의 준비·실행·테스트 방법은 [backend/README.md](backend/README.md)를 참고한다.
 웹 포털·키오스크 프론트엔드는 [frontend/README.md](frontend/README.md)를 참고한다. 배포 후 `http://52.78.12.168/`에서 접속한다.
+프론트 연동 순서·요청/응답·상태·오류 처리는 [백엔드 전체 기능 명세](backend/docs/functional-spec.md)를 기준으로 확인한다.
 
 ## 파트 전체를 잇는 종단 테스트
 

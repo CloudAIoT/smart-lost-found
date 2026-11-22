@@ -447,7 +447,7 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
                 tabIndex={0}
                 onClick={() => setFocus({ id: k.id, t: Date.now() })}
                 onKeyDown={(e) => e.key === 'Enter' && setFocus({ id: k.id, t: Date.now() })}
-                className={`p-4 border rounded-xl cursor-pointer transition-all space-y-1.5 ${
+                className={`p-4 border rounded-xl cursor-pointer transition-all space-y-1.5 shrink-0 ${
                   active ? 'bg-slate-800 border-indigo-500/40' : 'bg-slate-800/60 border-slate-700 hover:bg-slate-800'
                 }`}
               >
@@ -465,9 +465,11 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-400 flex items-start gap-1 break-keep">
+                <p className="text-xs text-slate-400 flex items-start gap-1">
                   <MapPin size={12} className="text-slate-500 mt-0.5 shrink-0" />
-                  {k.location_description || '장소 설명 없음'}
+                  {/* flex 자식 텍스트는 기본 min-width:auto 때문에 줄바꿈 대신 카드 밖으로 넘쳐
+                      옆/아래 키오스크 카드와 겹쳐 보이는 문제가 있었다. min-w-0으로 강제로 줄바꿈시킨다. */}
+                  <span className="min-w-0 break-keep">{k.location_description || '장소 설명 없음'}</span>
                 </p>
                 {hasCoords(k) && (
                   <div className="text-right">

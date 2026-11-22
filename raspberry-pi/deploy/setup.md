@@ -109,6 +109,7 @@ cp .env.example .env && chmod 600 .env          # 아래 표대로 고친다
 | `PI_FAKE_HARDWARE` | `false` (실제 카메라) | `false` (LED·버튼, [README의 배선](../README.md#보관함-led버튼-보관함-pi)대로 연결한 뒤) |
 | `PI_API_KEY` | 백엔드 `PI_DEVICES`의 `capture_api_key`와 같은 값 | `locker_api_key`와 같은 값 |
 | `PI_SIMULATION` | `true` (시연할 때) | `true` (시연할 때) |
+| `PI_SIMULATION_AUTO` | 기본값 `true` (쓰지 않음) | 기본값 `true`: 칸이 열리면 정상 보관·수령처럼 가상 무게가 저절로 바뀐다 |
 | `PI_MQTT_HOST`, `PI_MQTT_USERNAME`, `PI_MQTT_PASSWORD` | 브로커의 Tailscale 주소와 촬영 Pi 계정 | 같은 브로커와 보관함 Pi 계정 |
 | `PI_SENSOR_STATE_FILE` | `/home/pi/.slf-pi/sensors.json` | 같음 |
 

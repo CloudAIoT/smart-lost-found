@@ -11,7 +11,7 @@
 | 항목 | 구현 내용 |
 | --- | --- |
 | 입력 | 백엔드용 사진 2장과 ID·카테고리. 단일 사진 실험 도구도 유지 |
-| 카테고리 | `필통` 등 기본 한글 카테고리를 영어 힌트로 변환. 원래 입력과 모델 분류를 구분해 보관 |
+| 카테고리 | 한글·영어 입력 지원. 알려진 영어 종류는 한글 힌트로 변환하고 원래 입력은 별도로 보관 |
 | 전처리 | 파일·픽셀 한도, EXIF 회전, RGB 변환, 비율 유지 축소, 흐림·어두움 경고 |
 | 분석 | 백엔드에 모델 호출을 맡길 수 있는 prepare/parse 함수. 로컬 Qwen/MLX·Gemini 실험 경로도 제공 |
 | 출력 | 공통 필드 7개 + 특이 특징 한 필드. 확인 불가 값은 null, 엄격한 JSON 검증 |
@@ -34,7 +34,7 @@
 | 입력 | 실험에서 전달한 값 | 설명 |
 | --- | --- | --- |
 | 사진 | `case.jpg` 1장 | 검정 Carhartt 필통 사진. 전처리한 이미지를 모델에 전달 |
-| 카테고리 | `필통` | 습득자 선택값. 모델에는 영어 힌트 `pencil_case`를 전달하고 원래 입력은 결과에 보관 |
+| 카테고리 | `필통` | 습득자 선택값. 모델에 한글 힌트로 전달하고 원래 입력은 결과에 보관 |
 | 상세 notes | 없음 | 물품의 상세 특징을 사용자에게 별도로 입력받지 않음 |
 
 현재 코드는 카테고리를 생략한 이미지 단독 분석도 지원한다. 이 문서의 비교 결과는 두 방식 모두 `필통` 카테고리를 제공한 사례이다. `--backend`와 `--model`은 개발자가 고르는 실행 설정이며 습득자에게 요구하는 물품 정보가 아니다.
@@ -63,8 +63,8 @@
   "backend": "gemini",
   "input_category": "필통",
   "data": {
-    "category": "pencil_case",
-    "color": ["black", "white", "orange"],
+    "category": "필통",
+    "color": ["검정색", "흰색", "주황색"],
     "shape": "세로로 긴 직사각형",
     "surface_texture": "격자 모양의 직조 질감",
     "brand": "Carhartt",
@@ -76,11 +76,13 @@
 }
 ```
 
-`input_category`는 습득자 입력, `data.category`는 모델 분류이다. 카테고리는 영어 snake_case, 색상은 영어 기본 색상명, 형태·질감·구조·특이 특징은 한국어로 요청한다. `visible_text`는 읽히는 원문을 보존한다. 모델이 알아본 브랜드나 캐릭터 이름을 사진에 실제로 쓰인 글자처럼 `visible_text`에 넣지 않는다.
+`input_category`는 습득자 입력, `data.category`는 모델 분류이다. JSON 키는 영어로 유지하고 **카테고리·색상·형태·질감·구조·특이 특징 값은 한국어로 전달**한다. 브랜드명과 `visible_text`는 번역하지 않고 원문을 보존한다. 설명 속 고유명사·기술명도 원문을 포함할 수 있다. 모델이 알아본 브랜드나 캐릭터 이름을 사진에 실제로 쓰인 글자처럼 `visible_text`에 넣지 않는다.
+
+모델이 반환한 알려진 영어 카테고리·색상은 파서에서 한국어로 정규화한다. 예를 들어 `pencil_case` → `필통`, `black` → `검정색`이다. 자유로운 한국어 종류도 허용한다. 그 외 설명에 한국어 문자가 없으면 `INVALID_MODEL_OUTPUT`으로 거부하며 임의 번역하거나 추가 API를 호출하지 않는다. 이 검사는 언어의 완전성이나 특징의 사실성을 보장하지 않는다. 문제 생성 담당자는 `result.data.model_dump(mode='json')`으로 특징 객체를 받을 수 있다.
 
 브랜드를 확인할 수 없으면 `"brand": null`, 읽을 수 있는 문구가 없으면 `"visible_text": null`로 남긴다. null은 미확인이라는 뜻이며 해당 특징이 없다는 증거는 아니다. 목록형 필드의 빈 배열도 파싱 후 null로 통일한다. 이전 `material`은 관찰 가능한 `surface_texture`로 대체하고 `description`은 제거했다. 이전 실제 결과는 원본을 유지하며 오프라인 비교 도구에서 계속 읽을 수 있다.
 
-전체 CLI 결과에는 `model_name`, 밀리초 단위 `timings_ms`, 이미지·프롬프트 해시와 생성 설정인 `comparison_metadata`, API 토큰 사용량 `usage`도 저장한다. 새 결과의 `comparison_metadata.feature_schema`는 `fixed_common_v2`다. 로컬 HTTP 형식은 [설계 문서](docs/design.md)에 있다.
+전체 CLI 결과에는 `model_name`, 밀리초 단위 `timings_ms`, 이미지·프롬프트 해시와 생성 설정인 `comparison_metadata`, API 토큰 사용량 `usage`도 저장한다. 새 결과의 `comparison_metadata.feature_schema`와 두 사진 결과의 `schema_version`은 `fixed_common_v3_ko`다. 기존 10종 실험(`fixed_common_v2`)과 Qwen/Gemini 비교의 영어 출력은 당시 기록 그대로 보존하며 한국어 규격으로 재추론한 결과가 아니다. 로컬 HTTP 형식은 [설계 문서](docs/design.md)에 있다.
 
 ## 폴더 구성
 

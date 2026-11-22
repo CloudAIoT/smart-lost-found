@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ..core.config import Settings
 from ..core.errors import ServiceError
-from ..models.schemas import Features
+from ..models.schemas import FEATURE_SCHEMA_VERSION, Features
 from .preprocessing import preprocess
 from .vision_service import build_prompt, normalize_category, parse_features
 
@@ -36,7 +36,7 @@ class PreparedItem:
 
 class ItemAnalysisResult(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    schema_version: str = 'fixed_common_v2'
+    schema_version: str = FEATURE_SCHEMA_VERSION
     registration_id: UUID
     image_ids: tuple[UUID, UUID]
     input_category: str | None

@@ -48,7 +48,7 @@ payload = result.model_dump(mode='json')
 
 ```json
 {
-  "schema_version": "fixed_common_v2",
+  "schema_version": "fixed_common_v3_ko",
   "registration_id": "11111111-1111-1111-1111-111111111111",
   "image_ids": [
     "22222222-2222-2222-2222-222222222222",
@@ -56,8 +56,8 @@ payload = result.model_dump(mode='json')
   ],
   "input_category": "필통",
   "data": {
-    "category": "pencil_case",
-    "color": ["black"],
+    "category": "필통",
+    "color": ["검정색"],
     "shape": "직사각형",
     "surface_texture": "직조 표면",
     "brand": null,
@@ -71,13 +71,21 @@ payload = result.model_dump(mode='json')
 
 위는 구조 예시다. 실제 2장 추론 결과가 아니다. [특징 JSON Schema](feature-schema.json)와 [10종 단일 사진 실험](experiments/single-photo-10-cases.md)을 함께 참고한다. 공통 키 7개와 특이 특징 키 1개는 모두 필수이며 모르는 값은 null이다. 빈 목록은 null로 정규화한다.
 
+### 문제 생성 담당자에게 전달할 언어
+
+`fixed_common_v3_ko`부터 JSON 키와 타입은 유지하고 `category`, `color`, `shape`, `surface_texture`, `structure`, `distinctive_features` 값은 한국어로 반환한다. `brand`와 `visible_text`는 번역하지 않고 원문을 보존한다. 설명 속 `USB-C`, 캐릭터명 등 고유명사·기술명은 한국어 문장 안에 원문으로 포함할 수 있다. `input_category`와 ID는 입력값을 유지한다.
+
+`parse_item_output`은 알려진 영어 카테고리·색상을 한국어로 바꾼다. 알려지지 않은 영어 카테고리·색상이나 한국어 문자가 전혀 없는 설명은 `INVALID_MODEL_OUTPUT`(502)으로 거부한다. 처리 함수 자체에는 자동 번역 호출·재시도가 없으며 결과를 임의로 null로 바꾸지 않는다. 현재 백엔드의 모델 대체·재시도 정책은 별도로 적용된다. 한국어 종류에 대한 고정 목록은 없고 새로운 종류도 허용한다. 이는 한국어 문자 포함 여부를 확인하는 검사로, 문장 전체가 올바르게 번역됐는지 보장하지 않는다. 담당자는 위 예제의 `data` 객체를 기존 `AnalysisResult.features`와 문제 생성 입력에 사용할 수 있다.
+
+기존 저장 결과를 읽거나 비교할 때 번역하지 않는다. 10종 실험의 `fixed_common_v2` 영어 값은 당시 관찰 기록이며 이번 한국어 프롬프트의 실제 평가 결과가 아니다. 기존 DB 값의 언어 변경은 이 모듈에서 수행하지 않는다.
+
 두 사진용 프롬프트는 하나의 물건에 대한 보완 정보를 합치고, 회전으로 위치가 달라지거나 같은 핀이 두 사진에 나타나도 중복해서 세지 않도록 지시한다. 모순을 해소하지 못한 공통 값은 null, 명백히 다른 물건인 경우 전체 null을 요청한다. 이는 모델 지침이며 실제 동일 물건 판별을 보장하는 검증기는 아니다.
 
 `parse_item_output`은 키·타입·길이, 중복 JSON 키, NaN/Infinity를 검사한다. 색·형태·질감·글자·구조·특이 특징 중 어떤 관찰도 없는 결과는 `INSUFFICIENT_VISUAL_FEATURES`로 거부한다. 카테고리/브랜드만 채워진 결과도 성공으로 반환하지 않는다. 이 검사는 사실성·소유권 검증을 대신하지 않는다.
 
 ## 기존 백엔드 경계에 연결
 
-현재 `backend/app/integrations.py`의 `FeatureAnalyzer`는 등록 ID와 JPEG 두 장을 받고 `AnalysisResult(image_ids, features)`를 반환한다. 다음은 담당자가 해당 구현에서 사용할 연결 예시다.
+현재 `backend/app/integrations.py`의 `FeatureAnalyzer`는 등록 ID와 JPEG 두 장을 받고 `AnalysisResult(image_ids, features)`를 반환한다. [`GeminiPhotoAnalyzer`](../../backend/app/photo_analysis.py)는 이미 `prepare_item`과 `parse_item_output`을 사용하므로 이번 한국어 출력 규격도 해당 경로에 적용된다. 다음은 모델 호출 연결을 설명하는 일반 예시이며 새로운 백엔드 API 구현이 아니다.
 
 ```python
 from app.integrations import AnalysisResult, IntegrationError

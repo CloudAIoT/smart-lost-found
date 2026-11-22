@@ -131,13 +131,15 @@ def test_category_prompt_does_not_leak_into_later_inferences():
     assert service._prompt == 'cached unhinted prompt'
 
 
-def test_korean_category_uses_english_model_hint_without_changing_input_label():
+def test_category_hint_uses_korean_without_changing_the_original_input_label():
     from app.services.vision_service import build_prompt, normalize_category
     assert normalize_category('필통') == '필통'
-    assert 'category hint (JSON string): "pencil_case"' in build_prompt('필통')
-    assert 'category hint (JSON string): "wallet"' in build_prompt('지갑')
-    assert 'category hint (JSON string): "headphones"' in build_prompt('headphones')
-    assert 'category hint (JSON string): "plush_toy"' in build_prompt('인형')
+    assert normalize_category('pencil_case') == 'pencil_case'
+    assert 'category hint (JSON string): "필통"' in build_prompt('필통')
+    assert 'category hint (JSON string): "필통"' in build_prompt('pencil_case')
+    assert 'category hint (JSON string): "지갑"' in build_prompt('지갑')
+    assert 'category hint (JSON string): "헤드폰"' in build_prompt('headphones')
+    assert 'category hint (JSON string): "인형"' in build_prompt('인형')
 
 
 def test_all_seven_common_fields_and_details_are_required_but_nullable():

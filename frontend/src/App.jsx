@@ -139,12 +139,46 @@ const ERROR_MESSAGES = {
   OWNERSHIP_AI_NOT_CONFIGURED: '분실물 검색 또는 이미지 분석 서비스가 설정되지 않았습니다.',
   OWNERSHIP_AI_RATE_LIMITED: 'AI 요청이 많습니다. 잠시 후 다시 시도해 주세요.',
   RETURN_CODE_NOT_CONFIGURED: 'OTP 기능이 설정되지 않았습니다.',
+  ITEM_NOT_DETECTED: '보관함에서 물건을 감지하지 못했습니다. 물건을 다시 넣어 주세요.',
+  ITEM_STILL_INSIDE: '보관함에 물건이 남아 있습니다. 물건을 꺼낸 뒤 다시 시도해 주세요.',
 };
 
 function errorText(err) {
   const code = err?.code || 'UNKNOWN';
   const msg = ERROR_MESSAGES[code] || '요청을 처리하지 못했습니다.';
   return `${msg} (${code})`;
+}
+
+// 장치 경고: GET /api/alerts 응답의 severity('alarm'|'warning')를 그대로 쓴다(backend DeviceAlert).
+// code는 FORCED_OPEN, ITEM_MISSING, TAMPER, ITEM_NOT_DEPOSITED, ITEM_NOT_TAKEN, CAPTURE_ITEM_LEFT.
+const ALERT_LABELS = {
+  FORCED_OPEN: '보관함 강제 개방',
+  ITEM_MISSING: '강제 개방 후 물건 없음',
+  TAMPER: '보관함 이상 조작 감지',
+  ITEM_NOT_DEPOSITED: '투입 미확인',
+  ITEM_NOT_TAKEN: '수령 후 물건 남음',
+  CAPTURE_ITEM_LEFT: '촬영 공간에 물건 남음',
+};
+
+// 분실물 등록 카테고리 선택지(고정 목록). '기타' 선택 시 자연어 입력을 받는다.
+const CATEGORY_OPTIONS = [
+  '전자기기', '지갑·카드·신분증', '가방·파우치', '의류·패션소품', '열쇠·키링',
+  '문구·책·서류', '안경', '우산', '물병·텀블러', '액세서리·귀중품', '기타',
+];
+
+// 고정 카테고리 라벨을 백엔드 카테고리(id)에 매칭한다. 일치하는 항목이 없으면 null이며,
+// 이 경우에도 라벨 자체는 secondary_description으로 함께 전달한다.
+function matchCategoryId(categories, label) {
+  if (!label || label === '기타') return null;
+  const norm = (s) => String(s || '').replace(/\s/g, '');
+  const target = norm(label);
+  const found = categories.find((c) => {
+    const name = norm(c.name);
+    const code = norm(c.code);
+    if (name === target || code === target) return true;
+    return target.split('·').some((part) => part && (name.includes(part) || code.includes(part)));
+  });
+  return found ? found.id : null;
 }
 
 /* ============================================================
@@ -778,16 +812,26 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
   const [now, setNow] = useState(() => new Date());
 
   // 등록 상태
-  const [categoryId, setCategoryId] = useState('');
+  const [categoryLabel, setCategoryLabel] = useState(''); // 고정 카테고리 선택지(CATEGORY_OPTIONS)
+  const [otherText, setOtherText] = useState(''); // '기타' 선택 시 자연어 입력
   const [registration, setRegistration] = useState(null);
   const [previews, setPreviews] = useState({});
   const [shot2GuideOpen, setShot2GuideOpen] = useState(false); // 1차 촬영 후 방향 안내 팝업
   const [retakeOrder, setRetakeOrder] = useState(null); // 재촬영 대상 사진 번호(1|2) | null
+  const [depositBlocked, setDepositBlocked] = useState(false); // 보관 완료 409 ITEM_NOT_DETECTED
 
   // 수령 상태
   const [code, setCode] = useState('');
   const [pickup, setPickup] = useState(null);
   const [pickupConfirmed, setPickupConfirmed] = useState(false);
+  const [pickupBlocked, setPickupBlocked] = useState(false); // ITEM_STILL_INSIDE(409) 또는 경고 목록의 ITEM_NOT_TAKEN
+
+  // 장치 경고·상태
+  const [alerts, setAlerts] = useState([]);
+  const alertsSinceRef = useRef(null);
+  const pickupOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_TAKEN 경고만 본다
+  const depositOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_DEPOSITED 경고만 본다
+  const [deviceStatus, setDeviceStatus] = useState([]); // GET /kiosks/{id}/device-status (장치 온라인/오프라인)
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -800,19 +844,97 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
   const kiosk = kiosks.find((k) => k.id === kioskId);
 
+  // 장치 경고 폴링: GET /api/alerts?kiosk_id=&since= (backend recent_alerts).
+  // 응답 필드: { id, kiosk_id, code, severity, device, locker_number, message, detail, reported_at }.
+  // 키오스크를 바꾸면 이전 키오스크의 경고·since 기준을 비우고 새로 시작한다.
+  useEffect(() => {
+    setAlerts([]);
+    alertsSinceRef.current = null;
+    if (!kioskId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const since = alertsSinceRef.current;
+        const q = since ? `&since=${encodeURIComponent(since)}` : '';
+        const data = await api(`/alerts?kiosk_id=${kioskId}${q}`);
+        const list = Array.isArray(data) ? data : [];
+        if (cancelled || list.length === 0) return;
+        const latest = list.map((a) => a.reported_at).filter(Boolean).sort().pop();
+        if (latest) alertsSinceRef.current = latest;
+        setAlerts((prev) => {
+          const seen = new Set(prev.map((a) => a.id));
+          return [...list.filter((a) => !seen.has(a.id)), ...prev].slice(0, 5);
+        });
+      } catch {
+        // 경고 조회 실패는 화면 흐름을 막지 않는다.
+      }
+    };
+    poll();
+    const t = setInterval(poll, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [kioskId]);
+
+  // 수령 - 보관함 열림 화면에서, 이미 폴링 중인 경고 목록에 이 보관함의 ITEM_NOT_TAKEN이 있으면
+  // 수령 완료 확인 대신 안내를 띄운다(#45). 보관함을 연 시각 이후의 경고만 본다.
+  useEffect(() => {
+    if (!(step === 'pickup-open' && pickup?.locker_number && !pickup?.dev)) return;
+    const hit = alerts.some((a) => a.code === 'ITEM_NOT_TAKEN' && a.locker_number === pickup.locker_number
+      && (!pickupOpenedAtRef.current || a.reported_at >= pickupOpenedAtRef.current));
+    if (hit) setPickupBlocked(true);
+  }, [alerts, step, pickup?.locker_number, pickup?.dev]);
+
+  // 등록 - 보관함 개방 화면에서, 경고 목록에 이 보관함의 ITEM_NOT_DEPOSITED가 있으면 투입 안내를 띄운다.
+  useEffect(() => {
+    if (!(step === 'reg-deposit' && registration?.locker_number)) return;
+    const hit = alerts.some((a) => a.code === 'ITEM_NOT_DEPOSITED' && a.locker_number === registration.locker_number
+      && (!depositOpenedAtRef.current || a.reported_at >= depositOpenedAtRef.current));
+    if (hit) setDepositBlocked(true);
+  }, [alerts, step, registration?.locker_number]);
+
+  // 장치 온라인/오프라인 폴링: GET /api/kiosks/{kiosk_id}/device-status (backend kiosk_device_states).
+  // 응답 필드: { device, locker_number, connection, door, weight_g, item, reported_at, updated_at }.
+  // locker_number 0은 장치(컨트롤러) 자체를 가리킨다.
+  useEffect(() => {
+    if (!kioskId) {
+      setDeviceStatus([]);
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const data = await api(`/kiosks/${kioskId}/device-status`);
+        if (!cancelled) setDeviceStatus(Array.isArray(data) ? data : []);
+      } catch {
+        // 장치 상태 조회 실패는 화면 흐름을 막지 않는다.
+      }
+    };
+    poll();
+    const t = setInterval(poll, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [kioskId]);
+
   const reset = () => {
     setStep('main');
     setBusy('');
     setFailMessage('');
     setInlineError('');
-    setCategoryId('');
+    setCategoryLabel('');
+    setOtherText('');
     setRegistration(null);
     setPreviews({});
     setShot2GuideOpen(false);
     setRetakeOrder(null);
+    setDepositBlocked(false);
     setCode('');
     setPickup(null);
     setPickupConfirmed(false);
+    setPickupBlocked(false);
   };
 
   // 요청 실행 래퍼: 진행 중 표시, 실패 시 실패 화면 또는 화면 내 오류 표시
@@ -843,12 +965,14 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
   };
 
   // [POST /api/registrations] 등록 건 생성 후 촬영 단계로
+  // 카테고리는 고정 목록(CATEGORY_OPTIONS)에서 고르며, 일치하는 백엔드 카테고리가 있으면 id를 함께 보낸다.
+  // '기타'는 자연어 입력을 secondary_description으로 보낸다.
   const startRegistration = () =>
     run('등록 정보를 생성하는 중...', async () => {
       const body = {
         kiosk_id: kioskId,
-        primary_category_id: categoryId || null,
-        secondary_description: null,
+        primary_category_id: matchCategoryId(categories, categoryLabel),
+        secondary_description: categoryLabel === '기타' ? otherText.trim() : categoryLabel || null,
       };
       const data = await api('/registrations', { method: 'POST', body });
       setRegistration(data);
@@ -897,20 +1021,41 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       }
       reg = await api(`/registrations/${reg.id}/deposit/open`, { method: 'POST' });
       setRegistration(reg);
+      setDepositBlocked(false);
+      depositOpenedAtRef.current = new Date().toISOString();
       setStep('reg-deposit');
     });
 
-  // [POST deposit/complete]
+  // [POST deposit/complete] 409 ITEM_NOT_DETECTED면 다시 열기(deposit/reopen)로 유도한다.
   const completeDeposit = () =>
     run(
       '보관함 문 상태를 확인하는 중...',
       async () => {
-        const data = await api(`/registrations/${registration.id}/deposit/complete`, {
-          method: 'POST',
-          body: { confirmed: true },
-        });
+        try {
+          const data = await api(`/registrations/${registration.id}/deposit/complete`, {
+            method: 'POST',
+            body: { confirmed: true },
+          });
+          setRegistration(data);
+          setDepositBlocked(false);
+          setStep('reg-done');
+        } catch (err) {
+          if (err.code === 'ITEM_NOT_DETECTED') setDepositBlocked(true);
+          throw err;
+        }
+      },
+      { inline: true },
+    );
+
+  // [POST deposit/reopen] 물건 미감지로 막혔을 때 보관함을 다시 연다.
+  const reopenDeposit = () =>
+    run(
+      '보관함을 다시 여는 중...',
+      async () => {
+        const data = await api(`/registrations/${registration.id}/deposit/reopen`, { method: 'POST' });
         setRegistration(data);
-        setStep('reg-done');
+        setDepositBlocked(false);
+        depositOpenedAtRef.current = new Date().toISOString();
       },
       { inline: true },
     );
@@ -926,6 +1071,8 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       setInlineError('');
       setPickup({ found_item_id: null, kiosk_id: kioskId, locker_number: 0, dev: true });
       setPickupConfirmed(false);
+      setPickupBlocked(false);
+      pickupOpenedAtRef.current = new Date().toISOString();
       setStep('pickup-open');
       return;
     }
@@ -935,13 +1082,15 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
         const data = await api('/pickup/open', { method: 'POST', body: { code: normalized, kiosk_id: kioskId } });
         setPickup(data);
         setPickupConfirmed(false);
+        setPickupBlocked(false);
+        pickupOpenedAtRef.current = new Date().toISOString();
         setStep('pickup-open');
       },
       { inline: true },
     );
   };
 
-  // [POST /api/pickup/{found_item_id}/complete]
+  // [POST /api/pickup/{found_item_id}/complete] 409 ITEM_STILL_INSIDE면 다시 열기(pickup/reopen)로 유도한다.
   const completePickup = () => {
     if (pickup?.dev) {
       setStep('pickup-done');
@@ -950,9 +1099,33 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     run(
       '보관함 문 상태를 확인하는 중...',
       async () => {
-        const data = await api(`/pickup/${pickup.found_item_id}/complete`, { method: 'POST', body: { confirmed: true } });
+        try {
+          const data = await api(`/pickup/${pickup.found_item_id}/complete`, { method: 'POST', body: { confirmed: true } });
+          setPickup(data);
+          setPickupBlocked(false);
+          setStep('pickup-done');
+        } catch (err) {
+          if (err.code === 'ITEM_STILL_INSIDE') setPickupBlocked(true);
+          throw err;
+        }
+      },
+      { inline: true },
+    );
+  };
+
+  // [POST /api/pickup/{found_item_id}/reopen] 물건이 남아 있을 때 보관함을 다시 연다.
+  const reopenPickup = () => {
+    if (pickup?.dev || !pickup?.found_item_id) {
+      setPickupBlocked(false);
+      return;
+    }
+    run(
+      '보관함을 다시 여는 중...',
+      async () => {
+        const data = await api(`/pickup/${pickup.found_item_id}/reopen`, { method: 'POST' });
         setPickup(data);
-        setStep('pickup-done');
+        setPickupBlocked(false);
+        pickupOpenedAtRef.current = new Date().toISOString();
       },
       { inline: true },
     );
@@ -1004,6 +1177,46 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
         </span>
       </div>
 
+      {/* 장치 온라인/오프라인 (GET /api/kiosks/{kiosk_id}/device-status) */}
+      {deviceStatus.length > 0 && (
+        <div className="flex flex-wrap gap-3 pt-2 text-[11px] text-slate-400">
+          {deviceStatus.filter((d) => d.locker_number === 0).map((d) => (
+            <span key={d.device} className="inline-flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${d.connection === 'online' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+              {d.device === 'capture' ? '촬영 장치' : '보관함 컨트롤러'} {d.connection === 'online' ? '온라인' : '오프라인'}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* 장치 경고 (GET /api/alerts) */}
+      {alerts.length > 0 && (
+        <div className="space-y-1.5 pt-3">
+          {alerts.map((a, i) => {
+            const cls = a.severity === 'alarm'
+              ? 'bg-rose-950/50 border-rose-500/50 text-rose-300'
+              : 'bg-amber-950/40 border-amber-500/40 text-amber-300';
+            return (
+              <div key={a.id ?? i} className={`flex items-center justify-between gap-2 border rounded-lg px-3 py-2 text-xs ${cls}`}>
+                <span className="flex items-center gap-1.5">
+                  <TriangleAlert size={13} /> {ALERT_LABELS[a.code] || a.message || a.code || '알 수 없는 경고'}
+                </span>
+                <button onClick={() => setAlerts((prev) => prev.filter((_, j) => j !== i))} className="text-[11px] underline shrink-0">
+                  확인
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 등록 중 촬영 상자에 물건이 남아 있을 때 안내 (CAPTURE_ITEM_LEFT) */}
+      {['reg-info', 'reg-shot1', 'reg-shot2', 'reg-review'].includes(step) && alerts.some((a) => a.code === 'CAPTURE_ITEM_LEFT') && (
+        <div className="mt-3 flex items-center gap-2 bg-amber-950/40 border border-amber-500/40 rounded-lg px-3 py-2 text-xs text-amber-300">
+          <TriangleAlert size={13} /> 촬영 상자에 물건이 남아 있어요.
+        </div>
+      )}
+
       {/* MAIN */}
       {step === 'main' && (
         <div className="my-auto space-y-6 text-center py-6">
@@ -1049,7 +1262,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
         </div>
       )}
 
-      {/* 등록 - 물건 종류 선택 (자유 입력 없음) */}
+      {/* 등록 - 물건 종류 선택 (고정 목록 드롭다운, '기타'는 자연어 입력) */}
       {step === 'reg-info' && (
         <div className="space-y-4 my-auto">
           <div className="flex items-center justify-between gap-2">
@@ -1058,27 +1271,35 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
           </div>
           <div className="border-b border-slate-800 pb-2">
             <h3 className="font-bold text-white text-base">물건 종류 선택</h3>
-            <p className="text-xs text-slate-400">등록된 물건 종류가 있으면 선택해 주세요.</p>
+            <p className="text-xs text-slate-400">목록에서 물건 종류를 선택해 주세요.</p>
           </div>
           {categoriesError && <p role="alert" className="text-xs text-rose-300">{categoriesError}</p>}
-          {categories.length > 0 ? (
-            <select
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
-            >
-              <option value="">선택 안 함</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name || c.code}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <p className="text-xs text-slate-500">등록된 물건 종류가 없습니다. 바로 다음 단계로 진행합니다.</p>
+          <select
+            value={categoryLabel}
+            onChange={(e) => {
+              setCategoryLabel(e.target.value);
+              if (e.target.value !== '기타') setOtherText('');
+            }}
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-3 text-sm text-white focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">카테고리를 선택해 주세요</option>
+            {CATEGORY_OPTIONS.map((label) => (
+              <option key={label} value={label}>
+                {label}
+              </option>
+            ))}
+          </select>
+          {categoryLabel === '기타' && (
+            <textarea
+              value={otherText}
+              maxLength={200}
+              onChange={(e) => setOtherText(e.target.value)}
+              placeholder="예: 보조배터리, 장난감 등 물건의 종류를 적어 주세요."
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white h-20 focus:outline-none focus:border-indigo-500"
+            />
           )}
           <button
-            disabled={disabled}
+            disabled={disabled || !categoryLabel || (categoryLabel === '기타' && !otherText.trim())}
             onClick={startRegistration}
             className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all inline-flex items-center justify-center gap-1"
           >
@@ -1202,16 +1423,28 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
           <div>
             <span className="text-xs text-indigo-400 font-bold uppercase tracking-wider">보관함 개방</span>
             <h2 className="text-3xl font-extrabold text-white mt-1">{registration?.locker_number}번 보관함이 열렸습니다</h2>
-            <p className="text-xs text-slate-400 mt-2">물건을 보관함에 넣고 문을 닫은 뒤 아래 버튼을 눌러주세요.</p>
+            <p className="text-xs text-slate-400 mt-2">
+              {depositBlocked ? '보관함에 물건이 감지되지 않았어요. 물건을 넣고 문을 닫아 주세요.' : '물건을 보관함에 넣고 문을 닫은 뒤 아래 버튼을 눌러주세요.'}
+            </p>
           </div>
           {inlineError && <p className="text-xs text-rose-300">{inlineError}</p>}
-          <button
-            disabled={disabled}
-            onClick={completeDeposit}
-            className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-xs font-bold rounded-xl shadow"
-          >
-            물건을 넣고 문을 닫았습니다
-          </button>
+          {depositBlocked ? (
+            <button
+              disabled={disabled}
+              onClick={reopenDeposit}
+              className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 text-xs font-bold rounded-xl shadow inline-flex items-center gap-1"
+            >
+              <RefreshCw size={14} /> 보관함 다시 열기
+            </button>
+          ) : (
+            <button
+              disabled={disabled}
+              onClick={completeDeposit}
+              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-xs font-bold rounded-xl shadow"
+            >
+              물건을 넣고 문을 닫았습니다
+            </button>
+          )}
         </div>
       )}
 
@@ -1293,30 +1526,44 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
           <div>
             <span className="text-xs text-emerald-400 font-bold uppercase tracking-wider">잠금 해제 완료</span>
             <h2 className="text-3xl font-extrabold text-white mt-1">{pickup?.locker_number}번 보관함이 열렸습니다</h2>
-            <p className="text-xs text-slate-400 mt-2">물품을 꺼내신 후 보관함 문을 꼭 닫아주세요.</p>
+            <p className="text-xs text-slate-400 mt-2">
+              {pickupBlocked ? '보관함에 물건이 남아 있어요. 물건을 꺼내 주세요.' : '물품을 꺼내신 후 보관함 문을 꼭 닫아주세요.'}
+            </p>
             {pickup?.dev && (
               <p className="mt-3 inline-block text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-3 py-1">
                 개발자 테스트 OTP · 백엔드 미호출, 실제 보관함은 열리지 않습니다
               </p>
             )}
           </div>
-          <label className="flex items-center justify-center gap-2 text-xs text-slate-300 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={pickupConfirmed}
-              onChange={(e) => setPickupConfirmed(e.target.checked)}
-              className="w-4 h-4 accent-emerald-500"
-            />
-            보관함에서 물건을 꺼냈고, 문을 닫았습니다.
-          </label>
           {inlineError && <p className="text-xs text-rose-300">{inlineError}</p>}
-          <button
-            disabled={disabled || !pickupConfirmed}
-            onClick={completePickup}
-            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow"
-          >
-            수령 완료
-          </button>
+          {pickupBlocked ? (
+            <button
+              disabled={disabled}
+              onClick={reopenPickup}
+              className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 text-xs font-bold rounded-xl shadow inline-flex items-center gap-1"
+            >
+              <RefreshCw size={14} /> 보관함 다시 열기
+            </button>
+          ) : (
+            <>
+              <label className="flex items-center justify-center gap-2 text-xs text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pickupConfirmed}
+                  onChange={(e) => setPickupConfirmed(e.target.checked)}
+                  className="w-4 h-4 accent-emerald-500"
+                />
+                보관함에서 물건을 꺼냈고, 문을 닫았습니다.
+              </label>
+              <button
+                disabled={disabled || !pickupConfirmed}
+                onClick={completePickup}
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow"
+              >
+                수령 완료
+              </button>
+            </>
+          )}
         </div>
       )}
 

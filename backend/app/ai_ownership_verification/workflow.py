@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.errors import BusinessError, IntegrationError
 from app.models import FoundItem, ItemImage, OwnershipAttempt, now
+from .question_labels import is_display_label, is_latin_inscription, local_label
 from .search import PROOF_FIELDS, UNKNOWN, find_candidates, normalized, read_facts, stored_items
 from .structure_questions import POSITIONS, part_position, structure_positions
 from .workflow_ai import WorkflowAI
@@ -22,8 +23,9 @@ from .workflow_schemas import (
 
 MAX_WRONG_GROUPS = 2
 OPTION_COUNT = 5
-POLICY_VERSION = "development_v5"
+POLICY_VERSION = "development_v6"
 ATTEMPT_TTL = timedelta(minutes=20)
+NON_ANSWERS = UNKNOWN | {"모르겠어요", "기억안남"}
 PROMPTS = {
     "distinctive_features": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
     "visible_text": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
@@ -44,25 +46,77 @@ def question_values(candidate: Candidate, field: FieldName,
     return evidence, [evidence.value] if evidence else candidate.narrowing.get(field, [])
 
 
-def select_distractors(field: FieldName, known_labels: dict[str, str], candidates: list[Candidate],
+def localized_labels(field: FieldName, values: list[str], ai: WorkflowAI) -> list[str]:
+    if field == "visible_text":
+        return values
+    local, unresolved = {}, []
+    for value in dict.fromkeys(values):
+        if label := local_label(field, value):
+            local[value] = label
+        else:
+            unresolved.append(value)
+    if unresolved:
+        translated = ai.localize(field, unresolved)
+        if len(translated) != len(unresolved) or any(
+            not is_display_label(field, label) or normalized(field, label) in NON_ANSWERS for label in translated
+        ):
+            raise IntegrationError("OWNERSHIP_AI_INVALID_OPTIONS")
+        local.update(zip(unresolved, translated, strict=True))
+    return [local[value] for value in values]
+
+
+def select_distractors(field: FieldName, known_labels: dict[str, tuple[str, list[str]]], candidates: list[Candidate],
                        proposed: list[str]) -> list[str]:
     seen = set(known_labels)
+    seen_values = {value for _, values in known_labels.values() for value in values}
+    latin_only = field == "visible_text" and all(is_latin_inscription(label) for label, _ in known_labels.values())
+    private_values = set()
+    for candidate in candidates:
+        for evidence in candidate.proof:
+            private_values.add((evidence.field, normalized(evidence.field, evidence.value)))
+            if label := local_label(evidence.field, evidence.value):
+                private_values.add((evidence.field, normalized(evidence.field, label)))
     usable = []
-    for label in proposed:
+    for original in proposed:
+        label = local_label(field, original)
+        if label is None or (latin_only and not is_latin_inscription(label)):
+            continue
         key = normalized(field, label)
-        if not all(ch.isprintable() for ch in label) or key in UNKNOWN or key in {"모르겠어요", "기억안남"}:
+        if key in NON_ANSWERS or key in seen_values or normalized(field, original) in seen_values:
             continue
         if any(key in other or other in key for other in seen):
             continue
         # Avoid revealing other known private facts as distractors.
-        if any(normalized(ev.field, ev.value) == normalized(ev.field, label)
-               for candidate in candidates for ev in candidate.proof):
+        if any((private_field, normalized(private_field, label)) in private_values
+               or (private_field, normalized(private_field, original)) in private_values for private_field in PROOF_FIELDS):
             continue
         usable.append(label)
         seen.add(key)
         if len(seen) == OPTION_COUNT:
             return usable
     raise IntegrationError("OWNERSHIP_AI_INVALID_OPTIONS")
+
+
+def question_options(field: FieldName, labels: dict[str, str], candidates: list[Candidate], ai: WorkflowAI) -> list[Choice]:
+    localized = localized_labels(field, list(labels.values()), ai)
+    options_by_label: dict[str, tuple[str, list[str]]] = {}
+    for value, label in zip(labels, localized, strict=True):
+        key = normalized(field, label)
+        _, values = options_by_label.setdefault(key, (label, []))
+        values.append(value)
+    if len(options_by_label) < OPTION_COUNT:
+        displayed = [label for label, _ in options_by_label.values()]
+        alternatives = ai.distractors(field, displayed, OPTION_COUNT - len(displayed),
+                                      validate=partial(select_distractors, field, options_by_label, candidates))
+        for label in alternatives:
+            key = normalized(field, label)
+            options_by_label[key] = (label, [key])
+    if len(options_by_label) != OPTION_COUNT or any(
+        not is_display_label(field, label) for label, _ in options_by_label.values()
+    ):
+        raise IntegrationError("OWNERSHIP_AI_INVALID_OPTIONS")
+    return [Choice(id=uuid4(), label=label, value=values[0], equivalent_values=values[1:])
+            for label, values in options_by_label.values()]
 
 
 def registered_photo(session: Session, item_id: UUID, photo_id: UUID | None = None) -> ItemImage | None:
@@ -150,15 +204,12 @@ def advance(session: Session, state: AttemptState, ai: WorkflowAI) -> None:
     rank, field, part, labels = max(choices, key=lambda entry: entry[0])
     verification = rank[2]
     if part is not None:
-        question_text = f"{part}의 위치는 어디에 가장 가까웠나요?"
+        part_label, = localized_labels(field, [part], ai)
+        question_text = f"{part_label}의 위치는 어디에 가장 가까웠나요?"
         labels = {normalized(field, position): position for position in POSITIONS}
     else:
         question_text = PROMPTS[field]
-    if part is None and len(labels) < OPTION_COUNT:
-        alternatives = ai.distractors(field, list(labels.values()), OPTION_COUNT - len(labels),
-                                      validate=partial(select_distractors, field, labels, state.candidates))
-        labels.update((normalized(field, label), label) for label in alternatives)
-    options = [Choice(id=uuid4(), label=label, value=value) for value, label in labels.items()]
+    options = question_options(field, labels, state.candidates, ai)
     SystemRandom().shuffle(options)
     state.current = Question(id=uuid4(), field=field, structure_part=part,
                              purpose="verification" if verification else "narrowing",
@@ -260,13 +311,14 @@ def record_answer(state: AttemptState, answer: AnswerRequest) -> None:
     choice = next((option for option in question.options if option.id == answer.option_id), None)
     if choice is None:
         raise BusinessError("OWNERSHIP_OPTION_NOT_FOUND", 422)
+    accepted = {choice.value, *choice.equivalent_values}
     survivors, matched, conflicting = [], [], []
     reached_wrong_limit = False
     for candidate in state.candidates:
         evidence, expected = question_values(candidate, question.field, question.structure_part)
         if choice.value is None or not expected:
             survivors.append(candidate)
-        elif any(normalized(question.field, label) == choice.value for label in expected):
+        elif any(normalized(question.field, label) in accepted for label in expected):
             matched.append(candidate.item_id)
             if evidence and evidence.group not in candidate.matched_groups:
                 candidate.matched_groups.append(evidence.group)

@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, event, func, select, URL
 from sqlalchemy.orm import Session
 
 from app.ai_ownership_verification.api import get_ownership_ai
-from app.ai_ownership_verification.search import find_candidates, stored_items
+from app.ai_ownership_verification.search import find_candidates, normalized, stored_items
 from app.ai_ownership_verification.workflow import get_ownership_result
 from app.ai_ownership_verification.workflow_ai import EXTRACTION_MODELS, MATCHING_MODELS, GeminiWorkflowAI
 from app.ai_ownership_verification.workflow_schemas import SearchClues
@@ -129,6 +129,9 @@ class ObservedAI(GeminiWorkflowAI):
         return self._observe(f"options:{field}",
                              lambda: super(ObservedAI, self).distractors(field, known, count, validate=validate),
                              known=known, required_count=count)
+
+    def localize(self, field, labels):
+        return self._observe(f"localize:{field}", lambda: super(ObservedAI, self).localize(field, labels), known=labels)
 
     def record_request(self, request):
         if self.sent >= self.limit:
@@ -246,11 +249,18 @@ def run_case(client, engine, ai, mapping, entry):
         labels = [option["label"] for option in question["options"]]
         desired = next((label for term, label in expected.get("answers", {}).items() if term in question["text"]), None)
         wrong_for = next((label for term, label in expected.get("wrong_for", {}).items() if term in question["text"]), None)
+        field = state["current"]["field"]
+        options = state["current"]["options"]
         if wrong_for:
             known = [wrong_for] if isinstance(wrong_for, str) else wrong_for
-            desired = next((label for label in labels if label not in known), None)
-        option = next((option for option in question["options"] if option["label"] == desired), None)
-        previous_step = {"question": question["text"], "options": labels, "selected": desired,
+            accepted = {normalized(field, label) for label in known}
+            option = next((option for option in options if not accepted & option_values(field, option)), None)
+        elif desired is not None:
+            key = normalized(field, desired)
+            option = next((option for option in options if key in option_values(field, option)), None)
+        else:
+            option = None
+        previous_step = {"question": question["text"], "options": labels, "selected": option["label"] if option else desired,
                          "expected_wrong": wrong_for is not None, "candidates_before": candidates}
         result["steps"].append(previous_step)
         if option is None:
@@ -301,6 +311,10 @@ def run_case(client, engine, ai, mapping, entry):
     result["checks"] = checks
     result["passed"] = all(checks.values()) and "error" not in actual
     return result
+
+
+def option_values(field, option):
+    return {option["value"], *option.get("equivalent_values", []), normalized(field, option["label"])}
 
 
 def main():

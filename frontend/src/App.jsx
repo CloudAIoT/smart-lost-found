@@ -788,6 +788,118 @@ function WebOwnerNotice({ kind, onRetry, onHome }) {
 /* ============================================================
  * 웹 포털 컨테이너
  * ============================================================ */
+// 장치 상태 보기(관리자): GET /api/kiosks/{id}/device-status, GET /api/alerts 를 보여주는 간단한 표.
+// 프론트 자체 판정 없이 백엔드가 집계한 상태를 그대로 보여준다.
+function WebDeviceStatus({ kiosks, kiosksError, onBack }) {
+  const [kioskId, setKioskId] = useState('');
+  const [rows, setRows] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!kioskId && kiosks.length > 0) setKioskId(kiosks[0].id);
+  }, [kiosks, kioskId]);
+
+  const load = useCallback(async () => {
+    if (!kioskId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const [status, alertList] = await Promise.all([
+        api(`/kiosks/${kioskId}/device-status`),
+        api(`/alerts?kiosk_id=${kioskId}`),
+      ]);
+      setRows(Array.isArray(status) ? status : []);
+      setAlerts(Array.isArray(alertList) ? alertList.slice(0, 10) : []);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [kioskId]);
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 10000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  return (
+    <div className="space-y-5">
+      <BackHeader onBack={onBack} title="장치 상태" desc="키오스크별 보관함 센서 상태와 최근 경고를 확인합니다." />
+      {kiosksError && <p className="text-xs text-rose-300">{kiosksError}</p>}
+      <select
+        value={kioskId}
+        onChange={(e) => setKioskId(e.target.value)}
+        className="bg-slate-900 border border-slate-700 rounded-md text-sm text-slate-200 px-3 py-2 focus:outline-none"
+      >
+        {kiosks.map((k) => (
+          <option key={k.id} value={k.id}>{k.name}</option>
+        ))}
+      </select>
+      {error && <p className="text-xs text-rose-300">{error}</p>}
+      <div className="overflow-x-auto rounded-xl border border-slate-800">
+        <table className="w-full text-xs text-left text-slate-300">
+          <thead className="text-slate-500 uppercase text-[10px] bg-slate-900/60">
+            <tr>
+              <th className="py-2 px-3">장치</th>
+              <th className="py-2 px-3">연결</th>
+              <th className="py-2 px-3">문</th>
+              <th className="py-2 px-3">무게(g)</th>
+              <th className="py-2 px-3">물건감지</th>
+              <th className="py-2 px-3">갱신시각</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className="border-t border-slate-800">
+                <td className="py-2 px-3">{r.device === 'capture' ? '촬영 장치' : r.locker_number === 0 ? '보관함 컨트롤러' : `${r.locker_number}번 보관함`}</td>
+                <td className="py-2 px-3">
+                  <span className={`inline-flex items-center gap-1.5 ${r.connection === 'online' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${r.connection === 'online' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                    {r.connection === 'online' ? '온라인' : '오프라인'}
+                  </span>
+                </td>
+                <td className="py-2 px-3">{r.door === 'open' ? '열림' : r.door === 'closed' ? '닫힘' : '-'}</td>
+                <td className="py-2 px-3">{r.weight_g ?? '-'}</td>
+                <td className="py-2 px-3">{r.item ? '감지됨' : '-'}</td>
+                <td className="py-2 px-3 text-slate-500">{r.updated_at ? new Date(r.updated_at).toLocaleTimeString('ko-KR') : '-'}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && !loading && (
+              <tr><td colSpan={6} className="py-3 px-3 text-center text-slate-500">표시할 장치 상태가 없습니다.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="space-y-1.5">
+        <h3 className="text-xs font-semibold text-slate-400">최근 경고</h3>
+        {alerts.length === 0 ? (
+          <p className="text-xs text-slate-500">최근 경고가 없습니다.</p>
+        ) : (
+          alerts.map((a, i) => {
+            const cls = a.severity === 'alarm'
+              ? 'bg-rose-950/50 border-rose-500/50 text-rose-300'
+              : 'bg-amber-950/40 border-amber-500/40 text-amber-300';
+            return (
+              <div key={a.id ?? i} className={`flex items-center justify-between gap-2 border rounded-lg px-3 py-2 text-xs ${cls}`}>
+                <span className="flex items-center gap-1.5">
+                  <TriangleAlert size={13} /> {ALERT_LABELS[a.code] || a.message || a.code || '알 수 없는 경고'}
+                  {a.locker_number ? ` · ${a.locker_number}번` : ''}
+                </span>
+                <span className="text-[10px] text-slate-500 shrink-0">
+                  {a.reported_at ? new Date(a.reported_at).toLocaleTimeString('ko-KR') : ''}
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
   const [step, setStep] = useState('type');
   const [ownerResult, setOwnerResult] = useState(null);
@@ -846,7 +958,17 @@ function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
               </div>
             </button>
           </div>
+          <button
+            onClick={() => setStep('devices')}
+            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2"
+          >
+            <Monitor size={13} /> 장치 상태 보기 (관리자)
+          </button>
         </div>
+      )}
+
+      {step === 'devices' && (
+        <WebDeviceStatus kiosks={kiosks} kiosksError={kiosksError} onBack={() => setStep('type')} />
       )}
 
       {step === 'finder' && (
@@ -917,13 +1039,14 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
   // 수령 상태
   const [code, setCode] = useState('');
   const [pickup, setPickup] = useState(null);
-  const [pickupConfirmed, setPickupConfirmed] = useState(false);
+  const [pickupReady, setPickupReady] = useState(false); // 센서가 개방→폐쇄를 감지하면 true (수령 완료 버튼 활성화)
   const [pickupBlocked, setPickupBlocked] = useState(false); // ITEM_STILL_INSIDE(409) 또는 경고 목록의 ITEM_NOT_TAKEN
 
   // 장치 경고·상태
   const [alerts, setAlerts] = useState([]);
   const alertsSinceRef = useRef(null);
   const pickupOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_TAKEN 경고만 본다
+  const pickupDoorSeenOpenRef = useRef(false); // 수령 중 센서가 '열림'을 감지했는지(개방→폐쇄 판정용)
   const depositOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_DEPOSITED 경고만 본다
   const [deviceStatus, setDeviceStatus] = useState([]); // GET /kiosks/{id}/device-status (장치 온라인/오프라인)
 
@@ -977,8 +1100,22 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     if (!(step === 'pickup-open' && pickup?.locker_number && !pickup?.dev)) return;
     const hit = alerts.some((a) => a.code === 'ITEM_NOT_TAKEN' && a.locker_number === pickup.locker_number
       && (!pickupOpenedAtRef.current || a.reported_at >= pickupOpenedAtRef.current));
-    if (hit) setPickupBlocked(true);
+    if (hit) {
+      setPickupBlocked(true);
+      setPickupReady(false);
+    }
   }, [alerts, step, pickup?.locker_number, pickup?.dev]);
+
+  // 수령 - 보관함 열림 화면에서, 장치 상태(door)가 개방→폐쇄로 바뀐 것을 감지하면
+  // (남은 물건 경고가 없는 한) '수령 완료' 버튼을 활성화한다. 체크박스 자가 신고 대신 센서 판정을 따른다.
+  useEffect(() => {
+    if (!(step === 'pickup-open' && pickup?.locker_number && !pickup?.dev)) return;
+    const row = deviceStatus.find((d) => d.locker_number === pickup.locker_number);
+    if (!row?.door) return;
+    if (pickupOpenedAtRef.current && row.updated_at && row.updated_at < pickupOpenedAtRef.current) return;
+    if (row.door === 'open') pickupDoorSeenOpenRef.current = true;
+    if (row.door === 'closed' && pickupDoorSeenOpenRef.current && !pickupBlocked) setPickupReady(true);
+  }, [deviceStatus, step, pickup?.locker_number, pickup?.dev, pickupBlocked]);
 
   // 등록 - 보관함 개방 화면에서, 경고 목록에 이 보관함의 ITEM_NOT_DEPOSITED가 있으면 투입 안내를 띄운다.
   useEffect(() => {
@@ -1027,7 +1164,8 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     setDepositBlocked(false);
     setCode('');
     setPickup(null);
-    setPickupConfirmed(false);
+    setPickupReady(false);
+    pickupDoorSeenOpenRef.current = false;
     setPickupBlocked(false);
   };
 
@@ -1164,8 +1302,9 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     if (DEV_OTP && normalized === DEV_OTP) {
       setInlineError('');
       setPickup({ found_item_id: null, kiosk_id: kioskId, locker_number: 0, dev: true });
-      setPickupConfirmed(false);
       setPickupBlocked(false);
+      pickupDoorSeenOpenRef.current = false;
+      setPickupReady(true); // 개발자 테스트 OTP는 센서 연동이 없어 즉시 활성화한다.
       pickupOpenedAtRef.current = new Date().toISOString();
       setStep('pickup-open');
       return;
@@ -1175,8 +1314,9 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       async () => {
         const data = await api('/pickup/open', { method: 'POST', body: { code: normalized, kiosk_id: kioskId } });
         setPickup(data);
-        setPickupConfirmed(false);
         setPickupBlocked(false);
+        setPickupReady(false);
+        pickupDoorSeenOpenRef.current = false;
         pickupOpenedAtRef.current = new Date().toISOString();
         setStep('pickup-open');
       },
@@ -1639,24 +1779,13 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
               <RefreshCw size={14} /> 보관함 다시 열기
             </button>
           ) : (
-            <>
-              <label className="flex items-center justify-center gap-2 text-xs text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={pickupConfirmed}
-                  onChange={(e) => setPickupConfirmed(e.target.checked)}
-                  className="w-4 h-4 accent-emerald-500"
-                />
-                보관함에서 물건을 꺼냈고, 문을 닫았습니다.
-              </label>
-              <button
-                disabled={disabled || !pickupConfirmed}
-                onClick={completePickup}
-                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow"
-              >
-                수령 완료
-              </button>
-            </>
+            <button
+              disabled={disabled || !pickupReady}
+              onClick={completePickup}
+              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow"
+            >
+              {pickupReady ? '수령 완료' : '문 닫힘 감지 대기 중...'}
+            </button>
           )}
         </div>
       )}

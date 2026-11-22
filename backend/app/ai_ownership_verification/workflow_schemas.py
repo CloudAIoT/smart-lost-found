@@ -21,7 +21,7 @@ FailureReason = Literal[
     # Previously completed attempts can still contain these reasons.
     "no_verified_evidence", "verification_answers_mismatch",
 ]
-PolicyVersion = Literal["development_v1", "development_v2", "development_v3", "development_v4"]
+PolicyVersion = Literal["development_v1", "development_v2", "development_v3", "development_v4", "development_v5"]
 
 
 class SearchRequest(Contract):
@@ -95,6 +95,7 @@ class Choice(Contract):
 class Question(Contract):
     id: UUID
     field: FieldName
+    structure_part: str | None = None
     purpose: Literal["narrowing", "verification"]
     text: str
     options: list[Choice]
@@ -103,6 +104,7 @@ class Question(Contract):
 class RecordedAnswer(Contract):
     question_id: UUID
     field: FieldName
+    structure_part: str | None = None
     purpose: Literal["narrowing", "verification"]
     option_id: UUID
     outcome: Literal["answered", "unknown"]

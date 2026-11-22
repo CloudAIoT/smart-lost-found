@@ -12,7 +12,7 @@ from app.core.errors import ServiceError
 from app.models.schemas import Features
 from app.services.vision_service import VisionService, build_prompt, parse_features
 
-PAYLOAD = {'category': 'pencil_case', 'color': ['black'], 'shape': '직사각형',
+PAYLOAD = {'category': '필통', 'color': ['검정색'], 'shape': '직사각형',
            'surface_texture': '직조 표면', 'brand': None, 'visible_text': None,
            'structure': ['측면 지퍼'], 'distinctive_features': None}
 

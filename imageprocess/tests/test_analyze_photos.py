@@ -22,6 +22,8 @@ def test_mock_batch_uses_current_nullable_schema_and_filename_categories(tmp_pat
     assert all('MOCK_INFERENCE' in r['warnings'] for r in records)
     assert 'null' in (output/'report.md').read_text()
     assert json.loads((output/'manifest.json').read_text())['status'] == 'completed'
+    assert json.loads((output/'manifest.json').read_text())['feature_schema'] == 'fixed_common_v3_ko'
+    assert all(r['comparison_metadata']['feature_schema'] == 'fixed_common_v3_ko' for r in records)
 
 
 def test_batch_stops_after_shared_api_failure_and_saves_the_failure(tmp_path):

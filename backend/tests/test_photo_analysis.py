@@ -23,15 +23,21 @@ def sample_photos():
     return tuple(values)
 
 
-def test_analyzer_sends_both_photos_in_order_and_stores_validated_fields():
+@pytest.mark.parametrize("category, feature_color, expected_category, expected_color", [
+    ("필통", "빨강", "필통", "빨강"),
+    ("pencil_case", "red", "필통", "빨간색"),
+])
+def test_analyzer_sends_both_photos_in_order_and_stores_validated_fields(
+    category, feature_color, expected_category, expected_color,
+):
     photos = []
     for color in ("red", "blue"):
         with Image.new("RGB", (40, 25), color=color) as photo, BytesIO() as jpeg:
             photo.save(jpeg, format="JPEG")
             photos.append(AnalysisInput(uuid4(), jpeg.getvalue()))
     features = {
-        "category": "필통", "color": ["빨강"], "shape": "직사각형",
-        "surface_texture": "직조 표면", "brand": None, "visible_text": None,
+        "category": category, "color": [feature_color], "shape": "직사각형",
+        "surface_texture": "직조 표면", "brand": "Carhartt", "visible_text": ["carhartt"],
         "structure": ["측면 지퍼"], "distinctive_features": None,
     }
 
@@ -39,6 +45,7 @@ def test_analyzer_sends_both_photos_in_order_and_stores_validated_fields():
         payload = json.loads(request.content)
         parts = payload["contents"][0]["parts"]
         assert len(parts) == 3
+        assert "specific equivalent category in Korean" in parts[0]["text"]
         assert set(payload["generationConfig"]["responseJsonSchema"]["required"]) == features.keys()
         for part, channel in zip(parts[1:], (0, 2)):
             assert part["inline_data"]["mime_type"] == "image/jpeg"
@@ -52,7 +59,7 @@ def test_analyzer_sends_both_photos_in_order_and_stores_validated_fields():
     with httpx.Client(transport=httpx.MockTransport(respond)) as client:
         result = GeminiPhotoAnalyzer(GeminiWorkflowAI(settings, client), "필통").analyze(uuid4(), tuple(photos))
     assert result.image_ids == tuple(photo.image_id for photo in photos)
-    assert result.features == features
+    assert result.features == {**features, "category": expected_category, "color": [expected_color]}
 
 
 @pytest.mark.parametrize("status, expected_calls", [(503, 3), (401, 1)])

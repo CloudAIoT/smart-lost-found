@@ -271,7 +271,8 @@ def test_registration_api_reads_two_s3_photos_and_persists_gemini_json(env, monk
     with Session(env.engine) as session:
         report = inspect_analysis(session, UUID(value))
         assert report["verified"]
-        assert report["analysis_features"] == features
+        # Persist Korean labels even when a provider returns known English aliases.
+        assert report["analysis_features"] == {**features, "category": "노트북", "color": ["은색"]}
         assert report["analysis_input_image_ids"] == [image["id"] for image in response.json()["images"]]
         keys = list(session.scalars(select(ItemImage.object_key).where(
             ItemImage.registration_id == UUID(value)).order_by(ItemImage.shot_order)))

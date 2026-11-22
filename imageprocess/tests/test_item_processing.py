@@ -39,14 +39,14 @@ def test_backend_boundary_preserves_registration_ids_photo_order_and_nullable_fi
     assert prepared.images[1].getpixel((0, 0)) == (0, 0, 0)
     assert 'shot order 1 then 2' in prepared.prompt
     assert 'Do not count the same attachment twice' in prepared.prompt
-    assert '"pencil_case"' in prepared.prompt
+    assert '"필통"' in prepared.prompt
     payload = dict.fromkeys(Features.model_fields)
-    payload.update(category='pencil_case', color=['black'])
+    payload.update(category='필통', color=['검정색'])
     result = parse_item_output(prepared, json.dumps(payload))
     encoded = result.model_dump(mode='json')
     assert encoded['image_ids'] == [str(item.image_id) for item in inputs]
     assert encoded['data'] == payload
-    assert encoded['schema_version'] == 'fixed_common_v2'
+    assert encoded['schema_version'] == 'fixed_common_v3_ko'
     assert 'shot_2:IMAGE_DARK' in encoded['warnings']
 
 

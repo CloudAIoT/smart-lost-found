@@ -72,7 +72,9 @@ def test_local_category_reaches_model_without_overriding_its_prediction(tmp_path
     assert service.infer.call_args.kwargs == {'category': '필통'}
     service.load.assert_called_once()
     assert result['input_category'] == '필통'
-    assert result['data']['category'] == 'pencil_case'
+    assert result['data']['category'] == '필통'
+    assert result['data']['color'] == ['검정색']
+    assert result['comparison_metadata']['feature_schema'] == 'fixed_common_v3_ko'
 
 
 def test_cli_accepts_category_without_requesting_notes(tmp_path, monkeypatch, capsys):

@@ -9,7 +9,7 @@ from app.analyze_image import analyze_file
 from app.core.config import Settings
 from app.core.errors import ServiceError
 from app.explore_features import category_from_filename
-from app.models.schemas import COMMON_FEATURE_FIELDS
+from app.models.schemas import COMMON_FEATURE_FIELDS, FEATURE_SCHEMA_VERSION
 
 
 def _save(path: Path, value) -> None:
@@ -58,7 +58,7 @@ def run_batch(photos: Path, output_root: Path, settings: Settings, *, start_from
     inputs = [{'image': path.name, 'category': category_from_filename(path)} for path in paths]
     output_root.mkdir(parents=True, exist_ok=True)
     output = Path(mkdtemp(prefix='run-', dir=output_root))
-    manifest = {'feature_schema': 'fixed_common_v2', 'backend': settings.inference_backend,
+    manifest = {'feature_schema': FEATURE_SCHEMA_VERSION, 'backend': settings.inference_backend,
                 'model_name': settings.selected_model_name, 'inputs': inputs,
                 'start_from': start_from, 'skipped_before_start': [path.name for path in all_paths[:start_index]],
                 'common_fields': list(COMMON_FEATURE_FIELDS), 'unknown_value': None,

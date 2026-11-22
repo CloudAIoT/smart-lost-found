@@ -13,6 +13,7 @@
           "type": "null"
         }
       ],
+      "description": "물품 종류를 한국어로 작성. 확인 불가 시 null.",
       "title": "Category"
     },
     "color": {
@@ -31,6 +32,7 @@
           "type": "null"
         }
       ],
+      "description": "주요 색상을 한국어로 작성. 확인 불가 시 null.",
       "title": "Color"
     },
     "shape": {
@@ -44,6 +46,7 @@
           "type": "null"
         }
       ],
+      "description": "눈에 보이는 전체 형태를 한국어로 작성.",
       "title": "Shape"
     },
     "surface_texture": {
@@ -57,6 +60,7 @@
           "type": "null"
         }
       ],
+      "description": "관찰 가능한 표면 질감을 한국어로 작성.",
       "title": "Surface Texture"
     },
     "brand": {
@@ -70,6 +74,7 @@
           "type": "null"
         }
       ],
+      "description": "식별한 브랜드명을 원문으로 보존. 확인 불가 시 null.",
       "title": "Brand"
     },
     "visible_text": {
@@ -88,6 +93,7 @@
           "type": "null"
         }
       ],
+      "description": "실제로 읽히는 글자를 번역 없이 원문으로 보존.",
       "title": "Visible Text"
     },
     "structure": {
@@ -106,6 +112,7 @@
           "type": "null"
         }
       ],
+      "description": "눈에 보이는 주요 구조를 한국어로 작성.",
       "title": "Structure"
     },
     "distinctive_features": {
@@ -124,6 +131,7 @@
           "type": "null"
         }
       ],
+      "description": "구분에 도움이 되는 구체적 특징을 한국어로 작성. 고유명사는 원문 사용 가능.",
       "title": "Distinctive Features"
     }
   },

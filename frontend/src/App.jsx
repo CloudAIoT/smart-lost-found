@@ -418,7 +418,7 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
         </div>
 
         {/* 키오스크 목록 */}
-        <div className="space-y-3 flex flex-col h-[320px] sm:h-[400px] overflow-y-auto pr-1">
+        <div className="space-y-4 flex flex-col h-[360px] sm:h-[460px] overflow-y-auto pr-1">
           <div className="text-xs text-slate-400 font-medium px-1 flex justify-between">
             <span>추천 스마트 키오스크</span>
             <span className="text-indigo-400">총 {kiosks.length}곳</span>
@@ -447,28 +447,28 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
                 tabIndex={0}
                 onClick={() => setFocus({ id: k.id, t: Date.now() })}
                 onKeyDown={(e) => e.key === 'Enter' && setFocus({ id: k.id, t: Date.now() })}
-                className={`p-3.5 border rounded-xl cursor-pointer transition-all ${
+                className={`p-4 border rounded-xl cursor-pointer transition-all space-y-1.5 ${
                   active ? 'bg-slate-800 border-indigo-500/40' : 'bg-slate-800/60 border-slate-700 hover:bg-slate-800'
                 }`}
               >
-                <div className="flex justify-between items-start gap-2">
-                  <h4 className="font-bold text-white text-sm">{k.name}</h4>
+                <div className="flex flex-wrap justify-between items-start gap-x-2 gap-y-1">
+                  <h4 className="font-bold text-white text-sm break-keep">{k.name}</h4>
                   {!hasCoords(k) && (
-                    <span className="text-[11px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full whitespace-nowrap">
+                    <span className="text-[11px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full whitespace-nowrap shrink-0">
                       좌표 미등록
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-400 mt-1 flex items-start gap-1">
+                <p className="text-xs text-slate-400 flex items-start gap-1 break-keep">
                   <MapPin size={12} className="text-slate-500 mt-0.5 shrink-0" />
                   {k.location_description || '장소 설명 없음'}
                 </p>
-                <div className="mt-2 text-xs text-indigo-400 font-semibold flex items-center justify-between">
-                  <span className="flex items-center gap-1">
+                <div className="pt-0.5 text-xs text-indigo-400 font-semibold flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <span className="flex items-center gap-1 whitespace-nowrap">
                     <Footprints size={12} />
                     {k.distance != null ? formatDistance(k.distance) : '거리 정보 없음'}
                   </span>
-                  {hasCoords(k) && <span className="text-[11px] underline">위치 보기</span>}
+                  {hasCoords(k) && <span className="text-[11px] underline shrink-0">위치 보기</span>}
                 </div>
               </div>
             );

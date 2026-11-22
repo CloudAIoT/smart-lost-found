@@ -452,7 +452,13 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
                 }`}
               >
                 <div className="flex flex-wrap justify-between items-start gap-x-2 gap-y-1">
-                  <h4 className="font-bold text-white text-sm break-keep">{k.name}</h4>
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-white text-sm break-keep">{k.name}</h4>
+                    <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 rounded-full px-2 py-0.5 whitespace-nowrap">
+                      <Footprints size={11} />
+                      {k.distance != null ? formatDistance(k.distance) : '거리 정보 없음'}
+                    </span>
+                  </div>
                   {!hasCoords(k) && (
                     <span className="text-[11px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full whitespace-nowrap shrink-0">
                       좌표 미등록
@@ -463,13 +469,11 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
                   <MapPin size={12} className="text-slate-500 mt-0.5 shrink-0" />
                   {k.location_description || '장소 설명 없음'}
                 </p>
-                <div className="pt-0.5 text-xs text-indigo-400 font-semibold flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <span className="flex items-center gap-1 whitespace-nowrap">
-                    <Footprints size={12} />
-                    {k.distance != null ? formatDistance(k.distance) : '거리 정보 없음'}
-                  </span>
-                  {hasCoords(k) && <span className="text-[11px] underline shrink-0">위치 보기</span>}
-                </div>
+                {hasCoords(k) && (
+                  <div className="text-right">
+                    <span className="text-[11px] text-indigo-400 underline">위치 보기</span>
+                  </div>
+                )}
               </div>
             );
           })}

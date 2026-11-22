@@ -505,10 +505,49 @@ function WebOwner({ onBack, onResult }) {
   const [optionId, setOptionId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [photo, setPhoto] = useState(null); // { url, token } - photo_confirmation 단계의 등록 사진
+  const [photoLoading, setPhotoLoading] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+
+  // GET /ownership/attempts/{id}/photo: 확인용 등록 사진(JPEG)과 X-Ownership-Photo-Token 헤더.
+  // api()는 JSON 전용이라 이 엔드포인트는 fetch를 직접 쓴다.
+  const loadPhoto = async (attemptId) => {
+    setPhoto(null);
+    setPhotoError('');
+    setPhotoLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/ownership/attempts/${attemptId}/photo`);
+      if (!res.ok) {
+        let code = `HTTP_${res.status}`;
+        try {
+          const data = await res.json();
+          if (data?.detail?.code) code = data.detail.code;
+        } catch {
+          // 오류 응답 본문이 JSON이 아니면 기본 코드를 쓴다.
+        }
+        throw new ApiError(res.status, code);
+      }
+      const token = res.headers.get('X-Ownership-Photo-Token');
+      const blob = await res.blob();
+      setPhoto({ url: URL.createObjectURL(blob), token });
+    } catch (err) {
+      setPhotoError(errorText(err instanceof ApiError ? err : new ApiError(0, 'NETWORK_ERROR')));
+    } finally {
+      setPhotoLoading(false);
+    }
+  };
+
+  // 사진 objectURL은 다음 사진을 불러오거나 화면을 떠날 때 해제한다.
+  useEffect(() => () => {
+    if (photo?.url) URL.revokeObjectURL(photo.url);
+  }, [photo]);
 
   const accept = (result) => {
     setOptionId('');
-    if (result.status === 'question' || result.decision === 'supported') {
+    if (result.status === 'photo_confirmation') {
+      setAttempt(result);
+      loadPhoto(result.attempt_id);
+    } else if (result.status === 'question' || result.decision === 'supported') {
       setAttempt(result);
     } else if (result.status === 'no_candidates' || result.status === 'completed') {
       onResult({ status: result.decision || 'not_found' });
@@ -555,12 +594,37 @@ function WebOwner({ onBack, onResult }) {
     }
   };
 
+  // POST /ownership/attempts/{id}/photo-confirmation: 사진이 본인 물건이 맞는지 확인한다.
+  // 맞으면 완료 판정과 반환 코드(OTP)가 함께 온다. FE는 보조 경로(/found-items/.../return-code)를 따로 부르지 않는다.
+  const confirmPhoto = async (confirmed) => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const body = confirmed ? { confirmed: true, photo_token: photo?.token } : { confirmed: false };
+      const result = await api(`/ownership/attempts/${attempt.attempt_id}/photo-confirmation`, { method: 'POST', body });
+      const code = result.return_code;
+      if (result.attempt?.decision === 'supported' && code) {
+        onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name });
+      } else {
+        onResult({ status: result.attempt?.decision || 'not_confirmed' });
+      }
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const question = attempt?.question;
   const verified = attempt?.decision === 'supported';
+  const confirmingPhoto = attempt?.status === 'photo_confirmation';
   const restart = () => {
     setAttempt(null);
     setOptionId('');
     setError('');
+    setPhoto(null);
+    setPhotoError('');
   };
 
   return (
@@ -576,6 +640,19 @@ function WebOwner({ onBack, onResult }) {
       <form onSubmit={submit} className="space-y-4 max-w-xl mx-auto py-2 w-full">
         {verified ? (
           <p className="text-sm text-emerald-300">소유 확인이 완료됐습니다. 수령용 OTP를 발급받으세요.</p>
+        ) : confirmingPhoto ? (
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-white">등록된 사진 속 물건이 맞는지 확인해 주세요.</p>
+            {photoLoading && <p className="text-xs text-slate-400">사진을 불러오는 중...</p>}
+            {photoError && <p role="alert" className="text-xs text-rose-300">{photoError}</p>}
+            {photo?.url && (
+              <img
+                src={photo.url}
+                alt="등록된 물건 사진"
+                className="w-full max-h-72 object-contain rounded-xl border border-slate-700 bg-slate-950"
+              />
+            )}
+          </div>
         ) : question ? (
           <fieldset disabled={busy} key={question.id} className="space-y-2">
             <legend className="text-sm font-semibold text-white mb-3">{question.text}</legend>
@@ -604,12 +681,29 @@ function WebOwner({ onBack, onResult }) {
 
         {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
 
-        <button
-          type="submit" disabled={busy || (!verified && (question ? !optionId : !description.trim()))}
-          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
-        >
-          {busy ? '처리 중...' : verified ? '수령용 OTP 발급' : question ? '답변 제출' : '분실물 검색'}
-        </button>
+        {confirmingPhoto ? (
+          <div className="flex gap-3">
+            <button
+              type="button" disabled={busy || !photo} onClick={() => confirmPhoto(true)}
+              className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
+            >
+              {busy ? '처리 중...' : '맞습니다'}
+            </button>
+            <button
+              type="button" disabled={busy} onClick={() => confirmPhoto(false)}
+              className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
+            >
+              아닙니다
+            </button>
+          </div>
+        ) : (
+          <button
+            type="submit" disabled={busy || (!verified && (question ? !optionId : !description.trim()))}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
+          >
+            {busy ? '처리 중...' : verified ? '수령용 OTP 발급' : question ? '답변 제출' : '분실물 검색'}
+          </button>
+        )}
         {attempt && (
           <button type="button" disabled={busy} onClick={restart} className="text-sm text-slate-300 hover:text-white">
             검색 다시 시작

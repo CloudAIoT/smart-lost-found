@@ -109,7 +109,7 @@ class LockerMonitor:
     """보관함 칸마다 문·충격·무게 센서를 보고 상황을 판단한다."""
 
     def __init__(self, count: int, publisher: Publisher, scheduler: Scheduler, store: SensorStore,
-                 threshold_g: float, settle_seconds: float):
+                 threshold_g: float, settle_seconds: float, auto: bool = False, auto_weight_g: float = 150.0):
         saved = store.load().get("lockers", {})
         self.states = {n: LockerState(weight_g=float(saved.get(str(n), 0.0))) for n in range(1, count + 1)}
         self.sender = Sender(publisher, "locker")
@@ -118,6 +118,10 @@ class LockerMonitor:
         self.threshold_g = threshold_g
         self.settle_seconds = settle_seconds
         self.lock = threading.Lock()
+        # 자동 모드: 개방 명령으로 열리면 정상 보관·수령처럼 가상 무게를 알아서 바꾼다
+        self.auto = auto
+        self.auto_weight_g = auto_weight_g
+        self.skip_auto: frozenset[int] = frozenset()  # 다음 개방 한 번은 자동으로 바꾸지 않을 칸
 
     def has_item(self, weight_g: float) -> bool:
         return weight_g > self.threshold_g
@@ -141,6 +145,30 @@ class LockerMonitor:
         if change == "forced":
             self.sender.alert("FORCED_OPEN", "alarm", f"{number}번 보관함 문이 개방 명령 없이 열렸습니다. "
                               "강제 개방이 의심됩니다.", locker_id=number)
+        elif self.auto:
+            self._auto_item(number, state.weight_g)
+
+    def _auto_item(self, number: int, opened_weight_g: float) -> None:
+        # 정상 흐름 흉내: 빈 칸이 열리면 물건을 넣고(보관), 물건이 있는 칸이 열리면 꺼낸다(수령)
+        with self.lock:
+            skip = number in self.skip_auto
+            self.skip_auto = self.skip_auto - {number}
+        if skip:
+            log.info("%d번 칸: 이번 개방은 자동으로 넣거나 빼지 않음 (이상 상황 시연)", number)
+            return
+        action: ItemAction = "take" if self.has_item(opened_weight_g) else "put"
+        try:
+            self.change_item(number, action, self.auto_weight_g)
+        except DeviceError:
+            log.warning("%d번 칸 문이 먼저 닫혀 자동으로 무게를 바꾸지 못했습니다", number)
+            return
+        log.info("%d번 칸 자동으로 물건 %s", number, "꺼냄 (수령)" if action == "take" else "넣음 (보관)")
+
+    def skip_next_auto(self, number: int) -> dict:
+        # 다음에 개방 명령으로 열릴 때 한 번은 자동으로 바꾸지 않는다: 보관 안 됨·수령 안 됨 시연
+        with self.lock:
+            self.skip_auto = self.skip_auto | {number}
+        return self.snapshot()
 
     def _door_closed(self, number: int) -> None:
         with self.lock:
@@ -209,7 +237,8 @@ class LockerMonitor:
                 self._send_state(number, state)
 
     def snapshot(self) -> dict:
-        return {"lockers": [{"locker_id": n, "door": s.door, "weight_g": s.weight_g,
+        return {"auto": self.auto, "skip_auto": sorted(self.skip_auto),
+                "lockers": [{"locker_id": n, "door": s.door, "weight_g": s.weight_g,
                              "item": item_text(s.weight_g, self.threshold_g)} for n, s in self.states.items()]}
 
     def _send_state(self, number: int, state: LockerState) -> None:

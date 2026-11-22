@@ -62,6 +62,12 @@ def locker_routes(lockers: Lockers, monitor: LockerMonitor, check_locker: Callab
         check_locker(locker_id)
         return monitor.shock(locker_id, body.strength)
 
+    @router.post("/lockers/{locker_id}/skip-auto")
+    def skip_auto(locker_id: int) -> dict:
+        # 다음 개방 한 번은 자동으로 넣거나 빼지 않는다 (보관 안 됨·수령 안 됨 시연)
+        check_locker(locker_id)
+        return monitor.skip_next_auto(locker_id)
+
     return router
 
 

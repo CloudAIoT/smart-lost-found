@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     kiosk_id: str = Field(default="00000000-0000-0000-0000-000000000001", pattern=r"^[A-Za-z0-9-]{1,64}$")
     # true면 /sim 경로로 가상 센서 값을 바꿀 수 있다 (시연용)
     simulation: bool = False
+    # PI_SIMULATION=true일 때, 백엔드가 칸을 열면 정상 보관·수령처럼 가상 무게를 알아서 넣거나 뺀다
+    # 이상 상황(보관 안 됨·수령 안 됨)은 /sim/lockers/{n}/skip-auto로 다음 개방 한 번만 건너뛴다
+    simulation_auto: bool = True
     # MQTT 브로커 주소. 비어 있으면 브로커에 보내지 않고 로그로만 남긴다
     mqtt_host: str = ""
     mqtt_port: int = Field(default=1883, ge=1, le=65535)

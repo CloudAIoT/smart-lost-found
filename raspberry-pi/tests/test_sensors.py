@@ -28,6 +28,14 @@ def make_capture(pub, clock):
     return CaptureMonitor(pub, clock, SensorStore(None), threshold_g=10, leftover_seconds=120)
 
 
+def make_auto_lockers(pub, clock):
+    return LockerMonitor(2, pub, clock, SensorStore(None), threshold_g=10, settle_seconds=1.0, auto=True)
+
+
+def weight(monitor, number):
+    return monitor.snapshot()["lockers"][number - 1]["weight_g"]
+
+
 def test_forced_open_is_an_alarm(pub, clock):
     monitor = make_lockers(pub, clock)
     monitor.door_changed(1, "forced")
@@ -170,3 +178,42 @@ def test_env_example_reads_as_no_broker_and_no_state_file():
     settings = Settings(_env_file=example)
     assert (settings.mqtt_host, settings.simulation, settings.sensor_state_file) == ("", False, None)
     assert settings.kiosk_id == "00000000-0000-0000-0000-000000000001"
+
+
+def test_auto_puts_item_when_empty_locker_opens_by_command(pub, clock):
+    monitor = make_auto_lockers(pub, clock)
+    monitor.door_changed(1, "opened")
+    assert weight(monitor, 1) == 150  # 보관: 빈 칸이 열리면 물건을 넣은 것으로 본다
+    monitor.door_changed(1, "closed")
+    clock.run()
+    assert pub.alert_codes() == []
+
+
+def test_auto_takes_item_when_full_locker_opens_by_command(pub, clock):
+    monitor = make_auto_lockers(pub, clock)
+    monitor.change_item(1, "put", 150, preset=True)
+    monitor.door_changed(1, "opened")
+    assert weight(monitor, 1) == 0  # 수령: 물건 있는 칸이 열리면 꺼낸 것으로 본다
+    monitor.door_changed(1, "closed")
+    clock.run()
+    assert pub.alert_codes() == []
+
+
+def test_auto_skip_leaves_one_opening_for_abnormal_demo(pub, clock):
+    monitor = make_auto_lockers(pub, clock)
+    monitor.skip_next_auto(1)
+    assert monitor.snapshot()["skip_auto"] == [1]
+    monitor.door_changed(1, "opened")
+    assert weight(monitor, 1) == 0
+    monitor.door_changed(1, "closed")
+    clock.run()
+    assert pub.alert_codes() == ["ITEM_NOT_DEPOSITED"]
+    monitor.door_changed(1, "opened")  # 다시 열기: 건너뛰기는 한 번뿐이라 이번에는 넣는다
+    assert weight(monitor, 1) == 150
+
+
+def test_auto_does_not_touch_forced_open(pub, clock):
+    monitor = make_auto_lockers(pub, clock)
+    monitor.change_item(2, "put", 150, preset=True)
+    monitor.door_changed(2, "forced")
+    assert weight(monitor, 2) == 150  # 강제 개방은 시연 명령(take)으로만 꺼낸다

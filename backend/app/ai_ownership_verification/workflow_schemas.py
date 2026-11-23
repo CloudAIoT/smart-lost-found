@@ -21,7 +21,8 @@ FailureReason = Literal[
     # Previously completed attempts can still contain these reasons.
     "no_verified_evidence", "verification_answers_mismatch",
 ]
-PolicyVersion = Literal["development_v1", "development_v2", "development_v3", "development_v4", "development_v5"]
+PolicyVersion = Literal["development_v1", "development_v2", "development_v3", "development_v4", "development_v5",
+                        "development_v6"]
 
 
 class SearchRequest(Contract):
@@ -44,6 +45,10 @@ class SearchClues(Contract):
 
 class Distractors(Contract):
     labels: list[ChoiceLabel] = Field(max_length=8)
+
+
+class KoreanLabels(Contract):
+    labels: list[ChoiceLabel] = Field(min_length=1, max_length=5)
 
 
 class SearchMatch(Contract):
@@ -90,6 +95,7 @@ class Choice(Contract):
     id: UUID
     label: str
     value: str | None
+    equivalent_values: list[str] = Field(default_factory=list)
 
 
 class Question(Contract):

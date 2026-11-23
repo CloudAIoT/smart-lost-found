@@ -13,6 +13,9 @@ REQUIRED = {"POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "S3_BUCKET", "S
 OPTIONAL = {"BUSINESS_API_ENABLED", "COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES",
             "PREVIEW_TTL_SECONDS", "RETURN_CODE_TTL_SECONDS", "PI_DEVICES", "GEMINI_API_KEY", "GEMINI_MODEL",
             "IMAGE_ANALYSIS_TIMEOUT_SECONDS", "DEV_FAKE_DEVICE",
+            # 소유 확인 검색의 예산·대기·동시 실행 (backend/app/ai_ownership_verification/workflow.md).
+            "OWNERSHIP_SEARCH_BUDGET_SECONDS", "OWNERSHIP_SYNC_WAIT_SECONDS",
+            "OWNERSHIP_SEARCH_CONCURRENCY", "OWNERSHIP_MAX_CONCURRENT_SEARCHES",
             # 장치 상태 구독 (docs/mqtt-protocol.md). MQTT_HOST가 없으면 구독을 시작하지 않는다.
             "MQTT_HOST", "MQTT_PORT", "MQTT_USERNAME", "MQTT_PASSWORD", "MQTT_CLIENT_ID",
             "MQTT_ALERT_RETENTION_DAYS", "MQTT_BIND_ADDRESS"}
@@ -41,6 +44,12 @@ def render(payload: dict, output: Path) -> None:
         timeout = payload["IMAGE_ANALYSIS_TIMEOUT_SECONDS"]
         if not re.fullmatch(r"[0-9]{1,2}", timeout) or not 5 <= int(timeout) <= 90:
             raise ValueError("IMAGE_ANALYSIS_TIMEOUT_SECONDS must be between 5 and 90")
+    # 검색 예산은 nginx의 proxy_read_timeout 120초보다 작아야 한다. 더 크면 프록시가 먼저 끊는다.
+    for key, low, high in (("OWNERSHIP_SEARCH_BUDGET_SECONDS", 5, 110), ("OWNERSHIP_SYNC_WAIT_SECONDS", 0, 30),
+                           ("OWNERSHIP_SEARCH_CONCURRENCY", 1, 10), ("OWNERSHIP_MAX_CONCURRENT_SEARCHES", 1, 16)):
+        if key in payload and (not re.fullmatch(r"[0-9]{1,3}", payload[key])
+                               or not low <= int(payload[key]) <= high):
+            raise ValueError(f"{key} must be an integer between {low} and {high}")
     for key in ("COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES", "PREVIEW_TTL_SECONDS",
                "RETURN_CODE_TTL_SECONDS", "MQTT_PORT", "MQTT_ALERT_RETENTION_DAYS"):
         if key in payload and not re.fullmatch(r"[1-9][0-9]{0,9}", payload[key]):

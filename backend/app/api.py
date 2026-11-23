@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.ai_ownership_verification import search_jobs
 from app.ai_ownership_verification.workflow import authorize_return_code
 from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
 from app.config import Settings, get_settings
@@ -18,7 +19,7 @@ from app.device_telemetry import kiosk_device_states, recent_alerts
 from app.integrations import IntegrationError, PiGateway, UnconfiguredAnalyzer, make_store
 from app.models import Category, FoundItem, Kiosk, Locker, Registration
 from app.photo_analysis import GeminiPhotoAnalyzer
-from app import services
+from app import ai_metrics, services
 
 
 def require_business_api(settings: Annotated[Settings, Depends(get_settings)]) -> None:
@@ -123,6 +124,24 @@ def list_alerts(session: DB, kiosk_id: UUID | None = None,
         services.kiosk(session, kiosk_id)
     return recent_alerts(session, kiosk_id=kiosk_id, severity=severity, since=since,
                          limit=limit, offset=offset)
+
+
+@router.get("/ai/status")
+def ai_status(settings: Config):
+    """Measured AI call latency and the limits one search runs under. Calls no provider itself."""
+    key = settings.gemini_api_key
+    return {
+        "configured": bool(key and key.get_secret_value().strip() and settings.gemini_model),
+        "limits": {
+            "call_timeout_seconds": settings.gemini_timeout_seconds,
+            "search_budget_seconds": settings.ownership_search_budget_seconds,
+            "sync_wait_seconds": settings.ownership_sync_wait_seconds,
+            "search_concurrency": settings.ownership_search_concurrency,
+            "max_concurrent_searches": settings.ownership_max_concurrent_searches,
+        },
+        "searches": search_jobs.snapshot(),
+        "recent_calls": ai_metrics.summary(),
+    }
 
 
 @router.get("/categories")

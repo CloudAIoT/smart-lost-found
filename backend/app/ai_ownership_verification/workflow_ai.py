@@ -4,11 +4,13 @@ import json
 import logging
 import unicodedata
 from collections.abc import Callable
+from time import monotonic
 from typing import Protocol
 
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from app import ai_metrics
 from app.config import GeminiSettings
 from app.errors import IntegrationError
 from .gemini import API_ROOT, MAX_RESPONSE_BYTES
@@ -109,15 +111,26 @@ def validate_search_matches(clues: dict[str, str], items: dict[int, dict[str, li
 
 
 class GeminiWorkflowAI:
-    def __init__(self, settings: GeminiSettings, client: httpx.Client):
+    def __init__(self, settings: GeminiSettings, client: httpx.Client, *, budget_seconds: float | None = None):
         self.settings = settings
         self.client = client
+        # Three stages of model fallback multiply the per-call timeout, so one search needs a
+        # deadline of its own. Without a budget the client behaves as it did before.
+        self.deadline = monotonic() + budget_seconds if budget_seconds is not None else None
+
+    def remaining_seconds(self) -> float | None:
+        return None if self.deadline is None else self.deadline - monotonic()
+
+    def _require_budget(self, last: IntegrationError | None) -> None:
+        remaining = self.remaining_seconds()
+        if remaining is not None and remaining <= 0:
+            raise last or IntegrationError("OWNERSHIP_AI_TIMEOUT")
 
     def extract(self, description: str) -> SearchClues:
         source = unicodedata.normalize("NFKC", description).casefold()
 
         def extract_with(model: str) -> SearchClues:
-            clues = self._request(model, EXTRACT, {"text": description}, SearchClues)
+            clues = self._request(model, EXTRACT, {"text": description}, SearchClues, operation="extract")
             if any(unicodedata.normalize("NFKC", clue).casefold() not in source
                    for clue in clues.model_dump(exclude_none=True).values()):
                 raise IntegrationError("OWNERSHIP_UNGROUNDED_CLUE")
@@ -133,7 +146,8 @@ class GeminiWorkflowAI:
         }
 
         def compare_with(model: str) -> list[SearchMatch]:
-            results = self._request(model, SIMILAR, payload, SimilarItems, json_schema=SIMILAR_RESPONSE_SCHEMA).results
+            results = self._request(model, SIMILAR, payload, SimilarItems,
+                                    json_schema=SIMILAR_RESPONSE_SCHEMA, operation="search").results
             if len(results) != len(items) or {result.item for result in results} != items.keys():
                 raise IntegrationError("OWNERSHIP_AI_INVALID_MATCHES")
             if any(bool(result.matched_fields) != (result.decision == "match") for result in results):
@@ -150,29 +164,33 @@ class GeminiWorkflowAI:
         payload = {"feature_type": field, "known_labels": known, "required_count": count}
 
         def generate_with(model: str) -> list[str]:
-            result = self._request(model, DISTRACT, payload, Distractors)
+            result = self._request(model, DISTRACT, payload, Distractors, operation="options")
             return validate(result.labels)
 
         return self._with_fallback("distractors", MATCHING_MODELS, generate_with)
 
-    @staticmethod
-    def _with_fallback[T](operation: str, models: tuple[str, ...], run: Callable[[str], T]) -> T:
+    def _with_fallback[T](self, operation: str, models: tuple[str, ...], run: Callable[[str], T]) -> T:
+        last: IntegrationError | None = None
         for model in models[:-1]:
+            self._require_budget(last)
             try:
                 return run(model)
             except IntegrationError as exc:
                 if exc.code not in FALLBACK_ERRORS:
                     raise
+                last = exc
                 logger.warning("Gemini %s via %s failed (%s), trying the next model", operation, model, exc.code)
+        self._require_budget(last)
         return run(models[-1])
 
     def _request[T: BaseModel](self, model: str, instruction: str, data: dict, schema: type[T], *,
-                               json_schema: dict | None = None) -> T:
+                               json_schema: dict | None = None, operation: str = "generate") -> T:
         raw = self.generate_json_text(
             [{"text": json.dumps(data, ensure_ascii=False)}],
             json_schema if json_schema is not None else schema.model_json_schema(),
             instruction=instruction,
             model=model,
+            operation=operation,
         )
         try:
             return schema.model_validate_json(raw, strict=True)
@@ -180,9 +198,23 @@ class GeminiWorkflowAI:
             raise IntegrationError("OWNERSHIP_AI_INVALID_RESPONSE") from None
 
     def generate_json_text(self, parts: list[dict], schema: dict, *, instruction: str | None = None,
-                           model: str | None = None, timeout_seconds: float | None = None) -> str:
-        key = self.settings.gemini_api_key
+                           model: str | None = None, timeout_seconds: float | None = None,
+                           operation: str = "generate") -> str:
         requested_model = model if model is not None else self.settings.gemini_model
+        started = monotonic()
+        outcome = "ok"
+        try:
+            return self._generate(parts, schema, instruction, requested_model, timeout_seconds)
+        except IntegrationError as error:
+            outcome = error.code
+            raise
+        finally:
+            ai_metrics.record(operation, requested_model or "unset",
+                              int((monotonic() - started) * 1000), outcome)
+
+    def _generate(self, parts: list[dict], schema: dict, instruction: str | None,
+                  requested_model: str | None, timeout_seconds: float | None) -> str:
+        key = self.settings.gemini_api_key
         if not key or not key.get_secret_value().strip() or not requested_model:
             raise IntegrationError("OWNERSHIP_AI_NOT_CONFIGURED")
         payload = {
@@ -195,14 +227,19 @@ class GeminiWorkflowAI:
         }
         if instruction:
             payload["systemInstruction"] = {"parts": [{"text": instruction}]}
-        if model == "gemini-4-hydrogen":
+        if requested_model == "gemini-4-hydrogen":
             payload["generationConfig"]["thinkingConfig"] = {"thinkingLevel": "LOW"}
+        timeout = timeout_seconds if timeout_seconds is not None else self.settings.gemini_timeout_seconds
+        remaining = self.remaining_seconds()
+        if remaining is not None:
+            if remaining <= 0:
+                raise IntegrationError("OWNERSHIP_AI_TIMEOUT")
+            # Never wait past the search budget, even when the provider would still answer.
+            timeout = min(timeout, remaining)
         try:
             with self.client.stream("POST", f"{API_ROOT}/{requested_model}:generateContent",
                                     json=payload, headers={"x-goog-api-key": key.get_secret_value()},
-                                    timeout=(timeout_seconds if timeout_seconds is not None
-                                             else self.settings.gemini_timeout_seconds),
-                                    follow_redirects=False) as response:
+                                    timeout=timeout, follow_redirects=False) as response:
                 if response.status_code != 200:
                     code = {401: "AUTHENTICATION_FAILED", 403: "AUTHENTICATION_FAILED", 404: "MODEL_UNAVAILABLE",
                             429: "RATE_LIMITED"}.get(response.status_code, "REQUEST_FAILED")

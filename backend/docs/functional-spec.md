@@ -1,6 +1,6 @@
 # 프론트 연동을 위한 백엔드 기능 명세
 
-기준일: 2026-11-21. `main`의 FastAPI 라우터·요청/응답 모델·서비스·테스트를 기준으로 작성한다. 소유 확인은 사진 확인 단계와 정책 `development_v4`가 반영된 현재 구현이다. 이 문서는 **현재 구현된 연동 계약**이며, 명세에 적힌 개선 항목을 구현·배포 완료로 간주하지 않는다. 과거 F01~F13의 기능 식별자는 유지하고, 이전의 “검색·소유 확인·반환 미구현” 설명을 현재 동작으로 대체한다.
+기준일: 2026-11-23. `main`의 FastAPI 라우터·요청/응답 모델·서비스·테스트를 기준으로 작성한다. 소유 확인은 사진 확인 단계와 정책 `development_v4`가 반영된 현재 구현이다. 이 문서는 **현재 구현된 연동 계약**이며, 명세에 적힌 개선 항목을 구현·배포 완료로 간주하지 않는다. 과거 F01~F13의 기능 식별자는 유지하고, 이전의 “검색·소유 확인·반환 미구현” 설명을 현재 동작으로 대체한다.
 
 - 주 독자: 웹 포털·현장 키오스크 FE 담당자.
 - API 인덱스·운영자 DB 확인: [팀 API 문서](../../docs/api.md).
@@ -62,7 +62,7 @@
 
 ### 2.3 공개 엔드포인트 전체
 
-이 표의 21개가 업무 FE와 상태 확인에 제공되는 전체 라우트다. Swagger 자체·OpenAPI 문서 경로는 제외한다.
+이 표의 24개가 업무 FE와 상태 확인에 제공되는 전체 라우트다. Swagger 자체·OpenAPI 문서 경로는 제외한다.
 
 | 메서드 | 경로 | 기능 | 성공 |
 | --- | --- | --- | --- |
@@ -72,13 +72,15 @@
 | GET | `/api/categories` | F04 등록용 카테고리 목록 | 200 |
 | GET | `/api/kiosks/{kiosk_id}/device-status` | F14 장치·칸 최신 상태 | 200 |
 | GET | `/api/alerts` | F14 장치 경고 목록 | 200 |
+| GET | `/api/ai/status` | F02-A AI 통신 상태·소요 시간 | 200 |
 | POST | `/api/registrations` | F05 등록 생성 | 201 |
 | GET | `/api/registrations/{registration_id}` | F05 등록 조회 | 200 |
 | POST | `/api/registrations/{registration_id}/shots/{shot_order}` | F06 촬영·저장 | 200 |
 | GET | `/api/registrations/{registration_id}/shots/{shot_order}/preview` | F06 미리보기 URL | 200 |
 | POST | `/api/registrations/{registration_id}/analysis` | F08 두 사진 분석 | 200 |
 | POST | `/api/registrations/{registration_id}/deposit/open` | F07 투입용 개방 | 200 |
-| POST | `/api/registrations/{registration_id}/deposit/complete` | F12 보관 완료 | 200 |
+| POST | `/api/registrations/{registration_id}/deposit/complete` | F12-A 보관 완료 | 200 |
+| POST | `/api/registrations/{registration_id}/deposit/reopen` | F12-A 투입 칸 재개방 | 200 |
 | POST | `/api/ownership/attempts` | F09 자연어 검색·소유 확인 시작 | 200 |
 | GET | `/api/ownership/attempts/{attempt_id}` | F09 현재 질문·판정 조회 | 200 |
 | POST | `/api/ownership/attempts/{attempt_id}/answers` | F09 답변 제출 | 200 |
@@ -86,7 +88,8 @@
 | POST | `/api/ownership/attempts/{attempt_id}/photo-confirmation` | F09 사진 확인 + F10 코드 발급 | 200 |
 | POST | `/api/found-items/{found_item_id}/return-code` | F10 반환 코드 발급 (보조 경로) | 201 |
 | POST | `/api/pickup/open` | F11 수령용 개방 | 200 |
-| POST | `/api/pickup/{found_item_id}/complete` | F12 수령 완료 | 200 |
+| POST | `/api/pickup/{found_item_id}/complete` | F12-B 수령 완료 | 200 |
+| POST | `/api/pickup/{found_item_id}/reopen` | F12-B 수령 칸 재개방 | 200 |
 
 ## 3. F01~F04 상태 확인·기초 데이터·키오스크 설정
 
@@ -95,6 +98,46 @@
 `GET /health`는 본문 없이 호출하고 `{"status":"ok"}`를 반환한다. DB·S3·Gemini·Pi 정상 여부를 보장하지 않는다.
 
 `GET /ready`는 DB에 간단한 조회를 실행하고 `{"status":"ready"}`를 반환한다. DB 오류일 때는 503 `{"detail":"Database unavailable"}`다. 이 응답만으로 촬영·개방 장치가 정상이라고 판단하지 않는다.
+
+### F02-A AI 통신 상태와 소요 시간
+
+`GET /api/ai/status`는 모델 호출의 실측 소요 시간과 검색 하나가 지키는 제한값을 반환한다. 이 호출은 모델 공급자에 요청을 보내지 않으므로 상태를 보려고 자주 불러도 요청 제한을 쓰지 않는다. 업무 API 설정을 따르며 비활성화 상태에서는 503 `BUSINESS_API_DISABLED`다.
+
+~~~json
+{
+  "configured": true,
+  "limits": {
+    "call_timeout_seconds": 30,
+    "search_budget_seconds": 25,
+    "sync_wait_seconds": 3,
+    "search_concurrency": 3,
+    "max_concurrent_searches": 4
+  },
+  "searches": {"accepted": 1, "running": 1, "queued": 0},
+  "recent_calls": {
+    "window_seconds": 300,
+    "calls": 3,
+    "latency_ms": {"p50": 2400, "p95": 30000, "max": 30000},
+    "outcomes": {"ok": 2, "OWNERSHIP_AI_TIMEOUT": 1},
+    "models": {"gemini-3.5-flash-lite": 1, "gemini-4-hydrogen": 2},
+    "operations": {"search": {"calls": 2, "failed": 1, "slowest_ms": 30000}}
+  }
+}
+~~~
+
+| 필드 | 의미 |
+| --- | --- |
+| `configured` | AI 키와 모델이 모두 설정되어 있는지 |
+| `limits.call_timeout_seconds` | 모델 호출 하나의 제한 시간 |
+| `limits.search_budget_seconds` | 검색 하나 전체의 예산. 넘기면 502 `OWNERSHIP_AI_TIMEOUT` |
+| `limits.sync_wait_seconds` | 검색 시작 응답이 결과를 기다리는 시간. 넘기면 `pending` |
+| `limits.search_concurrency` | 후보 비교 배치를 동시에 호출하는 수 |
+| `limits.max_concurrent_searches` | 동시에 실행하는 배경 검색 수 |
+| `searches` | 접수·실행·대기 중인 배경 검색 수 |
+| `recent_calls` | 최근 300초의 호출 수, 소요 시간 분포, 결과 코드, 모델별 호출 수, 단계별 집계 |
+| `recent_calls.operations` | 단계 이름은 `extract`(단서 추출)·`search`(후보 비교)·`options`(선택지 생성)·`photo_analysis`(사진 분석) |
+
+집계는 서버 프로세스 메모리에 최근 500건만 남으므로 재시작하면 비어 있다. 값은 관측 기록이고 장애 판정이 아니다. 프롬프트·사용자 설명·API 키는 이 응답에 넣지 않는다.
 
 ### F03 키오스크 목록
 
@@ -289,6 +332,10 @@ PC 웹캠이나 업로드 파일을 보내는 API가 아니다. 백엔드가 등
 
 성공 HTTP 상태는 검색 결과 유무와 관계없이 200이다. `AttemptView.status`를 보고 화면을 나눈다.
 
+검색은 요청 스레드에서 끝내지 않는다. 서버는 확인 시도를 먼저 저장하고 배경에서 단서 추출·후보 비교·선택지 생성을 실행한다. `sync_wait_seconds`(기본 3초) 안에 끝나면 `question`이나 검색 종료 상태가 그대로 오고, 그보다 오래 걸리면 `status`가 `pending`인 응답이 온다. `pending`을 받은 FE는 `attempt_id`로 6.3의 조회를 `retry_after_ms` 간격으로 반복한다. 두 경우 모두 HTTP 200이다.
+
+검색 하나는 `search_budget_seconds`(기본 25초) 안에 끝난다. 예산을 넘기면 남은 대체 모델을 더 시도하지 않고 502 `OWNERSHIP_AI_TIMEOUT`을 반환한다. 프록시 제한 120초에 걸려 연결이 끊기는 대신 코드가 있는 오류로 끝낸다. 동시에 실행하는 배경 검색은 `max_concurrent_searches`(기본 4)개이고 초과분은 대기하며, 대기 중에도 조회는 `pending`을 반환한다. 제한값은 [F02-A](#f02-a-ai-통신-상태와-소요-시간)에서 확인한다.
+
 ### 6.2 AttemptView 전체 형태
 
 ~~~json
@@ -324,9 +371,13 @@ PC 웹캠이나 업로드 파일을 보내는 API가 아니다. 백엔드가 등
 | `question.options` | `{id: UUID, label: string}` 배열. ID로 제출하고 label로 표시 |
 | `decision` | null 또는 `supported` / `not_confirmed`. `insufficient_evidence`는 더 이상 발급되지 않고 과거 기록도 `not_confirmed`로 읽힌다 |
 | `found_item_id` | 소유 확인 성공 시에만 물품 UUID, 나머지는 null |
+| `stage` | null 또는 `queued` / `clue_extraction` / `candidate_search` / `question_ready`. 진행 표시용이며 판정 근거가 아님 |
+| `elapsed_ms` | null 또는 검색 시작 이후 경과 시간. 끝난 검색은 걸린 시간으로 고정됨 |
+| `retry_after_ms` | `pending`일 때만 값이 있음. 다음 조회까지 기다릴 시간 |
 
 | `status` | FE 처리 |
 | --- | --- |
+| `pending` | 검색 진행 중. `attempt_id`로 `retry_after_ms` 간격 재조회. `stage`·`elapsed_ms`로 진행 표시, 중복 제출 금지 |
 | `needs_clues` | 검색 가능한 단서 부족. 설명에 종류·색상·위치 등 기억나는 정보 추가 |
 | `no_candidates` | 현재 설명에 맞는 후보 없음. 문구 수정 또는 종료 |
 | `search_limit` | 서버 전체 대상 보관 물품이 500건 초과. 서비스 제한 안내, 무한 재검색 금지 |
@@ -335,16 +386,34 @@ PC 웹캠이나 업로드 파일을 보내는 API가 아니다. 백엔드가 등
 | `completed` | `decision`에 따른 최종 화면 |
 | `refine_search` | 응답 모델에 남아 있는 예약 상태. 현재 검색 구현은 생성하지 않음. 수신 시 설명 보완 화면으로 처리 |
 
-앞의 세 검색 종료 상태는 확인 시도를 만들지 않으므로 다른 필드는 null이다. 예:
+검색이 아직 진행 중인 응답 예:
+
+~~~json
+{
+  "status": "pending",
+  "attempt_id": "55555555-5555-4555-8555-555555555555",
+  "initial_candidate_count": null,
+  "question": null,
+  "decision": null,
+  "found_item_id": null,
+  "stage": "clue_extraction",
+  "elapsed_ms": 58,
+  "retry_after_ms": 700
+}
+~~~
+
+`needs_clues`·`no_candidates`·`search_limit`은 판정을 만들지 않는다. 같은 결과를 조회로 다시 읽을 수 있도록 확인 시도 자체는 저장되므로 `attempt_id`에는 값이 있고, 질문·판정 필드는 null이다. 예:
 
 ~~~json
 {
   "status": "no_candidates",
-  "attempt_id": null,
+  "attempt_id": "55555555-5555-4555-8555-555555555555",
   "initial_candidate_count": null,
   "question": null,
   "decision": null,
-  "found_item_id": null
+  "found_item_id": null,
+  "stage": "candidate_search",
+  "elapsed_ms": 4120
 }
 ~~~
 
@@ -353,6 +422,8 @@ PC 웹캠이나 업로드 파일을 보내는 API가 아니다. 백엔드가 등
 ### 6.3 현재 상태 조회와 답변 제출
 
 `GET /api/ownership/attempts/{attempt_id}`는 본문 없이 200 `AttemptView`를 반환한다. AI를 다시 실행하지 않고 저장된 현재 질문/판정을 읽는다. 404 `OWNERSHIP_ATTEMPT_NOT_FOUND`, 410 `OWNERSHIP_ATTEMPT_EXPIRED`, 409 `OWNERSHIP_ATTEMPT_RESTART_REQUIRED`를 처리한다.
+
+이 조회가 진행 중인 검색의 폴링 경로다. `pending`이면 `retry_after_ms`만큼 기다렸다가 같은 요청을 반복하고, 사용자에게는 `elapsed_ms`로 경과 시간을 보여 준다. 조회는 모델을 호출하지 않으므로 반복해도 요청 제한을 늘리지 않는다. 검색이 실패로 끝났으면 조회도 시작 요청과 같은 502 코드를 반환하므로, 같은 오류 처리를 쓴다. 서버가 재시작되면 진행 중이던 검색은 이어지지 않고, 예산 시각이 지난 뒤 조회에서 502 `OWNERSHIP_AI_TIMEOUT`이 된다.
 
 확인 시도의 유효기간은 생성 후 20분이며 답변마다 연장되지 않는다. 응답에 `expires_at`은 없으므로 서버의 410을 기준으로 다시 시작한다.
 
@@ -707,7 +778,8 @@ HTTP 200의 `no_candidates`/`completed/not_confirmed`는 네트워크 오류가 
 | 502 | `COMMAND_EXPIRED`, `INVALID_COMMAND`, `UNAUTHORIZED`, `LOCKER_NOT_FOUND`, `DEVICE_BUSY`, `CAMERA_ERROR`, `LOCK_ERROR` | Pi가 반환한 명령·인증·장치 오류. `UNAUTHORIZED`는 사용자 로그인 오류가 아님 |
 | 502 | `IMAGE_STORAGE_FAILED`, `INVALID_IMAGE`, `INVALID_ANALYSIS_RESULT` | 이미지 저장·읽기·검증 실패 |
 | 502 | `INVALID_MODEL_OUTPUT`, `INSUFFICIENT_VISUAL_FEATURES`, `IMAGE_TOO_LARGE`, `IMAGE_LOW_QUALITY`, `INVALID_CATEGORY`, `INVALID_ITEM_ID`, `INVALID_IMAGE_COUNT`, `DUPLICATE_IMAGE_ID` | 이미지 준비·모델 결과 검사 오류. 내부 모듈의 413/422를 이 업무 API의 HTTP 상태로 가정하지 않음 |
-| 502 | `OWNERSHIP_AI_TIMEOUT`, `OWNERSHIP_AI_UNREACHABLE`, `OWNERSHIP_AI_REQUEST_FAILED` | 모델 호출 실패 |
+| 502 | `OWNERSHIP_AI_TIMEOUT`, `OWNERSHIP_AI_UNREACHABLE`, `OWNERSHIP_AI_REQUEST_FAILED` | 모델 호출 실패. `OWNERSHIP_AI_TIMEOUT`은 검색 예산 초과와 중단된 배경 검색에도 쓰인다 |
+| 502 | `OWNERSHIP_SEARCH_FAILED` | 배경 검색 작업이 모델 오류 밖의 이유로 끝남. 새 검색 시작 |
 | 502 | `OWNERSHIP_AI_RATE_LIMITED`, `OWNERSHIP_AI_AUTHENTICATION_FAILED`, `OWNERSHIP_AI_MODEL_UNAVAILABLE` | 모델 공급자 요청 제한·인증·모델 설정 오류 |
 | 502 | `OWNERSHIP_AI_RESPONSE_TOO_LARGE`, `OWNERSHIP_AI_INVALID_RESPONSE`, `OWNERSHIP_AI_INVALID_OPTIONS`, `OWNERSHIP_AI_INVALID_MATCHES`, `OWNERSHIP_UNGROUNDED_CLUE` | AI 응답 형식·선택지·검색 결과·단서 검증 실패 |
 
@@ -722,7 +794,7 @@ HTTP 200의 `no_candidates`/`completed/not_confirmed`는 네트워크 오류가 
 | 분석 | `ready/succeeded`일 때만 캐시 응답. 실패는 상태 조회 후 사용자 재시도 |
 | 투입 개방 | 이미 개방/보관 완료면 재개방 안 함. `blocked`는 운영 확인 |
 | 보관·수령 완료 | 완료된 같은 건은 기존 결과 반환 |
-| 소유 확인 시작 | 새 확인 시도 생성. 중복 제출 방지 |
+| 소유 확인 시작 | 새 확인 시도 생성. 중복 제출 방지. `pending` 중 같은 설명을 다시 보내면 검색이 하나 더 생기므로 조회로 기다린다 |
 | 답변 제출 | 중복 답변은 현재 질문 오류가 될 수 있음. GET 후 현재 질문 기준으로 처리 |
 | 사진 확인 제출 | 승인 응답에 코드가 포함됨. 중복 제출은 발급 완료 오류. 자동 재전송 금지 |
 | 반환 코드 발급 | 동일 시도 재발급 불가. 유실된 평문 조회 API 없음 |

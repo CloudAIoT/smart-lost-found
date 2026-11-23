@@ -63,6 +63,7 @@ class GeminiPhotoAnalyzer:
                     try:
                         raw = self.gemini.generate_json_text(
                             parts, prepared.response_schema, model=model, timeout_seconds=remaining,
+                            operation="photo_analysis",
                         )
                         result = parse_item_output(prepared, raw)
                         break

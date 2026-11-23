@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.db import engine, get_session
 from app.api import router
+from app.ai_ownership_verification import search_jobs
 from app.ai_ownership_verification.api import router as ownership_router
 from app.errors import BusinessError, IntegrationError
 from app.mqtt_listener import make_listener
@@ -40,6 +41,8 @@ async def lifespan(app: FastAPI):
     finally:
         if listener is not None:
             await run_in_threadpool(listener.stop)
+        # Background searches hold DB sessions, so they stop before the engine goes away.
+        await run_in_threadpool(search_jobs.shutdown)
         await run_in_threadpool(engine.dispose)
 
 

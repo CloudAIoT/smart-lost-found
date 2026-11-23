@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.errors import BusinessError, IntegrationError
 from app.models import FoundItem, ItemImage, OwnershipAttempt, now
 from .search import PROOF_FIELDS, UNKNOWN, find_candidates, normalized, read_facts, stored_items
+from .structure_questions import POSITIONS, part_position, structure_positions
 from .workflow_ai import WorkflowAI
 from .workflow_schemas import (
     AnswerRequest, AttemptState, AttemptView, Candidate, Choice, Evidence, FieldName, OptionView,
@@ -21,12 +22,11 @@ from .workflow_schemas import (
 
 MAX_WRONG_GROUPS = 2
 OPTION_COUNT = 5
-POLICY_VERSION = "development_v4"
+POLICY_VERSION = "development_v5"
 ATTEMPT_TTL = timedelta(minutes=20)
 PROMPTS = {
     "distinctive_features": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
     "visible_text": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
-    "structure": "기억하는 물건의 구성이나 부품을 골라 주세요.",
     "shape": "기억하는 물건의 형태를 골라 주세요.",
     "surface_texture": "기억하는 물건의 표면 질감을 골라 주세요.",
     "material": "기억하는 물건의 재질을 골라 주세요.",
@@ -35,7 +35,11 @@ PROMPTS = {
 }
 
 
-def question_values(candidate: Candidate, field: FieldName) -> tuple[Evidence | None, list[str]]:
+def question_values(candidate: Candidate, field: FieldName,
+                    structure_part: str | None = None) -> tuple[Evidence | None, list[str]]:
+    if structure_part is not None:
+        position = structure_positions(candidate).get(structure_part)
+        return (position[0], [position[1]]) if position else (None, [])
     evidence = next((ev for ev in candidate.proof if ev.field == field), None)
     return evidence, [evidence.value] if evidence else candidate.narrowing.get(field, [])
 
@@ -79,9 +83,12 @@ def finish_questions(session: Session, state: AttemptState) -> None:
         return
 
     candidate = state.candidates[0]
-    required_fields = {evidence.field for evidence in candidate.proof}
+    required_fields = set()
+    for evidence in candidate.proof:
+        position = part_position(evidence.value) if evidence.field == "structure" else None
+        required_fields.add((evidence.field, position[0] if position else None))
     answered_fields = {
-        answer.field for answer in state.answers if answer.purpose == "verification"
+        (answer.field, answer.structure_part) for answer in state.answers if answer.purpose == "verification"
         and (candidate.item_id in answer.matched_item_ids or candidate.item_id in answer.conflicting_item_ids)
     }
     if not required_fields <= answered_fields:
@@ -104,15 +111,24 @@ def advance(session: Session, state: AttemptState, ai: WorkflowAI) -> None:
         state.decision = "not_confirmed"
         state.failure_reason = state.failure_reason or "candidates_eliminated"
         return
-    used_fields = set(state.mentioned_fields) | {answer.field for answer in state.answers}
-    choices = []
+    used_questions = {(answer.field, answer.structure_part) for answer in state.answers}
+    questions: dict[tuple[FieldName, str | None], list[tuple[Evidence | None, list[str]]]] = {}
     for field in PROOF_FIELDS:
-        if field in used_fields:
+        if field in state.mentioned_fields or (field, None) in used_questions:
             continue
+        if field != "structure":
+            questions[field, None] = [question_values(candidate, field) for candidate in state.candidates]
+            continue
+        for candidate in state.candidates:
+            for part, (evidence, position) in structure_positions(candidate).items():
+                if (field, part) not in used_questions:
+                    questions.setdefault((field, part), []).append((evidence, [position]))
+
+    choices = []
+    for (field, part), candidate_values in questions.items():
         labels, counts, coverage = {}, Counter(), 0
         verification = False
-        for candidate in state.candidates:
-            evidence, values = question_values(candidate, field)
+        for evidence, values in candidate_values:
             if not values:
                 continue
             coverage += 1
@@ -126,21 +142,27 @@ def advance(session: Session, state: AttemptState, ai: WorkflowAI) -> None:
             continue
         # With missing values retained, prefer the question that reduces the largest answer group most.
         split = coverage - max(counts.values())
-        choices.append(((split, coverage, verification), field, labels))
+        choices.append(((split, coverage, verification), field, part, labels))
     if not choices:
         finish_questions(session, state)
         return
 
-    rank, field, labels = max(choices, key=lambda entry: entry[0])
+    rank, field, part, labels = max(choices, key=lambda entry: entry[0])
     verification = rank[2]
-    if len(labels) < OPTION_COUNT:
+    if part is not None:
+        question_text = f"{part}의 위치는 어디에 가장 가까웠나요?"
+        labels = {normalized(field, position): position for position in POSITIONS}
+    else:
+        question_text = PROMPTS[field]
+    if part is None and len(labels) < OPTION_COUNT:
         alternatives = ai.distractors(field, list(labels.values()), OPTION_COUNT - len(labels),
                                       validate=partial(select_distractors, field, labels, state.candidates))
         labels.update((normalized(field, label), label) for label in alternatives)
     options = [Choice(id=uuid4(), label=label, value=value) for value, label in labels.items()]
     SystemRandom().shuffle(options)
-    state.current = Question(id=uuid4(), field=field, purpose="verification" if verification else "narrowing",
-                             text=PROMPTS[field], options=options)
+    state.current = Question(id=uuid4(), field=field, structure_part=part,
+                             purpose="verification" if verification else "narrowing",
+                             text=question_text, options=options)
 
 
 def start(session: Session, description: str, ai: WorkflowAI) -> AttemptView:
@@ -241,7 +263,7 @@ def record_answer(state: AttemptState, answer: AnswerRequest) -> None:
     survivors, matched, conflicting = [], [], []
     reached_wrong_limit = False
     for candidate in state.candidates:
-        evidence, expected = question_values(candidate, question.field)
+        evidence, expected = question_values(candidate, question.field, question.structure_part)
         if choice.value is None or not expected:
             survivors.append(candidate)
         elif any(normalized(question.field, label) == choice.value for label in expected):
@@ -264,7 +286,7 @@ def record_answer(state: AttemptState, answer: AnswerRequest) -> None:
     if not survivors and reached_wrong_limit:
         state.failure_reason = "wrong_evidence_limit"
     state.answers.append(RecordedAnswer(question_id=question.id, field=question.field, option_id=choice.id,
-                                        purpose=question.purpose,
+                                        purpose=question.purpose, structure_part=question.structure_part,
                                         outcome="unknown" if choice.value is None else "answered",
                                         matched_item_ids=matched, conflicting_item_ids=conflicting))
 

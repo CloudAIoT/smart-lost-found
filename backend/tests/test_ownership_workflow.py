@@ -52,7 +52,6 @@ class FakeAI:
             "visible_text": ["ZX", "TS", "B-9", "VV"],
             "material": ["종이", "금속", "고무", "유리"],
             "shape": ["삼각기둥형", "반원형", "육각기둥형", "타원형"],
-            "structure": ["앞 주머니", "손잡이 고리", "뒷면 똑딱이", "가운데 칸막이"],
             "brand": ["Dickies", "Eastpak", "Muji", "Nike"],
             "color": ["red", "yellow", "white", "green"],
         }[field]
@@ -233,6 +232,62 @@ def test_single_candidate_is_asked_about_remaining_shape(ownership):
     assert result_for(ownership, pending) is None
 
 
+@pytest.mark.parametrize("include_unknown", [False, True])
+def test_structure_location_question_only_compares_the_same_part(ownership, include_unknown):
+    ownership.ai.clues = SearchClues(category="마우스")
+    with Session(ownership.engine) as session:
+        first = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
+        second = session.get(Registration, session.get(FoundItem, ownership.second).registration_id)
+        first.analysis_features = {"category": "마우스", "structure": ["마우스 휠이 가운데 있음", "좌우 클릭 버튼이 있음"]}
+        second.analysis_features = {"category": "마우스", "structure": ["스크롤 휠이 좌측에 있음"]}
+        expected = {str(ownership.first)}
+        if include_unknown:
+            kiosk = session.get(Kiosk, first.kiosk_id)
+            unknown_id = add_item(session, kiosk, number=4, decoration="테스트", mark="테스트")
+            unknown = session.get(Registration, session.get(FoundItem, unknown_id).registration_id)
+            unknown.analysis_features = {"category": "마우스", "structure": [
+                "좌우 클릭 버튼이 있음", "가운데 있음", "가운데에 버튼 없음",
+                "스크롤 휠이 왼쪽에 있음", "스크롤 휠이 오른쪽에 있음",
+            ]}
+            expected.add(str(unknown_id))
+        session.commit()
+
+    attempt = begin(ownership, "마우스를 잃어버렸어요.")
+    assert attempt["question"]["text"] == "스크롤 휠의 위치는 어디에 가장 가까웠나요?"
+    labels = [option["label"] for option in attempt["question"]["options"]]
+    assert len(labels) == 5 and set(labels) == {"가운데", "왼쪽", "오른쪽", "앞쪽", "뒤쪽"}
+    response = submit(ownership, attempt, "가운데")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == ("completed" if include_unknown else "photo_confirmation")
+    with Session(ownership.engine) as session:
+        row = session.get(OwnershipAttempt, UUID(attempt["attempt_id"]))
+        assert {candidate["item_id"] for candidate in row.state["candidates"]} == expected
+        assert row.state["answers"][0]["conflicting_item_ids"] == [str(ownership.second)]
+    assert not any(call[0] == "distractors" for call in ownership.ai.calls)
+
+
+def test_single_candidate_can_continue_after_one_wrong_private_part_location(ownership):
+    ownership.ai.clues = SearchClues(category="마우스")
+    with Session(ownership.engine) as session:
+        first = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
+        wheel = "스크롤 휠 정중앙"
+        first.analysis_features = {
+            "data": {"category": "마우스", "structure": [wheel, "뒤쪽에 감도 버튼이 있음"]},
+            "ownership_evidence": [{
+                "feature_id": "wheel", "field": "structure", "value": wheel, "group": "wheel",
+                "visibility": "private", "verified": True, "distinguishing": True,
+            }],
+        }
+        session.commit()
+
+    attempt = begin(ownership, "마우스를 잃어버렸어요.")
+    assert attempt["initial_candidate_count"] == 1
+    assert "스크롤 휠" in attempt["question"]["text"]
+    next_question = submit(ownership, attempt, "오른쪽").json()
+    assert "감도 버튼" in next_question["question"]["text"]
+    assert submit(ownership, next_question, "뒤쪽").json()["status"] == "photo_confirmation"
+
+
 def test_hands_off_only_after_photo_confirmation(ownership):
     first = begin(ownership)
     assert first["initial_candidate_count"] == 2
@@ -262,7 +317,7 @@ def test_hands_off_only_after_photo_confirmation(ownership):
     assert result.failure_reason is None
     assert result.matched_evidence_groups == 2
     assert result.answered_questions == 2
-    assert result.policy_version == "development_v4"
+    assert result.policy_version == "development_v5"
 
 
 def test_verified_attempt_issues_one_otp_for_the_matched_item(ownership):

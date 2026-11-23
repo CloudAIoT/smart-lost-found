@@ -1,6 +1,7 @@
 """Connect registration photos to the shared image processing contract."""
 
 from base64 import b64encode
+from collections.abc import Callable
 from io import BytesIO
 import logging
 from time import monotonic
@@ -29,14 +30,18 @@ RETRYABLE_OUTPUT_ERRORS = frozenset({"INVALID_MODEL_OUTPUT", "INSUFFICIENT_VISUA
 
 
 class GeminiPhotoAnalyzer:
-    def __init__(self, gemini: GeminiWorkflowAI, category: str | None):
+    def __init__(self, gemini: GeminiWorkflowAI, category: str | None,
+                 *, on_stage: Callable[..., None] | None = None):
         self.gemini = gemini
         self.category = category
+        # Reported so a polling client can say which step is running and which model attempt.
+        self.on_stage = on_stage or (lambda stage, attempt=0: None)
 
     def analyze(self, registration_id: UUID, images: tuple[AnalysisInput, AnalysisInput]) -> AnalysisResult:
         from imageprocess import ImageInput, ServiceError, parse_item_output, prepare_item
         from imageprocess.app.core.config import Settings
 
+        self.on_stage("preparing")
         try:
             prepared = prepare_item(
                 registration_id, tuple(ImageInput(image.image_id, image.jpeg) for image in images),
@@ -61,6 +66,7 @@ class GeminiPhotoAnalyzer:
                         raise last_error
                     last = index == len(models) - 1
                     try:
+                        self.on_stage("inferring", index + 1)
                         raw = self.gemini.generate_json_text(
                             parts, prepared.response_schema, model=model, timeout_seconds=remaining,
                             operation="photo_analysis",
@@ -79,6 +85,7 @@ class GeminiPhotoAnalyzer:
                             raise
                         logger.warning("Gemini photo analysis via %s returned unusable output (%s), "
                                        "trying the next model", model, error.code)
+                self.on_stage("verifying")
             finally:
                 for photo in prepared.images:
                     photo.close()

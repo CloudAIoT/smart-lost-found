@@ -42,6 +42,12 @@ Swagger 주소는 `http://52.78.12.168/docs`다. 업무 API는 GitHub production
 | Variable | GEMINI_MODEL | 키오스크 등록 사진 분석에 사용할 Gemini 모델 이름 |
 | Variable | DEV_FAKE_DEVICE | true: Pi 대신 개발용 가짜 장치 사용. 값이 없거나 false면 실제 Pi를 호출한다 |
 | Variable | IMAGE_ANALYSIS_TIMEOUT_SECONDS | 사진 2장 분석 대기 시간. 기본 90초, 허용 5~90초. 소유 확인 텍스트 요청의 대기 시간과 별도 |
+| Variable | OWNERSHIP_SEARCH_BUDGET_SECONDS | 소유 확인 검색 하나의 전체 예산. 기본 25초, 허용 5~110초. nginx 대기 120초보다 작아야 한다 |
+| Variable | OWNERSHIP_SYNC_WAIT_SECONDS | 검색 시작 응답이 결과를 기다리는 시간. 기본 3초, 허용 0~30초. 넘기면 `pending`을 반환한다 |
+| Variable | OWNERSHIP_SEARCH_CONCURRENCY | 후보 비교 배치를 동시에 호출하는 수. 기본 3, 허용 1~10 |
+| Variable | OWNERSHIP_MAX_CONCURRENT_SEARCHES | 동시에 실행하는 배경 검색 수. 기본 4, 허용 1~16 |
+| Variable | ANALYSIS_SYNC_WAIT_SECONDS | 분석 시작 응답이 결과를 기다리는 시간. 기본 3초, 허용 0~30초. 넘기면 `running`을 반환한다 |
+| Variable | MAX_CONCURRENT_ANALYSES | 동시에 실행하는 배경 분석 수. 기본 2, 허용 1~8. 작업자마다 사진 2장을 메모리에 올린다 |
 | Variable | MQTT_HOST | 장치 상태 구독 대상. Compose에서는 `mqtt`. 비우면 구독을 시작하지 않는다 |
 | Variable | MQTT_PORT | 기본 1883 |
 | Variable | MQTT_USERNAME | 백엔드용 브로커 계정. ACL에서 읽기 전용이다 |

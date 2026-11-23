@@ -9,9 +9,10 @@ from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api import ReturnCodeView, Store, issue_ownership_return_code, require_business_api
+from app.api import (ReturnCodeView, Store, get_session_factory, issue_ownership_return_code,
+                     require_business_api)
 from app.config import Settings, get_settings
-from app.db import SessionLocal, get_session
+from app.db import get_session
 from . import search_jobs, workflow
 from .workflow_ai import GeminiWorkflowAI, WorkflowAI
 from .workflow_schemas import AnswerRequest, AttemptView, PhotoConfirmationRequest, SearchRequest
@@ -29,11 +30,6 @@ def get_ownership_ai(settings: Config) -> Iterator[WorkflowAI]:
 
 def get_search_ai(settings: Config) -> search_jobs.AiFactory:
     return search_jobs.gemini_factory(settings)
-
-
-def get_session_factory() -> search_jobs.SessionFactory:
-    # The background search cannot borrow the request session: it outlives the response.
-    return SessionLocal
 
 
 AI = Annotated[WorkflowAI, Depends(get_ownership_ai)]

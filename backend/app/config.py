@@ -33,6 +33,10 @@ class Settings(GeminiSettings):
     ownership_sync_wait_seconds: float = Field(default=3, ge=0, le=30)
     ownership_search_concurrency: int = Field(default=3, ge=1, le=10)
     ownership_max_concurrent_searches: int = Field(default=4, ge=1, le=16)
+    # Photo analysis runs off the request thread the same way, with image_analysis_timeout_seconds
+    # as its budget. Two decoded photos per worker, so this limit stays well below the search one.
+    analysis_sync_wait_seconds: float = Field(default=3, ge=0, le=30)
+    max_concurrent_analyses: int = Field(default=2, ge=1, le=8)
     postgres_db: str
     postgres_user: str
     postgres_password: SecretStr

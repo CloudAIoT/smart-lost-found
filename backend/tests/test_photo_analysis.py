@@ -78,3 +78,25 @@ def test_analyzer_retries_only_recoverable_provider_failures(status, expected_ca
     assert len(calls) == expected_calls
     expected_models = ("configured-model", *PHOTO_ANALYSIS_FALLBACK_MODELS)[:expected_calls]
     assert calls == [f"/v1beta/models/{model}:generateContent" for model in expected_models]
+
+
+def test_analyzer_reports_each_stage_and_model_attempt():
+    stages = []
+    features = {
+        "category": "필통", "color": ["빨강"], "shape": "직사각형", "surface_texture": "직조 표면",
+        "brand": None, "visible_text": None, "structure": None, "distinctive_features": None,
+    }
+    replies = [httpx.Response(503, json={"error": {"message": "unavailable"}}),
+               httpx.Response(200, json={"candidates": [{
+                   "finishReason": "STOP", "content": {"parts": [{"text": json.dumps(features)}]}}]})]
+
+    def respond(request):
+        return replies.pop(0)
+
+    settings = GeminiSettings(_env_file=None, gemini_api_key="test-key", gemini_model="test-model")
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        analyzer = GeminiPhotoAnalyzer(GeminiWorkflowAI(settings, client), "필통",
+                                       on_stage=lambda stage, attempt=0: stages.append((stage, attempt)))
+        analyzer.analyze(uuid4(), sample_photos())
+    # The attempt number is what tells a waiting user a retry is under way, not a stall.
+    assert stages == [("preparing", 0), ("inferring", 1), ("inferring", 2), ("verifying", 0)]

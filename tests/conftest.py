@@ -203,7 +203,9 @@ def kiosk(tmp_path):
     from sqlalchemy.orm import Session
     from sqlalchemy.pool import StaticPool
 
-    from app.api import get_analyzer, get_gateway, get_store
+    from contextlib import nullcontext
+
+    from app.api import get_analyzer_factory, get_gateway, get_session_factory, get_store
     from app.config import Settings, get_settings
     from app.db import Base, get_session
     from app.main import app
@@ -274,8 +276,11 @@ def kiosk(tmp_path):
                 yield session
 
         # get_gateway는 덮지 않는다. 실제 PiGateway가 실제 HTTP로 Pi를 호출해야 한다.
-        app.dependency_overrides.update({get_session: sessions, get_store: lambda: store,
-                                         get_analyzer: lambda: analyzer, get_settings: lambda: settings})
+        app.dependency_overrides.update({
+            get_session: sessions, get_store: lambda: store, get_settings: lambda: settings,
+            # 사진 분석은 배경 작업이므로 분석기와 세션을 요청 밖에서도 만들 수 있어야 한다.
+            get_analyzer_factory: lambda: (lambda category, on_stage: nullcontext(analyzer)),
+            get_session_factory: lambda: (lambda: Session(engine))})
         try:
             with TestClient(app) as client:
                 yield SimpleNamespace(client=client, engine=engine, settings=settings, store=store,

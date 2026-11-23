@@ -102,20 +102,91 @@ def capture(session: Session, registration_id: UUID, shot: int, gateway: DeviceG
     return value
 
 
-def analyze(session: Session, registration_id: UUID, analyzer: FeatureAnalyzer, store: ImageStore) -> Registration:
+# A worker may overshoot the analysis deadline slightly before it writes the outcome.
+ANALYSIS_GRACE = timedelta(seconds=10)
+
+
+def analysis_moment(progress: dict | None, field: str) -> datetime | None:
+    moment = (progress or {}).get(field)
+    if not isinstance(moment, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(moment)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def analysis_elapsed_ms(progress: dict | None) -> int | None:
+    started = analysis_moment(progress, "started_at")
+    if started is None:
+        return None
+    finished = analysis_moment(progress, "finished_at") or now()
+    return max(0, int((finished - started).total_seconds() * 1000))
+
+
+def expire_stale_analysis(session: Session, registration_id: UUID) -> None:
+    """Release a registration whose analysis worker never finished, so the user can retry.
+
+    A missing deadline means the row predates recorded progress, and a synchronous analysis cannot
+    outlive the process that served it. Either way no worker is coming, and leaving the row in
+    `analyzing/running` blocks the registration until it expires out of the flow entirely.
+    """
+    reg = session.get(Registration, registration_id)
+    if reg is None or reg.analysis_status != "running":
+        return
+    deadline = analysis_moment(reg.analysis_progress, "deadline_at")
+    if deadline is not None and deadline > now():
+        return
+    fail_analysis(session, reg, "ANALYSIS_TIMED_OUT")
+
+
+def fail_analysis(session: Session, reg: Registration, code: str) -> None:
+    reg.analysis_status = "failed"
+    reg.status = "draft"
+    reg.analysis_features = None
+    reg.analysis_progress = {**(reg.analysis_progress or {}), "stage": "failed",
+                             "error_code": code, "finished_at": now().isoformat()}
+    session.commit()
+
+
+def record_analysis_stage(session: Session, reg: Registration, stage: str, attempt: int = 0) -> None:
+    """Store the current stage so a polling client can say what the server is doing."""
+    reg.analysis_progress = {**(reg.analysis_progress or {}), "stage": stage, "attempt": attempt}
+    session.commit()
+
+
+def start_analysis(session: Session, registration_id: UUID, budget_seconds: float) -> Registration | None:
+    """Claim the registration for analysis. None means a stored success already answers the call."""
+    expire_stale_analysis(session, registration_id)
     reg = registration(session, registration_id)
     if reg.status == "ready" and reg.analysis_status == "succeeded":
-        return reg
+        return None
     reg = claim(session, registration_id, ("draft",), "analyzing")
     current = images(session, registration_id)
     if [image.shot_order for image in current] != [1, 2]:
         session.rollback()
         raise BusinessError("TWO_IMAGES_REQUIRED")
+    started = now()
+    reg.analysis_status = "running"
+    reg.analysis_input_image_ids = [str(image.id) for image in current]
+    reg.analysis_features = None
+    reg.analysis_progress = {
+        "stage": "queued", "attempt": 0, "started_at": started.isoformat(),
+        "deadline_at": (started + timedelta(seconds=budget_seconds) + ANALYSIS_GRACE).isoformat(),
+        "error_code": None,
+    }
+    session.commit()
+    return reg
+
+
+def run_analysis(session: Session, registration_id: UUID, analyzer: FeatureAnalyzer,
+                 store: ImageStore) -> Registration:
+    """Analyze a claimed registration. The caller owns the claim; this owns the outcome."""
+    reg = registration(session, registration_id)
+    current = images(session, registration_id)
     ids = tuple(image.id for image in current)
     keys = [image.object_key for image in current]
-    reg.analysis_status = "running"
-    reg.analysis_input_image_ids = [str(value) for value in ids]
-    session.commit()
     try:
         inputs = tuple(AnalysisInput(image_id=value, jpeg=store.read(key)) for value, key in zip(ids, keys))
         result = analyzer.analyze(registration_id, inputs)
@@ -128,15 +199,14 @@ def analyze(session: Session, registration_id: UUID, analyzer: FeatureAnalyzer, 
             json.dumps(result.features, allow_nan=False)
         except (ValueError, TypeError, RecursionError):
             raise IntegrationError("INVALID_ANALYSIS_RESULT") from None
-    except IntegrationError:
-        reg.analysis_status = "failed"
-        reg.status = "draft"
-        reg.analysis_features = None
-        session.commit()
+    except IntegrationError as error:
+        fail_analysis(session, reg, error.code)
         raise
     reg.analysis_features = result.features
     reg.analysis_status = "succeeded"
     reg.status = "ready"
+    reg.analysis_progress = {**(reg.analysis_progress or {}), "stage": "succeeded",
+                             "error_code": None, "finished_at": now().isoformat()}
     session.commit()
     return reg
 

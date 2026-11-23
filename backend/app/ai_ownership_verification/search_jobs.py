@@ -9,15 +9,14 @@ polls the attempt. The short wait below keeps the common fast search on the imme
 
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import AbstractContextManager, contextmanager
 import logging
-from threading import Lock
 from uuid import UUID, uuid4
 
 import httpx
 from sqlalchemy.orm import Session
 
+from app import ai_jobs
 from app.config import Settings
 from app.db import SessionLocal
 from . import workflow
@@ -29,12 +28,6 @@ logger = logging.getLogger(__name__)
 
 AiFactory = Callable[[], AbstractContextManager[WorkflowAI]]
 SessionFactory = Callable[[], AbstractContextManager[Session]]
-
-_executor: ThreadPoolExecutor | None = None
-_executor_lock = Lock()
-_counts_lock = Lock()
-_accepted = 0
-_running = 0
 
 
 def gemini_factory(settings: Settings) -> AiFactory:
@@ -50,43 +43,11 @@ def gemini_factory(settings: Settings) -> AiFactory:
 
 
 def shared_executor(max_workers: int) -> ThreadPoolExecutor:
-    """One pool per process. Its size caps concurrent provider calls and worker DB sessions."""
-    global _executor
-    with _executor_lock:
-        if _executor is None:
-            _executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ownership-search")
-        return _executor
-
-
-def shutdown() -> None:
-    global _executor
-    with _executor_lock:
-        if _executor is not None:
-            _executor.shutdown(wait=False, cancel_futures=True)
-            _executor = None
+    return ai_jobs.pool(ai_jobs.SEARCH, max_workers)
 
 
 def snapshot() -> dict[str, int]:
-    with _counts_lock:
-        return {"accepted": _accepted, "running": _running, "queued": max(0, _accepted - _running)}
-
-
-@contextmanager
-def _running_job() -> Iterator[None]:
-    global _running
-    with _counts_lock:
-        _running += 1
-    try:
-        yield
-    finally:
-        with _counts_lock:
-            _running -= 1
-
-
-def _accept(delta: int) -> None:
-    global _accepted
-    with _counts_lock:
-        _accepted += delta
+    return ai_jobs.snapshot(ai_jobs.SEARCH)
 
 
 class SearchJobs:
@@ -107,27 +68,12 @@ class SearchJobs:
             return workflow.get_view(session, attempt_id)
 
     def _dispatch(self, attempt_id: UUID, description: str) -> None:
-        if self.executor is None:
-            self._run(attempt_id, description)
-            return
-        _accept(1)
-        try:
-            future = self.executor.submit(self._run, attempt_id, description)
-        except RuntimeError:
-            # The pool is shutting down; finishing on this thread still answers the caller.
-            _accept(-1)
-            self._run(attempt_id, description)
-            return
-        future.add_done_callback(lambda _: _accept(-1))
-        try:
-            future.result(timeout=self.settings.ownership_sync_wait_seconds)
-        except FutureTimeout:
-            pass  # Still running: the caller polls the attempt from here on.
-        except Exception:
-            pass  # _run stored the outcome; the view below reports it.
+        # The stored attempt carries every outcome, so a failure needs no exception here.
+        ai_jobs.dispatch(ai_jobs.SEARCH, self.executor, lambda: self._run(attempt_id, description),
+                         wait_seconds=self.settings.ownership_sync_wait_seconds, reraise=False)
 
     def _run(self, attempt_id: UUID, description: str) -> None:
-        with _running_job():
+        with ai_jobs.running(ai_jobs.SEARCH):
             try:
                 with self.ai_factory() as ai, self.session_factory() as session:
                     workflow.run_search(session, attempt_id, description, ai,

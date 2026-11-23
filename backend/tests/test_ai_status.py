@@ -32,14 +32,17 @@ def client():
         ai_metrics.clear()
 
 
-def test_status_reports_the_limits_one_search_runs_under(client):
+def test_status_reports_the_limits_one_job_runs_under(client):
     body = client.get("/api/ai/status").json()
     assert body["configured"] is True
     assert body["limits"] == {
         "call_timeout_seconds": 30, "search_budget_seconds": 25, "sync_wait_seconds": 3,
         "search_concurrency": 3, "max_concurrent_searches": 4,
+        "analysis_timeout_seconds": 90, "analysis_sync_wait_seconds": 3,
+        "max_concurrent_analyses": 2,
     }
     assert body["searches"] == {"accepted": 0, "running": 0, "queued": 0}
+    assert body["analyses"] == {"accepted": 0, "running": 0, "queued": 0}
     assert body["recent_calls"]["calls"] == 0 and body["recent_calls"]["latency_ms"] is None
 
 

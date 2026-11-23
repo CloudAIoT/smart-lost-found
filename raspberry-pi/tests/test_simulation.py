@@ -16,8 +16,16 @@ def pub():
 @pytest.fixture
 def sim(pub):
     # 문이 저절로 닫히지 않게 길게 두고, 무게 확인은 문이 닫히자마자 한다
+    # 손으로 넣고 빼는 경우를 보려고 자동 모드는 끈다
     lockers = FakeLockers(count=2, open_seconds=60)
-    settings = make_settings("locker", simulation=True, door_settle_seconds=0)
+    settings = make_settings("locker", simulation=True, simulation_auto=False, door_settle_seconds=0)
+    return TestClient(create_app(settings, lockers=lockers, publisher=pub, scheduler=ManualScheduler()))
+
+
+@pytest.fixture
+def auto_sim(pub):
+    lockers = FakeLockers(count=2, open_seconds=60)
+    settings = make_settings("locker", simulation=True, door_settle_seconds=0)  # 자동 모드는 기본으로 켜져 있다
     return TestClient(create_app(settings, lockers=lockers, publisher=pub, scheduler=ManualScheduler()))
 
 
@@ -89,3 +97,30 @@ def test_capture_box_item_left_after_capture_warns(pub):
     assert client.post("/capture", json=body, headers=HEADERS).status_code == 200
     clock.run()  # 기다리는 시간이 지났다고 치고 확인
     assert pub.alert_codes() == ["CAPTURE_ITEM_LEFT"]
+
+
+def locker_item(client, number: int) -> str:
+    return client.get("/sim/state", headers=HEADERS).json()["lockers"][number - 1]["item"]
+
+
+def test_auto_mode_handles_normal_deposit_and_pickup(auto_sim, pub):
+    assert open_by_command(auto_sim, 1).status_code == 200
+    assert locker_item(auto_sim, 1) == "present"
+    sim_post(auto_sim, "lockers/1/door", {"action": "close"})
+    assert open_by_command(auto_sim, 1, "open-2").status_code == 200
+    assert locker_item(auto_sim, 1) == "empty"
+    sim_post(auto_sim, "lockers/1/door", {"action": "close"})
+    assert pub.alert_codes() == []
+
+
+def test_skip_auto_shows_deposit_without_item(auto_sim, pub):
+    state = sim_post(auto_sim, "lockers/1/skip-auto", {}).json()
+    assert state["auto"] is True and state["skip_auto"] == [1]
+    open_by_command(auto_sim, 1)
+    sim_post(auto_sim, "lockers/1/door", {"action": "close"})
+    assert pub.alert_codes() == ["ITEM_NOT_DEPOSITED"]
+
+
+def test_auto_mode_needs_simulation():
+    app = create_app(make_settings("locker", simulation_auto=True))
+    assert app.state.locker_monitor.auto is False

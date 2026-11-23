@@ -12,6 +12,7 @@ API 키는 --key 또는 환경변수 PI_SIM_API_KEY로 준다.
   python tools/sim.py locker 2 shock        # 강한 충격 (weak를 붙이면 약한 충격)
   python tools/sim.py locker 1 preset 150   # 시연 준비: 닫힌 칸에 물건이 있는 상태로 만들기
   python tools/sim.py locker 1 clear        # 시연 준비: 닫힌 칸을 빈 상태로 되돌리기
+  python tools/sim.py locker 1 skip         # 자동 모드에서 다음 개방 한 번은 넣거나 빼지 않기 (보관 안 됨·수령 안 됨 시연)
 예 (촬영 Pi):
   python tools/sim.py capture put 200
   python tools/sim.py capture take
@@ -51,6 +52,8 @@ def locker_request(number: int, action: str, value: str | None) -> tuple[str, di
         return f"/sim/lockers/{number}/door", {"action": "open"}
     if action == "close":
         return f"/sim/lockers/{number}/door", {"action": "close"}
+    if action == "skip":
+        return f"/sim/lockers/{number}/skip-auto", {}
     return f"/sim/lockers/{number}/shock", {"strength": value or "strong"}
 
 
@@ -62,7 +65,7 @@ def main() -> None:
     sub.add_parser("state", help="지금 센서 값 보기")
     locker = sub.add_parser("locker", help="보관함 칸 (보관함 Pi)")
     locker.add_argument("number", type=int)
-    locker.add_argument("action", choices=["put", "take", "close", "force-open", "shock", "preset", "clear"])
+    locker.add_argument("action", choices=["put", "take", "close", "force-open", "shock", "preset", "clear", "skip"])
     locker.add_argument("value", nargs="?", help="put·preset은 무게(g), shock은 weak 또는 strong")
     capture = sub.add_parser("capture", help="촬영 상자 (촬영 Pi)")
     capture.add_argument("action", choices=["put", "take"])

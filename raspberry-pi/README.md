@@ -134,15 +134,20 @@ pytest -q               # 테스트
 
 | 상황 | 시연 순서 (`tools/sim.py`) | 경고 |
 | --- | --- | --- |
-| 정상 보관 | 개방 명령 → `locker 1 put 150` → `locker 1 close` | 없음 |
-| 보관 안 됨 | 개방 명령 → `locker 1 close` | `ITEM_NOT_DEPOSITED` |
-| 수령 안 됨 | 물건이 있는 칸에 개방 명령 → `locker 1 close` | `ITEM_NOT_TAKEN` |
+| 정상 보관 | 빈 칸에 개방 명령 → (무게가 저절로 150g) → `locker 1 close` | 없음 |
+| 정상 수령 | 물건이 있는 칸에 개방 명령 → (무게가 저절로 0g) → `locker 1 close` | 없음 |
+| 보관 안 됨 | `locker 1 skip` → 빈 칸에 개방 명령 → `locker 1 close` | `ITEM_NOT_DEPOSITED` |
+| 수령 안 됨 | `locker 1 skip` → 물건이 있는 칸에 개방 명령 → `locker 1 close` | `ITEM_NOT_TAKEN` |
 | 강제 개방 | `locker 2 force-open` | `FORCED_OPEN`, LED가 빠르게 깜빡인다 |
 | 도난 의심 | 강제 개방 뒤 `locker 2 take` → `locker 2 close` | `ITEM_MISSING` |
 | 개방 시도 | 닫힌 칸에 `locker 1 shock` | `TAMPER` |
 | 촬영 상자에 남음 | `capture put 200` → 촬영 → 정해진 시간 기다림 | `CAPTURE_ITEM_LEFT` |
 
 개방 명령은 백엔드가 보낸다. 보관함 Pi가 실제 모드면 `close` 대신 그 칸의 버튼을 눌러도 된다. 물건이 있는 칸을 미리 만들려면 `locker 1 preset 150`, 닫힌 칸을 비우려면 `locker 1 clear`를 쓴다. 가상 무게는 Pi를 다시 켜도 남으므로, 시연 전에 `state`로 확인하고 백엔드의 보관 기록과 맞춘다.
+
+자동 모드(`PI_SIMULATION_AUTO`, 기본값 `true`): 백엔드의 개방 명령으로 칸이 열리면 정상 보관·수령처럼 가상 무게가 저절로 바뀐다. 빈 칸이 열리면 150g을 넣고, 물건이 있는 칸이 열리면 꺼낸다. 그래서 정상 흐름은 아무 명령 없이 문만 닫으면 된다. 보관 안 됨·수령 안 됨을 보여 줄 때만 열기 전에 `skip`을 쓴다. 그 칸의 다음 개방 한 번만 건너뛴다. 강제 개방은 자동으로 바꾸지 않으므로 도난 의심은 `take`로 만든다. 손으로 넣고 빼려면 `PI_SIMULATION_AUTO=false`로 둔다.
+
+무게 센서는 가상이라, 백엔드의 완료 확인(칸 상태)과 함께 쓰는 동안에는 `PI_SIMULATION=true`로 둔다. 끄면 무게가 늘 0이라 보관 완료가 막힌다.
 
 Pi의 `.env`에 아래를 더하고 서비스를 다시 켠다. 브로커 주소와 계정은 백엔드 담당과 정한다.
 
@@ -204,7 +209,8 @@ PI_ROLE=locker PI_API_KEY=locker-key-123 PI_FAKE_HARDWARE=true uvicorn --factory
 - [ ] 화면 경고 표시와 다시 열기 버튼 (프론트 담당)
 - [x] 두 Pi에 MQTT 설정 적용과 1차 시험: 강제 개방·충격 경고가 서버에 저장됨
 - [x] 2차 시험: 등록·보관·수령 흐름에서 경고 6가지, 완료 막기·다시 열기, 도난 시 DB 반영 확인 (실험 0002, 백엔드 #53, #54)
-- [ ] 시연 준비: DB와 가상 무게 맞추기, 가상 센서 조작 순서 정하기
+- [x] 가상 센서 자동 모드: 정상 보관·수령은 저절로, 이상 상황만 명령으로 (`PI_SIMULATION_AUTO`)
+- [ ] 시연 준비: DB와 가상 무게 맞추기, 실제 Pi에서 자동 모드로 보관·수령 한 바퀴 확인
 
 ## 진행 기록
 
@@ -233,3 +239,4 @@ PI_ROLE=locker PI_API_KEY=locker-key-123 PI_FAKE_HARDWARE=true uvicorn --factory
 | 2026-11-21 | 두 Pi에 브로커 설정을 넣고 서버 장치 상태에서 두 Pi online 확인, 1차 시험으로 강제 개방(FORCED_OPEN)·충격(TAMPER) 경고가 서버에 저장되는 것 확인, Pi 서비스 로그에 INFO가 보이게 고침 |
 | 2026-11-21 | (팀) 백엔드가 칸 상태로 보관·수령 완료를 막고 다시 열기 API를 추가(#53), 강제 개방 뒤 물건이 사라지면 DB에 missing으로 표시(#54) |
 | 2026-11-21 | 등록·보관·수령 흐름으로 2차 시험. 경고는 맞게 오지만 보관·수령 완료가 칸 상태를 보지 않는 문제와 도난 뒤 DB가 그대로인 문제를 찾아 백엔드에 전달, 반영 뒤 다시 시험해 경고 6가지·완료 막기·다시 열기·도난 시 DB 반영까지 확인 (실험 0002) |
+| 2026-11-22 | 재등록 때 가상 무게를 빠뜨려 정상 보관·수령도 막히는 것을 보고, 칸이 열리면 정상 보관·수령처럼 무게가 저절로 바뀌는 자동 모드를 추가. 이상 상황은 `skip`·`force-open`·`take` 같은 명령으로만 만든다 (맥에서 확인) |

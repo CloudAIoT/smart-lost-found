@@ -133,7 +133,8 @@ def create_app(settings: Settings | None = None, camera: Camera | None = None,
     else:
         lockers = lockers or make_lockers(settings)
         monitor = LockerMonitor(lockers.count, publisher, scheduler, store, settings.item_threshold_g,
-                                settings.door_settle_seconds)
+                                settings.door_settle_seconds,
+                                auto=settings.simulation and settings.simulation_auto)
         lockers.listener = monitor.door_changed  # 문이 열리고 닫힐 때 센서 감시에 알린다
         app.state.lockers = lockers
         app.state.locker_monitor = monitor

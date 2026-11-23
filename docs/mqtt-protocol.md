@@ -117,6 +117,7 @@ Pi를 `PI_SIMULATION=true`로 띄우면 시연용 경로(`/sim`)가 열린다. �
 | `POST /sim/lockers/{n}/item` | 보관함 Pi | 물건 넣기·꺼내기 `{"action": "put", "weight_g": 150}`, `{"action": "take"}` |
 | `POST /sim/lockers/{n}/door` | 보관함 Pi | 문 열기(명령 없이 = 강제 개방)·닫기 `{"action": "open"}` |
 | `POST /sim/lockers/{n}/shock` | 보관함 Pi | 충격 `{"strength": "strong"}` |
+| `POST /sim/lockers/{n}/skip-auto` | 보관함 Pi | 자동 모드에서 다음 개방 한 번은 무게를 바꾸지 않기(보관 안 됨·수령 안 됨 시연) |
 | `POST /sim/capture/item` | 촬영 Pi | 촬영 상자에 물건 넣기·꺼내기 |
 
 닫힌 칸에는 물건을 넣거나 뺄 수 없다(409 `DOOR_CLOSED`). 시연 준비로 물건이 있는 칸을 만들 때만 `"preset": true`를 붙인다.

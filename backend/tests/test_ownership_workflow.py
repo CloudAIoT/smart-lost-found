@@ -47,18 +47,22 @@ class FakeAI:
                 shortlist.append(SearchMatch(item=item, matched_fields=fields))
         return shortlist
 
+    def localize(self, field, labels):
+        self.calls.append(("localize", field, labels))
+        return [{"brushed aluminum finish": "결이 있는 알루미늄 표면"}[label] for label in labels]
+
     def distractors(self, field, known, count, *, validate):
         self.calls.append(("distractors", field, known))
         if self.broken_options:
             return validate(known)
         proposed = {
             "distinctive_features": ["노란 리본", "작은 은색 구슬", "하얀 줄무늬 스티커", "주황색 고리"],
-            "visible_text": ["ZX", "TS", "B-9", "VV"],
+            "visible_text": ["엠제이", "ZX", "TS", "B-9", "VV"],
             "material": ["종이", "금속", "고무", "유리"],
             "shape": ["삼각기둥형", "반원형", "육각기둥형", "타원형"],
-            "structure": ["앞 주머니", "손잡이 고리", "뒷면 똑딱이", "가운데 칸막이"],
-            "brand": ["Dickies", "Eastpak", "Muji", "Nike"],
+            "brand": ["디키즈", "이스트팩", "무지", "나이키"],
             "color": ["red", "yellow", "white", "green"],
+            "surface_texture": ["무광", "유광", "직조 표면", "반투명 표면"],
         }[field]
         return validate(proposed)
 
@@ -239,6 +243,62 @@ def test_single_candidate_is_asked_about_remaining_shape(ownership):
     assert result_for(ownership, pending) is None
 
 
+@pytest.mark.parametrize("include_unknown", [False, True])
+def test_structure_location_question_only_compares_the_same_part(ownership, include_unknown):
+    ownership.ai.clues = SearchClues(category="마우스")
+    with Session(ownership.engine) as session:
+        first = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
+        second = session.get(Registration, session.get(FoundItem, ownership.second).registration_id)
+        first.analysis_features = {"category": "마우스", "structure": ["Scroll wheel in the center", "좌우 클릭 버튼이 있음"]}
+        second.analysis_features = {"category": "마우스", "structure": ["스크롤 휠이 좌측에 있음"]}
+        expected = {str(ownership.first)}
+        if include_unknown:
+            kiosk = session.get(Kiosk, first.kiosk_id)
+            unknown_id = add_item(session, kiosk, number=4, decoration="테스트", mark="테스트")
+            unknown = session.get(Registration, session.get(FoundItem, unknown_id).registration_id)
+            unknown.analysis_features = {"category": "마우스", "structure": [
+                "좌우 클릭 버튼이 있음", "가운데 있음", "가운데에 버튼 없음",
+                "스크롤 휠이 왼쪽에 있음", "스크롤 휠이 오른쪽에 있음",
+            ]}
+            expected.add(str(unknown_id))
+        session.commit()
+
+    attempt = begin(ownership, "마우스를 잃어버렸어요.")
+    assert attempt["question"]["text"] == "스크롤 휠의 위치는 어디에 가장 가까웠나요?"
+    labels = [option["label"] for option in attempt["question"]["options"]]
+    assert len(labels) == 5 and set(labels) == {"가운데", "왼쪽", "오른쪽", "앞쪽", "뒤쪽"}
+    response = submit(ownership, attempt, "가운데")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == ("completed" if include_unknown else "photo_confirmation")
+    with Session(ownership.engine) as session:
+        row = session.get(OwnershipAttempt, UUID(attempt["attempt_id"]))
+        assert {candidate["item_id"] for candidate in row.state["candidates"]} == expected
+        assert row.state["answers"][0]["conflicting_item_ids"] == [str(ownership.second)]
+    assert not any(call[0] == "distractors" for call in ownership.ai.calls)
+
+
+def test_single_candidate_can_continue_after_one_wrong_private_part_location(ownership):
+    ownership.ai.clues = SearchClues(category="마우스")
+    with Session(ownership.engine) as session:
+        first = session.get(Registration, session.get(FoundItem, ownership.first).registration_id)
+        wheel = "스크롤 휠 정중앙"
+        first.analysis_features = {
+            "data": {"category": "마우스", "structure": [wheel, "DPI button at the rear"]},
+            "ownership_evidence": [{
+                "feature_id": "wheel", "field": "structure", "value": wheel, "group": "wheel",
+                "visibility": "private", "verified": True, "distinguishing": True,
+            }],
+        }
+        session.commit()
+
+    attempt = begin(ownership, "마우스를 잃어버렸어요.")
+    assert attempt["initial_candidate_count"] == 1
+    assert "스크롤 휠" in attempt["question"]["text"]
+    next_question = submit(ownership, attempt, "오른쪽").json()
+    assert "감도 버튼" in next_question["question"]["text"]
+    assert submit(ownership, next_question, "뒤쪽").json()["status"] == "photo_confirmation"
+
+
 def test_hands_off_only_after_photo_confirmation(ownership):
     first = begin(ownership)
     assert first["initial_candidate_count"] == 2
@@ -268,7 +328,7 @@ def test_hands_off_only_after_photo_confirmation(ownership):
     assert result.failure_reason is None
     assert result.matched_evidence_groups == 2
     assert result.answered_questions == 2
-    assert result.policy_version == "development_v4"
+    assert result.policy_version == "development_v6"
 
 
 def test_verified_attempt_issues_one_otp_for_the_matched_item(ownership):
@@ -322,7 +382,7 @@ def test_automatic_photo_features_allow_photo_confirmation_and_otp(ownership, ne
     assert pending["initial_candidate_count"] == 1
     if needs_color_question:
         assert "색상" in pending["question"]["text"]
-        pending = submit(ownership, pending, "navy").json()
+        pending = submit(ownership, pending, "남색").json()
     assert pending["status"] == "photo_confirmation"
     assert pending["found_item_id"] is None
     assert result_for(ownership, pending) is None
@@ -358,7 +418,7 @@ def test_semantic_search_rejects_model_ids_outside_the_supplied_batch(ownership)
     assert response.json() == {"detail": {"code": "OWNERSHIP_AI_INVALID_MATCHES"}}
 
 
-@pytest.mark.parametrize(("last_answer", "matches"), [("navy", 5), ("red", 4)])
+@pytest.mark.parametrize(("last_answer", "matches"), [("남색", 5), ("빨간색", 4)])
 def test_continues_past_two_matches_and_four_questions_until_exhausted(ownership, last_answer, matches):
     ownership.ai.clues = SearchClues(category="필통")
     with Session(ownership.engine) as session:
@@ -376,7 +436,7 @@ def test_continues_past_two_matches_and_four_questions_until_exhausted(ownership
 
     view = begin(ownership)
     asked = {view["question"]["id"]}
-    for label in ("파란 원형 핀", "MJ", "fabric", "Carhartt"):
+    for label in ("파란 원형 핀", "MJ", "천", "칼하트"):
         response = submit(ownership, view, label)
         assert response.status_code == 200, response.text
         view = response.json()
@@ -437,12 +497,12 @@ def test_public_difference_narrows_candidates_before_photo_confirmation(ownershi
         session.commit()
     view = begin(ownership)
     assert "재질" in view["question"]["text"]
-    assert {option["label"] for option in view["question"]["options"]} == {"fabric", "plastic", "종이", "금속", "고무"}
+    assert {option["label"] for option in view["question"]["options"]} == {"천", "플라스틱", "종이", "금속", "고무"}
     wrong = submit(ownership, view, "종이").json()
     assert wrong["decision"] == "not_confirmed" and result_for(ownership, wrong).item_id is None
     assert result_for(ownership, wrong).failure_reason == "candidates_eliminated"
     view = begin(ownership)
-    pending = submit(ownership, view, "fabric").json()
+    pending = submit(ownership, view, "천").json()
     finished = confirm_photo(ownership, pending)["attempt"]
     result = result_for(ownership, finished)
     assert result.item_id == ownership.first
@@ -467,7 +527,7 @@ def test_only_eligible_private_feature_is_enough_when_it_all_matches(ownership):
     assert "문구" in view["question"]["text"]
     view = submit(ownership, view, "MJ").json()
     assert "색상" in view["question"]["text"]
-    finished = confirm_photo(ownership, submit(ownership, view, "black").json())["attempt"]
+    finished = confirm_photo(ownership, submit(ownership, view, "검은색").json())["attempt"]
     assert finished["decision"] == "supported"
     assert result_for(ownership, finished).matched_evidence_groups == 1
 
@@ -611,6 +671,80 @@ def test_missing_registered_photo_prevents_success(ownership):
 def gemini_json(result):
     return httpx.Response(200, json={"candidates": [{"finishReason": "STOP",
                           "content": {"parts": [{"text": json.dumps(result)}]}}]})
+
+
+def test_visible_text_uses_the_original_inscription_and_latin_alternatives(ownership):
+    with Session(ownership.engine) as session:
+        item = session.get(FoundItem, ownership.first)
+        reg = session.get(Registration, item.registration_id)
+        source = reg.analysis_features
+        reg.analysis_features = {
+            "data": {**source["data"], "visible_text": ["mJ-9"]},
+            "ownership_evidence": [{**source["ownership_evidence"][1], "value": "mJ-9"}],
+        }
+        session.get(FoundItem, ownership.second).status = "awaiting_deposit"
+        session.commit()
+
+    view = begin(ownership)
+    assert "문구" in view["question"]["text"]
+    assert {option["label"] for option in view["question"]["options"]} == {"mJ-9", "ZX", "TS", "B-9", "VV"}
+    assert ("distractors", "visible_text", ["mJ-9"]) in ownership.ai.calls
+    assert not any(call[0] == "localize" for call in ownership.ai.calls)
+    pending = submit(ownership, view, "mJ-9").json()
+    assert confirm_photo(ownership, pending)["attempt"]["decision"] == "supported"
+    assert result_for(ownership, pending).matched_evidence_groups == 1
+
+
+def test_equivalent_english_and_korean_values_share_one_answer(ownership):
+    with Session(ownership.engine) as session:
+        for item_id, shape in [(ownership.first, "rectangular"), (ownership.second, "직사각형")]:
+            item = session.get(FoundItem, item_id)
+            reg = session.get(Registration, item.registration_id)
+            reg.analysis_features = {**reg.analysis_features["data"], "shape": shape}
+        session.commit()
+
+    view = begin(ownership)
+    labels = [option["label"] for option in view["question"]["options"]]
+    assert len(set(labels)) == 5 and labels.count("직사각형") == 1 and "rectangular" not in labels
+    finished = submit(ownership, view, "직사각형").json()
+    assert result_for(ownership, finished).failure_reason == "multiple_candidates"
+    with Session(ownership.engine) as session:
+        row = session.get(OwnershipAttempt, UUID(view["attempt_id"]))
+        assert set(row.state["answers"][0]["matched_item_ids"]) == {str(ownership.first), str(ownership.second)}
+
+
+def test_unmapped_english_label_is_translated_and_graded_against_registered_value(ownership):
+    with Session(ownership.engine) as session:
+        item = session.get(FoundItem, ownership.first)
+        reg = session.get(Registration, item.registration_id)
+        reg.analysis_features = {**reg.analysis_features["data"], "surface_texture": "brushed aluminum finish"}
+        session.get(FoundItem, ownership.second).status = "awaiting_deposit"
+        session.commit()
+
+    view = begin(ownership)
+    assert "표면 질감" in view["question"]["text"]
+    assert ("localize", "surface_texture", ["brushed aluminum finish"]) in ownership.ai.calls
+    assert ("distractors", "surface_texture", ["결이 있는 알루미늄 표면"]) in ownership.ai.calls
+    labels = {option["label"] for option in view["question"]["options"]}
+    assert labels == {"결이 있는 알루미늄 표면", "무광", "유광", "직조 표면", "반투명 표면"}
+    assert submit(ownership, view, "결이 있는 알루미늄 표면").json()["status"] == "photo_confirmation"
+
+
+def test_gemini_retries_translation_if_labels_are_english_or_missing():
+    settings = GeminiSettings(_env_file=None, gemini_api_key="test-key")
+    responses = iter([{"labels": ["Felt", "Mesh"]}, {"labels": ["펠트"]}, {"labels": ["펠트", "그물망"]}])
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path.rsplit("/", 1)[-1])
+        data = json.loads(json.loads(request.content)["contents"][0]["parts"][0]["text"])
+        assert data == {"feature_type": "material", "labels": ["Felt", "Mesh"]}
+        return gemini_json(next(responses))
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        assert GeminiWorkflowAI(settings, http).localize("material", ["Felt", "Mesh"]) == ["펠트", "그물망"]
+    assert calls == ["gemini-4-hydrogen:generateContent", "gemini-3.8-flash:generateContent",
+                     "gemini-3.5-flash-lite:generateContent"]
 
 
 def test_gemini_extracts_only_literal_user_clues():

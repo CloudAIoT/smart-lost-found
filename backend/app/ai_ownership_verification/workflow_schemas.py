@@ -22,7 +22,8 @@ FailureReason = Literal[
     # Previously completed attempts can still contain these reasons.
     "no_verified_evidence", "verification_answers_mismatch",
 ]
-PolicyVersion = Literal["development_v1", "development_v2", "development_v3", "development_v4"]
+PolicyVersion = Literal["development_v1", "development_v2", "development_v3", "development_v4", "development_v5",
+                        "development_v6"]
 SearchStage = Literal["queued", "clue_extraction", "candidate_search", "question_ready"]
 # A search that ends without a question keeps its outcome on the attempt, so a poll can report it.
 SearchStatus = Literal["needs_clues", "no_candidates", "search_limit", "failed"]
@@ -60,6 +61,10 @@ class SearchProgress(Contract):
 
 class Distractors(Contract):
     labels: list[ChoiceLabel] = Field(max_length=8)
+
+
+class KoreanLabels(Contract):
+    labels: list[ChoiceLabel] = Field(min_length=1, max_length=5)
 
 
 class SearchMatch(Contract):
@@ -106,11 +111,13 @@ class Choice(Contract):
     id: UUID
     label: str
     value: str | None
+    equivalent_values: list[str] = Field(default_factory=list)
 
 
 class Question(Contract):
     id: UUID
     field: FieldName
+    structure_part: str | None = None
     purpose: Literal["narrowing", "verification"]
     text: str
     options: list[Choice]
@@ -119,6 +126,7 @@ class Question(Contract):
 class RecordedAnswer(Contract):
     question_id: UUID
     field: FieldName
+    structure_part: str | None = None
     purpose: Literal["narrowing", "verification"]
     option_id: UUID
     outcome: Literal["answered", "unknown"]

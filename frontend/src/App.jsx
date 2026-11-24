@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api, API_BASE } from './api.js';
+import { aiStatusText as formatAiStatus, analysisPendingText, analyzeAndOpenRegistration, ownershipPendingText, waitForOwnership } from './aiProgress.js';
 import {
   Archive,
   ArrowLeft,
@@ -6,7 +8,6 @@ import {
   Boxes,
   Camera,
   CircleCheck,
-  CircleX,
   DoorOpen,
   Footprints,
   Globe,
@@ -32,7 +33,6 @@ import {
  * 백엔드(http://52.78.12.168)에 CORS 설정이 없으므로
  * vite.config.js의 dev 프록시를 거쳐 호출한다.
  * ============================================================ */
-const API_BASE = '/api';
 
 const LEAFLET_CSS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
 const LEAFLET_JS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
@@ -60,42 +60,6 @@ const DEV_OTP = import.meta.env.DEV ? 'DEV00000' : null;
 /* ============================================================
  * API 유틸
  * ============================================================ */
-class ApiError extends Error {
-  constructor(status, code) {
-    super(code);
-    this.status = status;
-    this.code = code;
-  }
-}
-
-async function api(path, { method = 'GET', body } = {}) {
-  const init = { method };
-  if (body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json' };
-    init.body = JSON.stringify(body);
-  }
-  let res;
-  try {
-    res = await fetch(`${API_BASE}${path}`, init);
-  } catch {
-    throw new ApiError(0, 'NETWORK_ERROR');
-  }
-  const text = await res.text();
-  let data = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = null;
-  }
-  if (!res.ok) {
-    let code = `HTTP_${res.status}`;
-    if (data?.detail?.code) code = data.detail.code;
-    else if (Array.isArray(data?.detail)) code = 'VALIDATION_ERROR';
-    throw new ApiError(res.status, code);
-  }
-  return data;
-}
-
 const ERROR_MESSAGES = {
   NETWORK_ERROR: '서버에 연결할 수 없습니다. 네트워크 또는 프록시 설정을 확인해 주세요.',
   VALIDATION_ERROR: '입력값이 올바르지 않습니다.',
@@ -110,6 +74,9 @@ const ERROR_MESSAGES = {
   SHOT_OUT_OF_ORDER: '첫 번째 촬영을 먼저 진행해 주세요.',
   TWO_IMAGES_REQUIRED: '사진 두 장이 모두 필요합니다.',
   ANALYSIS_REQUIRED: '사진 분석이 완료되지 않아 보관함을 열 수 없습니다.',
+  ANALYSIS_FAILED: '사진 분석에 실패했습니다. 다시 시도해 주세요.',
+  ANALYSIS_TIMED_OUT: '사진 분석 시간이 초과되었습니다. 다시 시도해 주세요.',
+  INVALID_AI_RESPONSE: 'AI 진행 상태를 확인할 수 없습니다. 다시 시도해 주세요.',
   NO_AVAILABLE_LOCKER: '현재 비어 있는 보관함이 없습니다.',
   ALLOCATION_CONFLICT: '보관함 배정 중 충돌이 발생했습니다. 잠시 후 다시 시도해 주세요.',
   DEPOSIT_NOT_OPENED: '보관함이 아직 열리지 않았습니다.',
@@ -144,6 +111,10 @@ const ERROR_MESSAGES = {
   OWNERSHIP_PHOTO_LOAD_REQUIRED: '등록 사진을 불러온 다음 다시 확인해 주세요.',
   OWNERSHIP_AI_NOT_CONFIGURED: '분실물 검색 또는 이미지 분석 서비스가 설정되지 않았습니다.',
   OWNERSHIP_AI_RATE_LIMITED: 'AI 요청이 많습니다. 잠시 후 다시 시도해 주세요.',
+  OWNERSHIP_AI_TIMEOUT: 'AI 응답 시간이 초과되었습니다. 다시 시도해 주세요.',
+  OWNERSHIP_AI_UNREACHABLE: 'AI 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+  OWNERSHIP_AI_REQUEST_FAILED: 'AI 요청을 처리하지 못했습니다. 다시 시도해 주세요.',
+  OWNERSHIP_SEARCH_FAILED: '분실물 검색에 실패했습니다. 다시 검색해 주세요.',
   RETURN_CODE_NOT_CONFIGURED: 'OTP 기능이 설정되지 않았습니다.',
 };
 
@@ -504,22 +475,6 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
   );
 }
 
-const OWNERSHIP_PENDING_STAGE_LABELS = {
-  searching: '유사한 물품을 찾는 중입니다',
-  matching: '특징을 비교하는 중입니다',
-  question_generation: '확인 질문을 준비하는 중입니다',
-  question: '확인 질문을 준비하는 중입니다',
-  evaluating: '답변을 확인하는 중입니다',
-  decision: '답변을 확인하는 중입니다',
-  photo_analysis: '사진을 분석하는 중입니다',
-};
-
-function ownershipPendingText(stage) {
-  if (!stage) return 'AI가 분석하는 중입니다';
-  return OWNERSHIP_PENDING_STAGE_LABELS[stage] || 'AI가 분석하는 중입니다';
-}
-
-const OWNERSHIP_POLL_INTERVAL_MS = 1500;
 const OWNERSHIP_SLOW_HINT_MS = 8000;
 
 /* ============================================================
@@ -535,21 +490,12 @@ function WebOwner({ onBack, onResult }) {
   const [photoRetry, setPhotoRetry] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState(null); // { stage, elapsedMs } while backend AI search/답변 처리가 진행 중일 때
+  const [pending, setPending] = useState(null); // { stage, elapsedMs } while backend AI search is running
   const [aiStatusText, setAiStatusText] = useState('');
   const photoAttemptId = attempt?.status === 'photo_confirmation' ? attempt.attempt_id : null;
-  const pollTimerRef = useRef(null);
-  const pollAttemptIdRef = useRef(null);
-  const pollStartedAtRef = useRef(0);
+  const requestRef = useRef(null);
 
-  const stopPolling = () => {
-    if (pollTimerRef.current) {
-      clearTimeout(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-  };
-
-  useEffect(() => () => stopPolling(), []);
+  useEffect(() => () => requestRef.current?.abort(), []);
 
   useEffect(() => {
     if (!photoAttemptId) return;
@@ -580,34 +526,17 @@ function WebOwner({ onBack, onResult }) {
     };
   }, [photoAttemptId, photoRetry]);
 
-  const pollAttempt = async () => {
-    const attemptId = pollAttemptIdRef.current;
-    if (!attemptId) return;
-    try {
-      accept(await api(`/ownership/attempts/${attemptId}`));
-    } catch (err) {
-      stopPolling();
-      setPending(null);
-      setBusy(false);
-      setError(errorText(err));
-    }
-  };
-
-  const accept = (result) => {
-    if (result?.status === 'pending') {
-      pollAttemptIdRef.current = result.attempt_id || pollAttemptIdRef.current;
-      if (!pollStartedAtRef.current) pollStartedAtRef.current = Date.now();
-      setPending({ stage: result.stage, elapsedMs: result.elapsed_ms ?? (Date.now() - pollStartedAtRef.current) });
-      stopPolling();
-      pollTimerRef.current = setTimeout(pollAttempt, OWNERSHIP_POLL_INTERVAL_MS);
-      return;
-    }
-    stopPolling();
-    pollAttemptIdRef.current = null;
-    pollStartedAtRef.current = 0;
+  const accept = async (initial, signal) => {
+    const started = Date.now();
+    const result = await waitForOwnership(initial, {
+      signal,
+      onProgress: (progress) => setPending({
+        stage: progress.stage, elapsedMs: progress.elapsed_ms ?? (Date.now() - started),
+      }),
+    });
+    signal.throwIfAborted();
     setPending(null);
     setAiStatusText('');
-    setBusy(false);
     setOptionId('');
     if (result.status === 'question' || result.status === 'photo_confirmation' || result.decision === 'supported') {
       setAttempt(result);
@@ -621,58 +550,70 @@ function WebOwner({ onBack, onResult }) {
   };
 
   const checkAiStatus = async () => {
+    const signal = requestRef.current?.signal;
+    if (!signal || signal.aborted) return;
     try {
-      const status = await api('/ai/status');
-      const healthy = status.healthy ?? status.ok ?? (status.status ? status.status === 'ok' : undefined);
-      const latencyMs = status.avg_latency_ms ?? status.recent_latency_ms ?? status.latency_ms;
-      const parts = [];
-      if (healthy === true) parts.push('AI 서버 상태는 정상입니다.');
-      else if (healthy === false) parts.push('AI 서버 응답이 지연되고 있습니다.');
-      if (typeof latencyMs === 'number') parts.push(`최근 평균 응답 시간 약 ${(latencyMs / 1000).toFixed(1)}초.`);
-      setAiStatusText(parts.length ? parts.join(' ') : '상태를 확인했지만 표시할 수 있는 정보가 없습니다.');
+      const status = await api('/ai/status', { signal });
+      if (!signal.aborted) setAiStatusText(formatAiStatus(status));
     } catch (err) {
-      setAiStatusText(errorText(err));
+      if (!signal.aborted) setAiStatusText(errorText(err));
     }
   };
 
   const submit = async (event, confirmed = true) => {
     event.preventDefault();
-    if (busy || verified || (photoAttemptId && confirmed && (!photoReady || photoError))) return;
+    if (requestRef.current || busy || verified || (photoAttemptId && confirmed && (!photoReady || photoError))) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const { signal } = controller;
     setBusy(true);
     setError('');
+    setAiStatusText('');
     try {
       if (photoAttemptId) {
         const result = await api(`/ownership/attempts/${photoAttemptId}/photo-confirmation`, {
           method: 'POST',
           body: confirmed ? { confirmed, photo_token: photo.token } : { confirmed },
+          signal,
         });
+        signal.throwIfAborted();
         const code = result.return_code;
         if (code) {
-          setBusy(false);
           onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name });
         } else {
-          accept(result.attempt);
+          await accept(result.attempt, signal);
         }
       } else if (attempt?.question) {
         const result = await api(`/ownership/attempts/${attempt.attempt_id}/answers`, {
           method: 'POST',
           body: { question_id: attempt.question.id, option_id: optionId },
+          signal,
         });
-        accept(result);
+        await accept(result, signal);
       } else {
-        accept(await api('/ownership/attempts', { method: 'POST', body: { description: description.trim() } }));
+        await accept(await api('/ownership/attempts', {
+          method: 'POST', body: { description: description.trim() }, signal,
+        }), signal);
       }
     } catch (err) {
+      if (signal.aborted) return;
       if (err.code === 'OWNERSHIP_QUESTION_NOT_CURRENT') {
         try {
-          accept(await api(`/ownership/attempts/${attempt.attempt_id}`));
+          await accept(await api(`/ownership/attempts/${attempt.attempt_id}`, { signal }), signal);
         } catch (refreshError) {
-          setBusy(false);
-          setError(errorText(refreshError));
+          if (!signal.aborted) setError(errorText(refreshError));
         }
       } else {
-        setBusy(false);
         setError(errorText(err));
+      }
+    } finally {
+      if (requestRef.current === controller) {
+        if (!signal.aborted) {
+          setBusy(false);
+          setPending(null);
+        }
+        requestRef.current = null;
+        controller.abort();
       }
     }
   };
@@ -680,9 +621,8 @@ function WebOwner({ onBack, onResult }) {
   const question = attempt?.question;
   const verified = attempt?.decision === 'supported';
   const restart = () => {
-    stopPolling();
-    pollAttemptIdRef.current = null;
-    pollStartedAtRef.current = 0;
+    requestRef.current?.abort();
+    requestRef.current = null;
     setPending(null);
     setAiStatusText('');
     setBusy(false);
@@ -708,7 +648,7 @@ function WebOwner({ onBack, onResult }) {
         {verified ? (
           <p className="text-sm text-emerald-300">이미 완료된 소유 확인입니다. 새 OTP가 필요하면 검색을 다시 시작해 주세요.</p>
         ) : pending ? (
-          <div className="space-y-3 text-center py-6">
+          <div role="status" className="space-y-3 text-center py-6">
             <div className="inline-flex items-center gap-2 text-sm text-slate-200">
               <LoaderCircle size={16} className="animate-spin text-emerald-400" />
               {ownershipPendingText(pending.stage)}
@@ -1069,10 +1009,11 @@ function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
  *       → deposit/open → deposit/complete
  * 수령: POST /pickup/open → /pickup/{found_item_id}/complete
  * ============================================================ */
-function StepBackBar({ onBack }) {
+function StepBackBar({ onBack, disabled }) {
   return (
     <button
       onClick={onBack}
+      disabled={disabled}
       className="inline-flex items-center gap-1 text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg px-3.5 py-2.5 transition-colors shrink-0"
     >
       <ArrowLeft size={13} /> 뒤로가기
@@ -1112,6 +1053,9 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
   const [shot2GuideOpen, setShot2GuideOpen] = useState(false); // 1차 촬영 후 방향 안내 팝업
   const [retakeOrder, setRetakeOrder] = useState(null); // 재촬영 대상 사진 번호(1|2) | null
   const [depositBlocked, setDepositBlocked] = useState(false); // 보관 완료 409 ITEM_NOT_DETECTED
+  const analysisRequestRef = useRef(null);
+
+  useEffect(() => () => analysisRequestRef.current?.abort(), []);
 
   // 수령 상태
   const [code, setCode] = useState('');
@@ -1228,6 +1172,8 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
   }, [kioskId]);
 
   const reset = () => {
+    analysisRequestRef.current?.abort();
+    analysisRequestRef.current = null;
     setStep('main');
     setBusy('');
     setFailMessage('');
@@ -1319,21 +1265,39 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     setStep(order === 1 ? 'reg-shot1' : 'reg-shot2');
   };
 
-  // [POST analysis] → [POST deposit/open]
-  const analyzeAndOpen = () =>
-    run('사진을 분석하고 빈 보관함을 여는 중...', async () => {
-      let reg = registration;
-      if (reg.analysis_status !== 'succeeded') {
-        reg = await api(`/registrations/${reg.id}/analysis`, { method: 'POST' });
-        setRegistration(reg);
-        if (reg.analysis_status !== 'succeeded') throw new ApiError(409, 'ANALYSIS_REQUIRED');
-      }
-      reg = await api(`/registrations/${reg.id}/deposit/open`, { method: 'POST' });
+  // [POST analysis] → poll [GET registration] → [POST deposit/open]
+  const analyzeAndOpen = async () => {
+    if (analysisRequestRef.current || busy) return;
+    const controller = new AbortController();
+    analysisRequestRef.current = controller;
+    const { signal } = controller;
+    setBusy('사진 분석 상태를 확인하는 중...');
+    setInlineError('');
+    try {
+      const reg = await analyzeAndOpenRegistration(registration.id, {
+        signal,
+        onProgress: (progress) => {
+          setRegistration(progress);
+          setBusy(analysisPendingText(progress));
+        },
+        onOpening: () => setBusy('사진 분석이 완료되어 빈 보관함을 여는 중...'),
+      });
+      signal.throwIfAborted();
       setRegistration(reg);
       setDepositBlocked(false);
       depositOpenedAtRef.current = new Date().toISOString();
       setStep('reg-deposit');
-    });
+    } catch (err) {
+      // Keep the photos and registration so retry can resume a still-running job.
+      if (!signal.aborted) setInlineError(errorText(err));
+    } finally {
+      if (analysisRequestRef.current === controller) {
+        if (!signal.aborted) setBusy('');
+        analysisRequestRef.current = null;
+        controller.abort();
+      }
+    }
+  };
 
   // [POST deposit/complete] 409 ITEM_NOT_DETECTED면 다시 열기(deposit/reopen)로 유도한다.
   const completeDeposit = () =>
@@ -1468,6 +1432,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     'pickup-scan': 'main',
   };
   const goBack = () => {
+    if (busy) return;
     const target = backTargets[step];
     if (!target) return;
     if (target !== 'reg-review') setRetakeOrder(null);
@@ -1698,7 +1663,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       {step === 'reg-review' && (
         <div className="space-y-6 text-center my-auto">
           <div className="flex items-center justify-between gap-2 text-left">
-            <StepBackBar onBack={goBack} />
+            <StepBackBar onBack={goBack} disabled={disabled} />
             <span className="text-xs text-indigo-400 font-semibold">습득물 등록 · 4/4</span>
           </div>
           <div>
@@ -1729,6 +1694,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
               </button>
             </div>
           </div>
+          {inlineError && <p role="alert" className="text-sm text-rose-300">{inlineError}</p>}
           <button
             disabled={disabled}
             onClick={analyzeAndOpen}
@@ -1922,7 +1888,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
       {/* 진행 중 오버레이 */}
       {busy && (
-        <div className="absolute inset-0 z-30 bg-slate-950/80 rounded-[16px] flex flex-col items-center justify-center gap-3 text-center px-6">
+        <div role="status" className="absolute inset-0 z-30 bg-slate-950/80 rounded-[16px] flex flex-col items-center justify-center gap-3 text-center px-6">
           <LoaderCircle size={36} className="animate-spin text-indigo-400" />
           <p className="text-sm text-slate-200 font-semibold">{busy}</p>
         </div>

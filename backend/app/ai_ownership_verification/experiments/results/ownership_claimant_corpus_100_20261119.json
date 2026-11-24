@@ -1,0 +1,2628 @@
+{
+  "synthetic": true,
+  "distribution": {
+    "normal": 25,
+    "similar": 25,
+    "missing": 40,
+    "excluded": 10
+  },
+  "item_count": 100,
+  "searchable_count": 90,
+  "items": [
+    {
+      "item": "B01",
+      "group": "similar",
+      "category_name": "가방",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bag",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [
+          "작은 고리"
+        ],
+        "description": "합성 등록 물품 가방. 색상: black."
+      }
+    },
+    {
+      "item": "B02",
+      "group": "similar",
+      "category_name": "가방",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bag",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [
+          "작은 고리"
+        ],
+        "description": "합성 등록 물품 가방. 색상: black."
+      }
+    },
+    {
+      "item": "B03",
+      "group": "similar",
+      "category_name": "가방",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bag",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [
+          "작은 고리"
+        ],
+        "description": "합성 등록 물품 가방. 색상: black."
+      }
+    },
+    {
+      "item": "B04",
+      "group": "similar",
+      "category_name": "가방",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bag",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [
+          "작은 고리"
+        ],
+        "description": "합성 등록 물품 가방. 색상: black."
+      }
+    },
+    {
+      "item": "B05",
+      "group": "similar",
+      "category_name": "가방",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bag",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [
+          "작은 고리"
+        ],
+        "description": "합성 등록 물품 가방. 색상: black."
+      }
+    },
+    {
+      "item": "E01",
+      "group": "excluded",
+      "category_name": "헬멧",
+      "found_location": "학생회관 입구",
+      "item_status": "awaiting_deposit",
+      "storage_assignment_status": "awaiting_deposit",
+      "searchable": false,
+      "features": {
+        "category": "helmet",
+        "color": [
+          "black"
+        ],
+        "material": "plastic",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 헬멧. 색상: black."
+      }
+    },
+    {
+      "item": "E02",
+      "group": "excluded",
+      "category_name": "헬멧",
+      "found_location": "학생회관 입구",
+      "item_status": "awaiting_deposit",
+      "storage_assignment_status": "awaiting_deposit",
+      "searchable": false,
+      "features": {
+        "category": "helmet",
+        "color": [
+          "black"
+        ],
+        "material": "plastic",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 헬멧. 색상: black."
+      }
+    },
+    {
+      "item": "E03",
+      "group": "excluded",
+      "category_name": "헬멧",
+      "found_location": "학생회관 입구",
+      "item_status": "awaiting_deposit",
+      "storage_assignment_status": "awaiting_deposit",
+      "searchable": false,
+      "features": {
+        "category": "helmet",
+        "color": [
+          "black"
+        ],
+        "material": "plastic",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 헬멧. 색상: black."
+      }
+    },
+    {
+      "item": "E04",
+      "group": "excluded",
+      "category_name": "헬멧",
+      "found_location": "학생회관 입구",
+      "item_status": "awaiting_deposit",
+      "storage_assignment_status": "awaiting_deposit",
+      "searchable": false,
+      "features": {
+        "category": "helmet",
+        "color": [
+          "black"
+        ],
+        "material": "plastic",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 헬멧. 색상: black."
+      }
+    },
+    {
+      "item": "E05",
+      "group": "excluded",
+      "category_name": "헬멧",
+      "found_location": "학생회관 입구",
+      "item_status": "awaiting_deposit",
+      "storage_assignment_status": "awaiting_deposit",
+      "searchable": false,
+      "features": {
+        "category": "helmet",
+        "color": [
+          "black"
+        ],
+        "material": "plastic",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 헬멧. 색상: black."
+      }
+    },
+    {
+      "item": "E06",
+      "group": "excluded",
+      "category_name": "헬멧",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "cancelled",
+      "searchable": false,
+      "features": {
+        "category": "helmet",
+        "color": [
+          "black"
+        ],
+        "material": "plastic",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 헬멧. 색상: black."
+      }
+    },
+    {
+      "item": "E07",
+      "group": "excluded",
+      "category_name": "헬멧",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "cancelled",
+      "searchable": false,
+      "features": {
+        "category": "helmet",
+        "color": [
+          "black"
+        ],
+        "material": "plastic",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 헬멧. 색상: black."
+      }
+    },
+    {
+      "item": "E08",
+      "group": "excluded",
+      "category_name": "헬멧",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "cancelled",
+      "searchable": false,
+      "features": {
+        "category": "helmet",
+        "color": [
+          "black"
+        ],
+        "material": "plastic",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 헬멧. 색상: black."
+      }
+    },
+    {
+      "item": "E09",
+      "group": "excluded",
+      "category_name": "헬멧",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "cancelled",
+      "searchable": false,
+      "features": {
+        "category": "helmet",
+        "color": [
+          "black"
+        ],
+        "material": "plastic",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 헬멧. 색상: black."
+      }
+    },
+    {
+      "item": "E10",
+      "group": "excluded",
+      "category_name": "헬멧",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "cancelled",
+      "searchable": false,
+      "features": {
+        "category": "helmet",
+        "color": [
+          "black"
+        ],
+        "material": "plastic",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 헬멧. 색상: black."
+      }
+    },
+    {
+      "item": "M01",
+      "group": "missing",
+      "category_name": "이어폰",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "earbuds",
+        "color": [
+          "white"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 이어폰. 색상: white."
+      }
+    },
+    {
+      "item": "M02",
+      "group": "missing",
+      "category_name": "이어폰",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "earbuds",
+        "color": [
+          "black"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 이어폰. 색상: black."
+      }
+    },
+    {
+      "item": "M03",
+      "group": "missing",
+      "category_name": "보온병",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "thermos",
+        "color": [],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 보온병. 색상: 미상."
+      }
+    },
+    {
+      "item": "M04",
+      "group": "missing",
+      "category_name": "책갈피",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bookmark",
+        "color": [
+          "red"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 책갈피. 색상: red."
+      }
+    },
+    {
+      "item": "M05",
+      "group": "missing",
+      "category_name": "목도리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "scarf",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 목도리. 색상: blue."
+      }
+    },
+    {
+      "item": "M06",
+      "group": "missing",
+      "category_name": "모자",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "hat",
+        "color": [],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 모자. 색상: 미상."
+      }
+    },
+    {
+      "item": "M07",
+      "group": "missing",
+      "category_name": "재킷",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "jacket",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "distinctive_features": [],
+        "description": "합성 등록 물품 재킷. 색상: blue."
+      }
+    },
+    {
+      "item": "M08",
+      "group": "missing",
+      "category_name": "마우스",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "mouse",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 마우스. 색상: black."
+      }
+    },
+    {
+      "item": "M09",
+      "group": "missing",
+      "category_name": "충전기",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "charger",
+        "color": [],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 충전기. 색상: 미상."
+      }
+    },
+    {
+      "item": "M10",
+      "group": "missing",
+      "category_name": "열쇠고리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keyring",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠고리. 색상: black."
+      }
+    },
+    {
+      "item": "M11",
+      "group": "missing",
+      "category_name": "목도리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "scarf",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 목도리. 색상: blue."
+      }
+    },
+    {
+      "item": "M12",
+      "group": "missing",
+      "category_name": "모자",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "hat",
+        "color": [],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 모자. 색상: 미상."
+      }
+    },
+    {
+      "item": "M13",
+      "group": "missing",
+      "category_name": "재킷",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "jacket",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 재킷. 색상: blue."
+      }
+    },
+    {
+      "item": "M14",
+      "group": "missing",
+      "category_name": "마우스",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "mouse",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "distinctive_features": [],
+        "description": "합성 등록 물품 마우스. 색상: black."
+      }
+    },
+    {
+      "item": "M15",
+      "group": "missing",
+      "category_name": "충전기",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "charger",
+        "color": [],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 충전기. 색상: 미상."
+      }
+    },
+    {
+      "item": "M16",
+      "group": "missing",
+      "category_name": "열쇠고리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keyring",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠고리. 색상: black."
+      }
+    },
+    {
+      "item": "M17",
+      "group": "missing",
+      "category_name": "목도리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "scarf",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 목도리. 색상: blue."
+      }
+    },
+    {
+      "item": "M18",
+      "group": "missing",
+      "category_name": "모자",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "hat",
+        "color": [],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 모자. 색상: 미상."
+      }
+    },
+    {
+      "item": "M19",
+      "group": "missing",
+      "category_name": "재킷",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "jacket",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 재킷. 색상: blue."
+      }
+    },
+    {
+      "item": "M20",
+      "group": "missing",
+      "category_name": "마우스",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "mouse",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 마우스. 색상: black."
+      }
+    },
+    {
+      "item": "M21",
+      "group": "missing",
+      "category_name": "충전기",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "charger",
+        "color": [],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "distinctive_features": [],
+        "description": "합성 등록 물품 충전기. 색상: 미상."
+      }
+    },
+    {
+      "item": "M22",
+      "group": "missing",
+      "category_name": "열쇠고리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keyring",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠고리. 색상: black."
+      }
+    },
+    {
+      "item": "M23",
+      "group": "missing",
+      "category_name": "목도리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "scarf",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 목도리. 색상: blue."
+      }
+    },
+    {
+      "item": "M24",
+      "group": "missing",
+      "category_name": "모자",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "hat",
+        "color": [],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 모자. 색상: 미상."
+      }
+    },
+    {
+      "item": "M25",
+      "group": "missing",
+      "category_name": "재킷",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "jacket",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 재킷. 색상: blue."
+      }
+    },
+    {
+      "item": "M26",
+      "group": "missing",
+      "category_name": "마우스",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "mouse",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 마우스. 색상: black."
+      }
+    },
+    {
+      "item": "M27",
+      "group": "missing",
+      "category_name": "충전기",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "charger",
+        "color": [],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 충전기. 색상: 미상."
+      }
+    },
+    {
+      "item": "M28",
+      "group": "missing",
+      "category_name": "열쇠고리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keyring",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠고리. 색상: black."
+      }
+    },
+    {
+      "item": "M29",
+      "group": "missing",
+      "category_name": "목도리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "scarf",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 목도리. 색상: blue."
+      }
+    },
+    {
+      "item": "M30",
+      "group": "missing",
+      "category_name": "모자",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "hat",
+        "color": [],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 모자. 색상: 미상."
+      }
+    },
+    {
+      "item": "M31",
+      "group": "missing",
+      "category_name": "재킷",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "jacket",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 재킷. 색상: blue."
+      }
+    },
+    {
+      "item": "M32",
+      "group": "missing",
+      "category_name": "마우스",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "mouse",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 마우스. 색상: black."
+      }
+    },
+    {
+      "item": "M33",
+      "group": "missing",
+      "category_name": "충전기",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "charger",
+        "color": [],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 충전기. 색상: 미상."
+      }
+    },
+    {
+      "item": "M34",
+      "group": "missing",
+      "category_name": "열쇠고리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keyring",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠고리. 색상: black."
+      }
+    },
+    {
+      "item": "M35",
+      "group": "missing",
+      "category_name": "목도리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "scarf",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "distinctive_features": [],
+        "description": "합성 등록 물품 목도리. 색상: blue."
+      }
+    },
+    {
+      "item": "M36",
+      "group": "missing",
+      "category_name": "모자",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "hat",
+        "color": [],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 모자. 색상: 미상."
+      }
+    },
+    {
+      "item": "M37",
+      "group": "missing",
+      "category_name": "재킷",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "jacket",
+        "color": [
+          "blue"
+        ],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 재킷. 색상: blue."
+      }
+    },
+    {
+      "item": "M38",
+      "group": "missing",
+      "category_name": "마우스",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "mouse",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 마우스. 색상: black."
+      }
+    },
+    {
+      "item": "M39",
+      "group": "missing",
+      "category_name": "충전기",
+      "found_location": "공학관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "charger",
+        "color": [],
+        "material": "unknown",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 충전기. 색상: 미상."
+      }
+    },
+    {
+      "item": "M40",
+      "group": "missing",
+      "category_name": "열쇠고리",
+      "found_location": null,
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keyring",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠고리. 색상: black."
+      }
+    },
+    {
+      "item": "N01",
+      "group": "normal",
+      "category_name": "수첩",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "notebook",
+        "color": [],
+        "material": null,
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [
+          "QX"
+        ],
+        "distinctive_features": [
+          "물방울 배지"
+        ],
+        "description": "합성 등록 물품 수첩. 색상: 미상."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "QX",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "물방울 배지",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    },
+    {
+      "item": "N02",
+      "group": "normal",
+      "category_name": "가방",
+      "found_location": "공학관 복도",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bag",
+        "color": [
+          "blue"
+        ],
+        "material": "metal",
+        "shape": "직사각형",
+        "surface_texture": "광택 표면",
+        "structure": [
+          "지퍼"
+        ],
+        "brand": "Muji",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 가방. 색상: blue."
+      }
+    },
+    {
+      "item": "N03",
+      "group": "normal",
+      "category_name": "열쇠",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keys",
+        "color": [
+          "red"
+        ],
+        "material": "plastic",
+        "shape": "불규칙형",
+        "surface_texture": "직조 표면",
+        "structure": [
+          "고리"
+        ],
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠. 색상: red."
+      }
+    },
+    {
+      "item": "N04",
+      "group": "normal",
+      "category_name": "휴대폰",
+      "found_location": "중앙도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "phone",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": "직사각형",
+        "surface_texture": "매끄러운 표면",
+        "structure": [
+          "버튼"
+        ],
+        "brand": "Nike",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 휴대폰. 색상: black."
+      }
+    },
+    {
+      "item": "N05",
+      "group": "normal",
+      "category_name": "안경",
+      "found_location": "공학관 복도",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "glasses",
+        "color": [
+          "white"
+        ],
+        "material": "leather",
+        "shape": "타원형",
+        "surface_texture": "광택 표면",
+        "structure": [
+          "접이식 다리"
+        ],
+        "brand": "Adidas",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 안경. 색상: white."
+      }
+    },
+    {
+      "item": "N06",
+      "group": "normal",
+      "category_name": "카드지갑",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "card_case",
+        "color": [
+          "blue"
+        ],
+        "material": "metal",
+        "shape": "직사각형",
+        "surface_texture": "직조 표면",
+        "structure": [
+          "카드 슬롯"
+        ],
+        "brand": "Muji",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 카드지갑. 색상: blue."
+      }
+    },
+    {
+      "item": "N07",
+      "group": "normal",
+      "category_name": "가방",
+      "found_location": "중앙도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bag",
+        "color": [
+          "red"
+        ],
+        "material": "plastic",
+        "shape": "직사각형",
+        "surface_texture": "매끄러운 표면",
+        "structure": [
+          "지퍼"
+        ],
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 가방. 색상: red."
+      }
+    },
+    {
+      "item": "N08",
+      "group": "normal",
+      "category_name": "열쇠",
+      "found_location": "공학관 복도",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keys",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": "불규칙형",
+        "surface_texture": "광택 표면",
+        "structure": [
+          "고리"
+        ],
+        "brand": "Nike",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠. 색상: black."
+      }
+    },
+    {
+      "item": "N09",
+      "group": "normal",
+      "category_name": "휴대폰",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "phone",
+        "color": [
+          "white"
+        ],
+        "material": "leather",
+        "shape": "직사각형",
+        "surface_texture": "직조 표면",
+        "structure": [
+          "버튼"
+        ],
+        "brand": "Adidas",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 휴대폰. 색상: white."
+      }
+    },
+    {
+      "item": "N10",
+      "group": "normal",
+      "category_name": "안경",
+      "found_location": "중앙도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "glasses",
+        "color": [
+          "blue"
+        ],
+        "material": "metal",
+        "shape": "타원형",
+        "surface_texture": "매끄러운 표면",
+        "structure": [
+          "접이식 다리"
+        ],
+        "brand": "Muji",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 안경. 색상: blue."
+      }
+    },
+    {
+      "item": "N11",
+      "group": "normal",
+      "category_name": "카드지갑",
+      "found_location": "공학관 복도",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "card_case",
+        "color": [
+          "red"
+        ],
+        "material": "plastic",
+        "shape": "직사각형",
+        "surface_texture": "광택 표면",
+        "structure": [
+          "카드 슬롯"
+        ],
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 카드지갑. 색상: red."
+      }
+    },
+    {
+      "item": "N12",
+      "group": "normal",
+      "category_name": "가방",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bag",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": "직사각형",
+        "surface_texture": "직조 표면",
+        "structure": [
+          "지퍼"
+        ],
+        "brand": "Nike",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 가방. 색상: black."
+      }
+    },
+    {
+      "item": "N13",
+      "group": "normal",
+      "category_name": "열쇠",
+      "found_location": "중앙도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keys",
+        "color": [
+          "white"
+        ],
+        "material": "leather",
+        "shape": "불규칙형",
+        "surface_texture": "매끄러운 표면",
+        "structure": [
+          "고리"
+        ],
+        "brand": "Adidas",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠. 색상: white."
+      }
+    },
+    {
+      "item": "N14",
+      "group": "normal",
+      "category_name": "휴대폰",
+      "found_location": "공학관 복도",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "phone",
+        "color": [
+          "blue"
+        ],
+        "material": "metal",
+        "shape": "직사각형",
+        "surface_texture": "광택 표면",
+        "structure": [
+          "버튼"
+        ],
+        "brand": "Muji",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 휴대폰. 색상: blue."
+      }
+    },
+    {
+      "item": "N15",
+      "group": "normal",
+      "category_name": "안경",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "glasses",
+        "color": [
+          "red"
+        ],
+        "material": "plastic",
+        "shape": "타원형",
+        "surface_texture": "직조 표면",
+        "structure": [
+          "접이식 다리"
+        ],
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 안경. 색상: red."
+      }
+    },
+    {
+      "item": "N16",
+      "group": "normal",
+      "category_name": "카드지갑",
+      "found_location": "중앙도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "card_case",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": "직사각형",
+        "surface_texture": "매끄러운 표면",
+        "structure": [
+          "카드 슬롯"
+        ],
+        "brand": "Nike",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 카드지갑. 색상: black."
+      }
+    },
+    {
+      "item": "N17",
+      "group": "normal",
+      "category_name": "가방",
+      "found_location": "공학관 복도",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bag",
+        "color": [
+          "white"
+        ],
+        "material": "leather",
+        "shape": "직사각형",
+        "surface_texture": "광택 표면",
+        "structure": [
+          "지퍼"
+        ],
+        "brand": "Adidas",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 가방. 색상: white."
+      }
+    },
+    {
+      "item": "N18",
+      "group": "normal",
+      "category_name": "열쇠",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keys",
+        "color": [
+          "blue"
+        ],
+        "material": "metal",
+        "shape": "불규칙형",
+        "surface_texture": "직조 표면",
+        "structure": [
+          "고리"
+        ],
+        "brand": "Muji",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠. 색상: blue."
+      }
+    },
+    {
+      "item": "N19",
+      "group": "normal",
+      "category_name": "휴대폰",
+      "found_location": "중앙도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "phone",
+        "color": [
+          "red"
+        ],
+        "material": "plastic",
+        "shape": "직사각형",
+        "surface_texture": "매끄러운 표면",
+        "structure": [
+          "버튼"
+        ],
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 휴대폰. 색상: red."
+      }
+    },
+    {
+      "item": "N20",
+      "group": "normal",
+      "category_name": "안경",
+      "found_location": "공학관 복도",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "glasses",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": "타원형",
+        "surface_texture": "광택 표면",
+        "structure": [
+          "접이식 다리"
+        ],
+        "brand": "Nike",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 안경. 색상: black."
+      }
+    },
+    {
+      "item": "N21",
+      "group": "normal",
+      "category_name": "카드지갑",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "card_case",
+        "color": [
+          "white"
+        ],
+        "material": "leather",
+        "shape": "직사각형",
+        "surface_texture": "직조 표면",
+        "structure": [
+          "카드 슬롯"
+        ],
+        "brand": "Adidas",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 카드지갑. 색상: white."
+      }
+    },
+    {
+      "item": "N22",
+      "group": "normal",
+      "category_name": "가방",
+      "found_location": "중앙도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "bag",
+        "color": [
+          "blue"
+        ],
+        "material": "metal",
+        "shape": "직사각형",
+        "surface_texture": "매끄러운 표면",
+        "structure": [
+          "지퍼"
+        ],
+        "brand": "Muji",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 가방. 색상: blue."
+      }
+    },
+    {
+      "item": "N23",
+      "group": "normal",
+      "category_name": "열쇠",
+      "found_location": "공학관 복도",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "keys",
+        "color": [
+          "red"
+        ],
+        "material": "plastic",
+        "shape": "불규칙형",
+        "surface_texture": "광택 표면",
+        "structure": [
+          "고리"
+        ],
+        "brand": "Generic",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 열쇠. 색상: red."
+      }
+    },
+    {
+      "item": "N24",
+      "group": "normal",
+      "category_name": "휴대폰",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "phone",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": "직사각형",
+        "surface_texture": "직조 표면",
+        "structure": [
+          "버튼"
+        ],
+        "brand": "Nike",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 휴대폰. 색상: black."
+      }
+    },
+    {
+      "item": "N25",
+      "group": "normal",
+      "category_name": "안경",
+      "found_location": "중앙도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "glasses",
+        "color": [
+          "white"
+        ],
+        "material": "leather",
+        "shape": "타원형",
+        "surface_texture": "매끄러운 표면",
+        "structure": [
+          "접이식 다리"
+        ],
+        "brand": "Adidas",
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 안경. 색상: white."
+      }
+    },
+    {
+      "item": "P01",
+      "group": "similar",
+      "category_name": "필통",
+      "found_location": "도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "pencil_case",
+        "color": [
+          "navy"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Carhartt",
+        "visible_text": [
+          "MJ"
+        ],
+        "distinctive_features": [
+          "파란 원형 핀"
+        ],
+        "description": "합성 등록 물품 필통. 색상: navy."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "파란 원형 핀",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "MJ",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "material",
+          "field": "material",
+          "value": "fabric",
+          "group": "material",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "brand",
+          "field": "brand",
+          "value": "Carhartt",
+          "group": "brand",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "color",
+          "field": "color",
+          "value": "navy",
+          "group": "color",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    },
+    {
+      "item": "P02",
+      "group": "similar",
+      "category_name": "필통",
+      "found_location": "도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "pencil_case",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [
+          "AB"
+        ],
+        "distinctive_features": [
+          "빨간 사각 핀"
+        ],
+        "description": "합성 등록 물품 필통. 색상: black."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "빨간 사각 핀",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "AB",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    },
+    {
+      "item": "P03",
+      "group": "similar",
+      "category_name": "필통",
+      "found_location": "도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "pencil_case",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [
+          "AB"
+        ],
+        "distinctive_features": [
+          "빨간 사각 핀"
+        ],
+        "description": "합성 등록 물품 필통. 색상: black."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "빨간 사각 핀",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "AB",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    },
+    {
+      "item": "P04",
+      "group": "similar",
+      "category_name": "필통",
+      "found_location": "도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "pencil_case",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [
+          "AB"
+        ],
+        "distinctive_features": [
+          "초록 줄무늬 배지"
+        ],
+        "description": "합성 등록 물품 필통. 색상: black."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "초록 줄무늬 배지",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "AB",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    },
+    {
+      "item": "P05",
+      "group": "similar",
+      "category_name": "필통",
+      "found_location": "도서관 1층",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "pencil_case",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [
+          "AB"
+        ],
+        "distinctive_features": [
+          "초록 줄무늬 배지"
+        ],
+        "description": "합성 등록 물품 필통. 색상: black."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "초록 줄무늬 배지",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "AB",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    },
+    {
+      "item": "T01",
+      "group": "similar",
+      "category_name": "물병",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "water_bottle",
+        "color": [
+          "blue"
+        ],
+        "material": null,
+        "shape": "원통형",
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 물병. 색상: blue."
+      }
+    },
+    {
+      "item": "T02",
+      "group": "similar",
+      "category_name": "물병",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "water_bottle",
+        "color": [
+          "blue"
+        ],
+        "material": null,
+        "shape": "직육면체",
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 물병. 색상: blue."
+      }
+    },
+    {
+      "item": "T03",
+      "group": "similar",
+      "category_name": "물병",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "water_bottle",
+        "color": [
+          "blue"
+        ],
+        "material": null,
+        "shape": "직육면체",
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 물병. 색상: blue."
+      }
+    },
+    {
+      "item": "T04",
+      "group": "similar",
+      "category_name": "물병",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "water_bottle",
+        "color": [
+          "blue"
+        ],
+        "material": null,
+        "shape": "직육면체",
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 물병. 색상: blue."
+      }
+    },
+    {
+      "item": "T05",
+      "group": "similar",
+      "category_name": "물병",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "water_bottle",
+        "color": [
+          "blue"
+        ],
+        "material": null,
+        "shape": "직육면체",
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 물병. 색상: blue."
+      }
+    },
+    {
+      "item": "U01",
+      "group": "similar",
+      "category_name": "우산",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "umbrella",
+        "color": [
+          "black"
+        ],
+        "material": "nylon",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 우산. 색상: black."
+      }
+    },
+    {
+      "item": "U02",
+      "group": "similar",
+      "category_name": "우산",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "umbrella",
+        "color": [
+          "black"
+        ],
+        "material": "vinyl",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 우산. 색상: black."
+      }
+    },
+    {
+      "item": "U03",
+      "group": "similar",
+      "category_name": "우산",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "umbrella",
+        "color": [
+          "black"
+        ],
+        "material": "vinyl",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 우산. 색상: black."
+      }
+    },
+    {
+      "item": "U04",
+      "group": "similar",
+      "category_name": "우산",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "umbrella",
+        "color": [
+          "black"
+        ],
+        "material": "vinyl",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 우산. 색상: black."
+      }
+    },
+    {
+      "item": "U05",
+      "group": "similar",
+      "category_name": "우산",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "umbrella",
+        "color": [
+          "black"
+        ],
+        "material": "vinyl",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": null,
+        "visible_text": [],
+        "distinctive_features": [],
+        "description": "합성 등록 물품 우산. 색상: black."
+      }
+    },
+    {
+      "item": "W01",
+      "group": "similar",
+      "category_name": "지갑",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "wallet",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [
+          "AB"
+        ],
+        "distinctive_features": [
+          "은색 나뭇잎"
+        ],
+        "description": "합성 등록 물품 지갑. 색상: black."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "은색 나뭇잎",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "AB",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    },
+    {
+      "item": "W02",
+      "group": "similar",
+      "category_name": "지갑",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "wallet",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [
+          "AB"
+        ],
+        "distinctive_features": [
+          "은색 나뭇잎"
+        ],
+        "description": "합성 등록 물품 지갑. 색상: black."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "은색 나뭇잎",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "AB",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    },
+    {
+      "item": "W03",
+      "group": "similar",
+      "category_name": "지갑",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "wallet",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [
+          "CD"
+        ],
+        "distinctive_features": [
+          "갈색 고리"
+        ],
+        "description": "합성 등록 물품 지갑. 색상: black."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "갈색 고리",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "CD",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    },
+    {
+      "item": "W04",
+      "group": "similar",
+      "category_name": "지갑",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "wallet",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [
+          "CD"
+        ],
+        "distinctive_features": [
+          "갈색 고리"
+        ],
+        "description": "합성 등록 물품 지갑. 색상: black."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "갈색 고리",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "CD",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    },
+    {
+      "item": "W05",
+      "group": "similar",
+      "category_name": "지갑",
+      "found_location": "학생회관 입구",
+      "item_status": "stored",
+      "storage_assignment_status": "stored",
+      "searchable": true,
+      "features": {
+        "category": "wallet",
+        "color": [
+          "black"
+        ],
+        "material": "fabric",
+        "shape": null,
+        "surface_texture": null,
+        "structure": null,
+        "brand": "Generic",
+        "visible_text": [
+          "CD"
+        ],
+        "distinctive_features": [
+          "갈색 고리"
+        ],
+        "description": "합성 등록 물품 지갑. 색상: black."
+      },
+      "ownership_evidence": [
+        {
+          "feature_id": "distinctive_features",
+          "field": "distinctive_features",
+          "value": "갈색 고리",
+          "group": "distinctive_features",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        },
+        {
+          "feature_id": "visible_text",
+          "field": "visible_text",
+          "value": "CD",
+          "group": "visible_text",
+          "visibility": "private",
+          "verified": true,
+          "distinguishing": true
+        }
+      ]
+    }
+  ]
+}

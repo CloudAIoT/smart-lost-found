@@ -1,13 +1,17 @@
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
+import base64
 import json
 import sys
 from threading import Barrier
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+import httpx
 from PIL import Image
+from pydantic import SecretStr
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -16,9 +20,11 @@ from sqlalchemy.orm import Session
 from app.api import get_analyzer, get_gateway, get_store
 from app.config import Settings, get_settings
 from app.db import Base, get_session
-from app.integrations import AnalysisResult, IntegrationError
+from app.integrations import AnalysisResult, IntegrationError, S3ImageStore
+from app.inspect_analysis import inspect_analysis
 from app.main import app
-from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, StorageAssignment
+from app.models import (Category, DeviceCommand, DeviceState, FoundItem, ItemImage, Kiosk, Locker,
+                        Registration, StorageAssignment)
 from app.services import BusinessError, complete_deposit, open_deposit, search_stored_items
 
 
@@ -32,8 +38,8 @@ class FakeDevice:
         self.error = None
         self.on_open = None
 
-    def capture(self, kiosk_id, command_id, registration_id, expires_at):
-        self.captures.append((kiosk_id, command_id, registration_id))
+    def capture(self, kiosk_id, command_id, registration_id, expires_at, shot_order):
+        self.captures.append((kiosk_id, command_id, registration_id, shot_order))
         self.expiries.append(expires_at)
         if self.error:
             raise self.error
@@ -144,6 +150,7 @@ def test_full_deposit_and_duplicates(env):
     assert len(env.gateway.captures) == 2
     assert env.gateway.captures[0][1] != env.gateway.captures[1][1]
     assert env.gateway.captures[0][2] == env.gateway.captures[1][2]
+    assert [capture[3] for capture in env.gateway.captures] == [1, 2]
     assert env.client.post(base + "/shots/1").status_code == 200
     assert len(env.gateway.captures) == 2
     assert env.client.post(base + "/analysis").status_code == 200
@@ -207,6 +214,77 @@ def test_order_and_analysis_gates(env):
     assert env.gateway.opens == []
     env.analyzer.wrong_images = False
     assert env.client.post(base + "/analysis").status_code == 200
+
+
+@pytest.mark.parametrize("first_failure", [None, "provider", "schema"])
+def test_registration_api_reads_two_s3_photos_and_persists_gemini_json(env, monkeypatch, first_failure):
+    value = start(env)
+    base = f"/api/registrations/{value}"
+    for shot, color in enumerate(("red", "blue"), 1):
+        with Image.new("RGB", (2304, 1296), color=color) as photo, BytesIO() as jpeg:
+            photo.save(jpeg, format="JPEG")
+            env.gateway.jpeg = jpeg.getvalue()
+        assert env.client.post(f"{base}/shots/{shot}").status_code == 200
+    features = {
+        "category": "laptop", "color": ["silver"], "shape": "직사각형",
+        "surface_texture": "매끄러운 표면", "brand": "Samsung", "visible_text": ["SAMSUNG"],
+        "structure": ["힌지"], "distinctive_features": ["왼쪽 모서리의 작은 흠집"],
+    }
+    requests, reads = [], []
+
+    def respond(request):
+        requests.append(request)
+        assert 0 < request.extensions["timeout"]["read"] <= 90
+        parts = json.loads(request.content)["contents"][0]["parts"]
+        assert len(parts) == 3
+        for part, channel in zip(parts[1:], (0, 2)):
+            with Image.open(BytesIO(base64.b64decode(part["inline_data"]["data"]))) as photo:
+                assert photo.size == (1280, 720)
+                assert photo.getpixel((10, 10))[channel] > 200
+        if len(requests) == 1 and first_failure == "provider":
+            return httpx.Response(503, json={"error": {"message": "temporarily unavailable"}})
+        data = {**features, "color": 123} if len(requests) == 1 and first_failure == "schema" else features
+        return httpx.Response(200, json={"candidates": [{
+            "finishReason": "STOP", "content": {"parts": [{"text": json.dumps(data)}]},
+        }]})
+
+    class S3:
+        def get_object(self, *, Bucket, Key):
+            assert Bucket == "test-bucket"
+            reads.append(Key)
+            return {"Body": BytesIO(env.store.objects[Key])}
+
+    real_client = httpx.Client
+    monkeypatch.setattr("app.api.httpx.Client", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(respond), **kwargs))
+    env.settings.gemini_api_key = SecretStr("test-key")
+    env.settings.gemini_model = "test-model"
+    del app.dependency_overrides[get_analyzer]
+    app.dependency_overrides[get_store] = lambda: S3ImageStore(S3(), "test-bucket", 60, 1024 * 1024)
+
+    response = env.client.post(base + "/analysis")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "ready"
+    assert response.json()["analysis_status"] == "succeeded"
+    assert "analysis_features" not in response.json()
+    assert "왼쪽 모서리" not in response.text
+    with Session(env.engine) as session:
+        report = inspect_analysis(session, UUID(value))
+        assert report["verified"]
+        # Persist Korean labels even when a provider returns known English aliases.
+        assert report["analysis_features"] == {**features, "category": "노트북", "color": ["은색"]}
+        assert report["analysis_input_image_ids"] == [image["id"] for image in response.json()["images"]]
+        keys = list(session.scalars(select(ItemImage.object_key).where(
+            ItemImage.registration_id == UUID(value)).order_by(ItemImage.shot_order)))
+    call_count = 2 if first_failure else 1
+    # Provider/model retries reuse the same S3 bytes and preprocessed images.
+    assert reads == keys
+    expected_models = ["test-model"] + (["gemini-3.1-flash-lite"] if first_failure else [])
+    assert [request.url.path.split("/")[-1].removesuffix(":generateContent") for request in requests] == expected_models
+    assert env.client.post(base + "/analysis").status_code == 200
+    assert len(requests) == call_count
+    assert len(reads) == 2
+    assert env.settings.gemini_timeout_seconds == 30
 
 
 def deeply_nested_features():
@@ -474,3 +552,69 @@ def test_postgres_concurrent_completion_preserves_first_timestamp(env):
     with ThreadPoolExecutor(max_workers=2) as pool:
         timestamps = list(pool.map(complete, [1, 2]))
     assert timestamps[0] == timestamps[1]
+
+
+def report_locker(env, item, *, locker_number=1, seconds_ago=0.0, online=True):
+    """Write what the locker told the server over MQTT, exactly as the subscriber would.
+
+    The controller row (locker_number 0) carries the connection; without an online controller a
+    locker reading is too old to trust, so tests that expect a decision must write both.
+    """
+    moment = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
+    with Session(env.engine) as session:
+        session.merge(DeviceState(kiosk_id=UUID(env.kiosk_id), device="locker", locker_number=0,
+                                  connection="online" if online else "offline",
+                                  reported_at=moment, updated_at=moment))
+        if item is not None:
+            session.merge(DeviceState(kiosk_id=UUID(env.kiosk_id), device="locker",
+                                      locker_number=locker_number, door="closed",
+                                      weight_g=120.0 if item == "present" else 0.0, item=item,
+                                      reported_at=moment, updated_at=moment))
+        session.commit()
+
+
+def test_deposit_waits_until_the_locker_reports_the_item(env):
+    """An empty locker contradicts the deposit the user declared, and the device says so a second
+    later as ITEM_NOT_DEPOSITED. The completion is refused until the item is actually in there."""
+    value = ready(env)
+    base = f"/api/registrations/{value}"
+    assert env.client.post(base + "/deposit/open").status_code == 200
+
+    report_locker(env, "empty")
+    blocked = env.client.post(base + "/deposit/complete", json={"confirmed": True})
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["detail"]["code"] == "ITEM_NOT_DETECTED"
+    assert env.client.get(base).json()["status"] == "awaiting_deposit"
+    with Session(env.engine) as session:
+        # Refusing wrote nothing: the locker is still held for this registration.
+        assignment = session.scalar(select(StorageAssignment))
+        assert (assignment.status, assignment.deposited_at) == ("awaiting_deposit", None)
+        assert session.scalar(select(FoundItem)).status == "awaiting_deposit"
+
+    # The door is shut, so the user needs it opened again before the item can go in.
+    opens_before = len(env.gateway.opens)
+    reopened = env.client.post(base + "/deposit/reopen")
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["locker_number"] == 1
+    assert len(env.gateway.opens) == opens_before + 1
+
+    report_locker(env, "present")
+    done = env.client.post(base + "/deposit/complete", json={"confirmed": True})
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "stored"
+
+
+@pytest.mark.parametrize("reading", ["none", "older_than_the_open", "controller_offline"])
+def test_completion_ignores_a_reading_that_cannot_answer(env, reading):
+    """No row, a reading older than the open, or an offline controller all leave the old rule in
+    place: the user's confirmation plus a closed door. MQTT being absent must change nothing."""
+    if reading == "older_than_the_open":
+        report_locker(env, "empty", seconds_ago=600)
+    value = ready(env)
+    base = f"/api/registrations/{value}"
+    assert env.client.post(base + "/deposit/open").status_code == 200
+    if reading == "controller_offline":
+        report_locker(env, "empty", online=False)
+    done = env.client.post(base + "/deposit/complete", json={"confirmed": True})
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "stored"

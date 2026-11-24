@@ -169,7 +169,7 @@ erDiagram
 | registration_id | uuid FK → registrations, UNIQUE | 필수, 출처 등록 |
 | status | text | 필수, `awaiting_deposit / stored / awaiting_pickup / returned` 제안 |
 
-구현 반영(2026-11-11): 상태 CHECK는 `awaiting_deposit / stored / retrieved` 3개다. 수령 대기는 물건이 아니라 배정 상태로만 두고, 반환 완료는 `returned` 대신 `retrieved`로 적는다.
+구현 반영(2026-11-21): 상태 CHECK는 `awaiting_deposit / stored / retrieved / missing` 4개다. 수령 대기는 물건이 아니라 배정 상태로만 두고, 반환 완료는 `returned` 대신 `retrieved`로 적는다. `missing`은 강제 개방 뒤 보관 물품이 사라진 `ITEM_MISSING` 사고 상태다.
 
 이미지 두 장과 분석이 준비된 등록 완료 요청에서 물건을 만들고 `awaiting_deposit`로 두는 안이다. 이 행의 생성이 실제 투입 완료를 뜻하지 않는다. 실패·취소된 배정과 물건의 정리 정책은 Q03에서 결정한다. 등록 정보는 위 등록 FK로 참조하며 동일 카테고리를 양쪽에 독립 수정하는 중복 필드는 제안하지 않는다.
 
@@ -186,9 +186,9 @@ erDiagram
 | retrieved_at | timestamptz | 수령 완료 확인 전 NULL |
 | ended_at | timestamptz | 유효 배정 중 NULL. 완료·취소로 해제된 시점 |
 
-구현 반영(2026-11-11): 상태 CHECK는 `reserved / awaiting_deposit / stored / awaiting_pickup / retrieved / cancelled`이고, `ended_at` 일치 제약은 `cancelled`와 `retrieved` 두 상태를 묶는다. `retrieved_at`과 `completed` 상태는 두지 않았다. 수령 완료 시 `status = 'retrieved'`와 `ended_at`을 같은 트랜잭션에서 기록해 칸을 해제한다.
+구현 반영(2026-11-21): 상태 CHECK는 `reserved / awaiting_deposit / stored / awaiting_pickup / retrieved / cancelled / missing`이고, `ended_at` 일치 제약은 `cancelled / retrieved / missing` 세 상태를 묶는다. `retrieved_at`과 `completed` 상태는 두지 않았다. 수령 완료는 `retrieved`, 강제 개방 뒤 물품 사라짐은 `missing`과 `ended_at`을 같은 트랜잭션에서 기록해 칸을 해제한다.
 
-`ended_at IS NULL`인 행에 대해 `locker_id`, `found_item_id` 각각 부분 UNIQUE 인덱스를 제안한다. 예약·개방 중·결과 불명·수령 대기에서도 배정을 유지한다. `completed/cancelled`와 `ended_at`의 일치 제약, `retrieved_at >= deposited_at` 등 시각 검증은 상태 계약과 함께 확정한다. 개방 성공만으로 배정을 종료하지 않는다.
+`ended_at IS NULL`인 행에 대해 `locker_id`, `found_item_id` 각각 부분 UNIQUE 인덱스를 제안한다. 예약·개방 중·결과 불명·수령 대기에서도 배정을 유지한다. `cancelled/retrieved/missing`과 `ended_at`의 일치 제약, `retrieved_at >= deposited_at` 등 시각 검증은 상태 계약과 함께 확정한다. 개방 성공만으로 배정을 종료하지 않는다.
 
 ### 5.9 item_features
 
@@ -296,16 +296,19 @@ GET 상태 조회에 명령 ID가 필요하다는 요구는 없으므로 이를 
 8. DB 트랜잭션과 물리 개방·외부 이미지 저장은 하나의 원자적 작업이 아니다. 명령 기록→외부 호출→결과 기록 사이의 장애 복구 정책을 Q10에서 정한다.
 9. `opened` 확인 후 코드 사용 처리와 명령 성공을 기록한다. 수령 완료는 별도의 완료 확인 뒤 배정을 종료한다. 결과 불명일 때 배정이나 코드 처리 잠금을 무조건 해제하지 않는 방안을 제안한다.
 10. 물건·배정 양쪽의 상태를 저장한다면 같은 트랜잭션에서 전이시킨다. 상태 중복을 없애고 배정에서 파생하는 대안도 구현 전에 검토한다.
+11. `ITEM_MISSING`은 사용자 완료가 아닌 사고 전이다. 경고·물품 `missing`·배정 `missing/ended_at`·미사용 코드 폐기를 같은 트랜잭션에 두고 등록 이력은 유지한다.
 
 | 업무 구간 | 전이 제안 | 확정 조건 |
 | --- | --- | --- |
 | 등록 준비 | 촬영 중 → 사진 준비 → 분석 중 → 분석 성공 | 사진 두 장은 S2·S4, 분석 성공 선행은 D04, 실패 재시도 정책은 Q04·Q07 |
 | 등록 개방 | 빈 칸 예약 → 개방 중 → 투입 대기 | opened 전 번호 표시 금지는 S2 |
-| 투입 완료 | 투입 대기 → 보관 중 | 성공한 개방 이후 사용자 완료 확인 + 센서 closed(D03·D06) |
+| 투입 완료 | 투입 대기 → 보관 중 | 성공한 개방 이후 사용자 완료 확인 + 센서 closed(D03·D06). 이번 개방 이후 받은 MQTT 칸 상태가 `item=empty`면 완료하지 않는다 |
 | 질문 생성 | 대상 물건 선택 → 특징 선별 → 질문 준비 또는 정보 부족 | 선별 규칙과 결과 구조는 S5 실험안, 공개 API·재생성 정책은 Q05 |
 | 답변 평가 | 답변 제출 → 평가 중 → 판정 기록 | 평가 결과와 승인 기준은 Q05·Q06 |
 | 수령 개방 | 코드 발급 → 처리 중 → 개방 성공·코드 사용 | S2 6.2; 결과 불명은 별도 보류 제안 |
-| 수령 완료 | 수령 대기 → 반환 완료·배정 종료 | 성공한 개방 이후 사용자 완료 확인 + 센서 closed(D03·D06) |
+| 수령 완료 | 수령 대기 → 반환 완료·배정 종료 | 성공한 개방 이후 사용자 완료 확인 + 센서 closed(D03·D06). 이번 개방 이후 받은 MQTT 칸 상태가 `item=present`면 완료하지 않는다 |
+| 재개방 | 투입 대기·수령 대기 유지 | 완료가 거절된 칸을 다시 연다. 새 `device_commands` 행만 생기고 배정·반환 코드는 그대로다 |
+| 강제 개방 후 분실 | 보관 중 → 물품·배정 `missing`, 배정 종료 | `ITEM_MISSING` 경고가 유일한 사고 신호다. 등록은 유지하고 미사용 반환 코드는 폐기한다 |
 | 장치 실패 | sent → failed 또는 unknown | 명확한 실패와 응답 유실 구분 제안, Q10 |
 
 부분 UNIQUE·CHECK·복합 FK·서비스 검증 중 어떤 수단으로 각 제약을 보장할지는 물리 ERD 작성 시 결정한다. 새로 제안한 제약을 이미 구현된 보장으로 해석하지 않는다.

@@ -1445,7 +1445,14 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
         setPickupBlocked(false);
         pickupOpenedAtRef.current = new Date().toISOString();
       },
-      { inline: true },
+      {
+        inline: true,
+        // 남아 있는 물건을 알릴 때는 어느 칸인지 같이 말해 주는 편이 찾기 쉽다.
+        mapError: (err) =>
+          err?.code === 'ITEM_STILL_INSIDE'
+            ? `${pickup.locker_number}번 보관함에 물건이 남아 있어요. 다시 열어 꺼내 주세요. (ITEM_STILL_INSIDE)`
+            : errorText(err),
+      },
     );
   };
 

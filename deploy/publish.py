@@ -56,9 +56,12 @@ def main():
     payload = {key: os.environ.get(key, "") for key in
                ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "S3_BUCKET", "S3_REGION")}
     payload["BUSINESS_API_ENABLED"] = os.environ.get("BUSINESS_API_ENABLED", "false")
-    # Pi 설정은 전부 선택값이다. 비어 있으면 아예 빼서, render_config의 "값은 비어 있으면 안 된다" 검사를 그대로 둔다.
+    # 비어 있는 선택 설정은 런타임 구성에서 생략한다.
     for key in ("COMMAND_TTL_SECONDS", "PI_TIMEOUT_SECONDS", "MAX_IMAGE_BYTES", "PREVIEW_TTL_SECONDS",
-               "RETURN_CODE_TTL_SECONDS", "PI_DEVICES"):
+               "RETURN_CODE_TTL_SECONDS", "PI_DEVICES", "GEMINI_API_KEY", "GEMINI_MODEL",
+               "IMAGE_ANALYSIS_TIMEOUT_SECONDS", "DEV_FAKE_DEVICE",
+               "MQTT_HOST", "MQTT_PORT", "MQTT_USERNAME", "MQTT_PASSWORD", "MQTT_CLIENT_ID",
+               "MQTT_ALERT_RETENTION_DAYS", "MQTT_BIND_ADDRESS"):
         value = os.environ.get(key, "")
         if value:
             payload[key] = value

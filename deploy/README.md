@@ -38,12 +38,35 @@ Swagger 주소는 `http://52.78.12.168/docs`다. 업무 API는 GitHub production
 | Variable | MAX_IMAGE_BYTES | 백엔드가 받는 촬영 사진 크기 상한 |
 | Variable | PREVIEW_TTL_SECONDS | 미리보기 서명 URL 유효 시간(초) |
 | Variable | RETURN_CODE_TTL_SECONDS | 반환 코드 유효 시간(초) |
+| Secret | GEMINI_API_KEY | 등록 사진 분석과 분실물 검색·문답 생성용 Gemini 키 |
+| Variable | GEMINI_MODEL | 키오스크 등록 사진 분석에 사용할 Gemini 모델 이름 |
+| Variable | DEV_FAKE_DEVICE | true: Pi 대신 개발용 가짜 장치 사용. 값이 없거나 false면 실제 Pi를 호출한다 |
+| Variable | IMAGE_ANALYSIS_TIMEOUT_SECONDS | 사진 2장 분석 대기 시간. 기본 90초, 허용 5~90초. 소유 확인 텍스트 요청의 대기 시간과 별도 |
+| Variable | MQTT_HOST | 장치 상태 구독 대상. Compose에서는 `mqtt`. 비우면 구독을 시작하지 않는다 |
+| Variable | MQTT_PORT | 기본 1883 |
+| Variable | MQTT_USERNAME | 백엔드용 브로커 계정. ACL에서 읽기 전용이다 |
+| Secret | MQTT_PASSWORD | 그 계정의 비밀번호 |
+| Variable | MQTT_CLIENT_ID | 기본 `slf-backend`. 백엔드가 꺼진 동안의 경고 큐가 이 값에 묶인다 |
+| Variable | MQTT_ALERT_RETENTION_DAYS | 경고 보관 기간. 기본 14일 |
+| Variable | MQTT_BIND_ADDRESS | 브로커 1883을 공개할 EC2 주소. **Tailscale 주소(`100.x.y.z`)만 넣는다.** 비우면 127.0.0.1에만 열려 Pi가 닿지 못한다 |
+
+로컬 `backend/.env`의 Gemini 설정은 EC2에 자동으로 전달되지 않는다. 위 GitHub production Secret·Variable을 설정하고 배포해야 SSM SecureString과 런타임 환경에 반영된다. 사진 분석 경로의 Nginx 응답 대기 시간은 120초다. 배포 후 등록 ID로 호출하고 저장 JSON을 읽는 방법은 [분석·DB 저장 확인](../docs/api.md#등록-id로-사진-분석db-저장-확인)을 따른다.
 
 Pi 설정 6종은 모두 선택값이다. 전부 비우면 지금처럼 Pi·수령 기능이 미설정 오류를 낸다. 하나라도
 빈 문자열로 두면 그 키 자체를 보내지 않는다(`deploy/publish.py`). `PI_DEVICES`는 EC2가 두 Pi와
 같은 tailnet에 있어야 닿는다. 값은 `backend/.env.example`의 `PI_DEVICES` 예시와 같은 JSON 한 줄이고,
 키오스크 ID마다 `capture_url`·`capture_api_key`·`locker_url`·`locker_api_key` 네 개가 모두 있어야
 한다. EC2의 Tailscale 설치·인증은 이 문서 범위 밖이며 이미 되어 있다고 가정한다.
+
+`DEV_FAKE_DEVICE=true`는 Pi를 부르는 자리에 `app.dev_device`의 개발용 가짜 장치를 끼운다. 촬영은 이미지에
+들어 있는 더미 JPEG 2장을 촬영 순서대로 돌려주고, 보관함 개방은 성공으로, 문 상태는 항상 `closed`로
+답한다. S3 저장·미리보기 URL·상태 전이·DB 기록은 실제 경로 그대로다. 이 값은 Pi 없이 FE 흐름을
+확인할 때만 켜고, 실제 물건을 보관하는 운영에서는 끈다. 장치 호출이 실패했다고 자동으로 가짜 장치로
+넘어가지는 않는다.
+
+`DEV_FAKE_DEVICE=true`를 켠 상태에서 FE 질문 화면용 보관 물품 10건을 만들거나 보관 상태로 되돌리려면
+`sudo docker exec smart-lost-found-prod-backend-1 python -m app.seed_demo_items`를 실행한다. 내용과 되돌리기
+규칙은 [개발 확인용 보관 물품](../docs/api.md#개발-확인용-보관-물품-10건)에 있다.
 
 Variables/Secrets 변경만으로 배포 이벤트가 발생하지 않는다. 저장소 Actions → Backend CI and EC2 deployment → Run workflow → **main**으로 재배포한다. `.env`나 장기 AWS 액세스 키를 Git에 올리지 않는다. 이미지 안에도 비밀값을 넣지 않는다.
 
@@ -86,6 +109,75 @@ GitHub와 서버의 배포 잠금으로 동시 배포를 직렬화한다. GitHub
 `smart-lost-found-postgres-production` 볼륨은 개발 Compose 볼륨과 분리한다. 배포 스크립트는 `down -v`나 DB 볼륨 삭제를 실행하지 않는다. t3.micro에 맞춰 앱 worker는 1개, 컨테이너 메모리와 로그 크기를 제한했다. 부하 검증과 필요 시 인스턴스 확대는 별도 작업이다.
 
 백업은 `/opt/smart-lost-found/backups/릴리스ID.dump`에 저장한다. 서버 디스크 장애 대비 원격 백업과 보존 기간·자동 정리는 아직 미구현이다. 릴리스·이미지·백업이 누적되므로 디스크 사용량을 확인해야 한다. 복구는 별도 DB에 `pg_restore`로 검증한 뒤 진행한다.
+
+## 장치 상태 MQTT 브로커
+
+Pi가 보내는 센서 상태와 이상 상황을 받는 Mosquitto를 같은 EC2에 둔다. 규약은 [MQTT 규약](../docs/mqtt-protocol.md)이다.
+
+AWS 쪽에서 **바꿀 것이 없다.** Pi와 EC2가 같은 tailnet에 있으므로 1883을 보안 그룹에 열지 않는다. 열면 평문 MQTT가 인터넷에 노출된다. Tailscale 조율 트래픽은 기존 아웃바운드로 충분하고, 탄력적 IP·Route 53·IAM 역할·인스턴스 타입도 그대로다. 브로커는 AWS API를 호출하지 않는다.
+
+연결 범위는 두 구간으로 나뉜다.
+
+- Pi → 브로커: EC2의 Tailscale 주소 `100.x.y.z:1883`. Compose가 그 주소에만 포트를 공개한다(`MQTT_BIND_ADDRESS`).
+- 백엔드 → 브로커: Compose 내부 네트워크의 `mqtt:1883`. 호스트 네트워크를 거치지 않는다.
+
+계정·권한 파일은 비밀값이라 저장소에 두지 않고 서버에 직접 넣는다. [deploy/mosquitto/](mosquitto/)에 `mosquitto.conf`와 `acl` 사본이 있고, `passwords`만 서버에서 만든다. 세 파일이 모두 있을 때만 `deploy.sh`가 브로커를 올리므로, 넣지 않은 서버의 배포는 지금과 똑같이 동작한다.
+
+```bash
+ssh -i ~/.ssh/smart-lost-found.pem ubuntu@100.73.97.89
+
+sudo mkdir -p /opt/smart-lost-found/mosquitto
+
+# 저장소의 두 파일을 올린다. 워크스테이션에서 홈으로 scp한 뒤 옮긴다.
+#   scp -i <키> deploy/mosquitto/mosquitto.conf deploy/mosquitto/acl ubuntu@<주소>:~/
+sudo mv ~/mosquitto.conf ~/acl /opt/smart-lost-found/mosquitto/
+
+# 계정 3개. 비밀번호는 대화형으로 두 번씩 입력한다.
+# --user root가 없으면 이미지의 mosquitto 사용자가 root 소유 디렉터리에 파일을 만들지 못한다.
+#
+# 한 번에 세 줄을 붙여넣지 않는다. mosquitto_passwd가 붙여넣기 버퍼에 남은 다음 줄을
+# 비밀번호로 읽어, 틀렸다는 말도 없이 엉뚱한 값이 등록된다. 한 줄씩 실행하고 끝까지 기다린다.
+# -c는 첫 계정에만 쓴다. 두 번째부터 쓰면 앞의 계정이 지워진다.
+sudo docker run --rm -it --user root -v /opt/smart-lost-found/mosquitto:/work \
+  eclipse-mosquitto:2.0 mosquitto_passwd -c /work/passwords capture-pi
+
+sudo docker run --rm -it --user root -v /opt/smart-lost-found/mosquitto:/work \
+  eclipse-mosquitto:2.0 mosquitto_passwd /work/passwords locker-pi
+
+sudo docker run --rm -it --user root -v /opt/smart-lost-found/mosquitto:/work \
+  eclipse-mosquitto:2.0 mosquitto_passwd /work/passwords backend
+
+# 컨테이너의 mosquitto 사용자(uid 1883)가 읽을 수 있어야 한다. 빠뜨리면 브로커가 뜨다 죽는다.
+# 배포 디렉터리는 root 전용이라 cd로 들어갈 수 없다(sudo cd도 쉘 빌트인이라 안 된다). 절대 경로로 쓴다.
+sudo chown 1883:1883 /opt/smart-lost-found/mosquitto/{mosquitto.conf,acl,passwords}
+sudo chmod 0400 /opt/smart-lost-found/mosquitto/{mosquitto.conf,acl,passwords}
+sudo ls -l /opt/smart-lost-found/mosquitto   # -r-------- 1 1883 1883 세 줄
+```
+
+그다음 GitHub production에 위 표의 `MQTT_*`를 넣고 main에서 워크플로를 재실행한다. `MQTT_BIND_ADDRESS`는 이 서버의 Tailscale 주소이고 `MQTT_HOST`는 `mqtt`다. 둘을 바꿔 넣으면 Pi가 닿지 못하거나 포트가 잘못 열린다.
+
+`mqtt` 서비스와 브로커 분기는 이미지에 담겨 배포된다. 그래서 **브로커를 추가한 커밋이 main에 들어간 뒤에 재배포해야** 한다. 그 전에 설정만 넣고 배포하면 브로커 없이 백엔드가 재접속만 반복한다.
+
+점검:
+
+```bash
+# 브로커가 떴는지, Tailscale 주소에만 열렸는지
+sudo docker ps --filter name=smart-lost-found-prod-mqtt-1
+sudo ss -lntp | grep 1883          # 100.x.y.z:1883 만 보여야 한다
+
+# 백엔드가 붙어 구독을 시작했는지
+sudo docker logs --tail 20 smart-lost-found-prod-backend-1 | grep -i mqtt
+
+# 메시지가 들어오는지 (백엔드 계정은 읽기 전용이라 이 구독이 ACL 확인도 된다)
+sudo docker exec -it smart-lost-found-prod-mqtt-1 \
+  mosquitto_sub -h 127.0.0.1 -u backend -P '<비밀번호>' -t 'slf/#' -v
+```
+
+Pi 두 대의 `.env`에는 `PI_MQTT_HOST=100.73.97.89`과 각자의 계정(`capture-pi`, `locker-pi`)을 넣고 서비스를 다시 켠다([라즈베리파이 README](../raspberry-pi/README.md#가상-센서와-mqtt)).
+
+경고는 보존 메시지가 아니라서, 백엔드가 배포로 교체되는 동안 발행된 경고는 브로커의 세션 큐에만 남는다. 그래서 백엔드는 고정 `MQTT_CLIENT_ID`로 세션을 유지한다. 같은 ID를 쓰는 두 번째 구독자를 붙이면 서로 연결을 끊고 그 큐를 잃는다. 로컬에서 운영 브로커에 붙어 볼 때는 다른 ID를 쓴다.
+
+브로커 상태와 큐는 `smart-lost-found-mosquitto-production` 볼륨에 남는다. 배포 스크립트는 이 볼륨을 지우지 않는다.
 
 ## 도메인이 정해진 뒤 HTTPS
 

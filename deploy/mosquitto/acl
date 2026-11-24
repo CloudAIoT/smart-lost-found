@@ -1,0 +1,19 @@
+# 주제 권한 (docs/mqtt-protocol.md 2절)
+#
+# 저장소의 사본이다. 운영 값은 EC2의 /opt/smart-lost-found/mosquitto/acl 이다.
+# acl_file이 지정되면 여기에 없는 주제는 모두 거부된다.
+#
+# Pi는 자기 키오스크 아래로 보내기만 하고, 백엔드는 받기만 한다.
+# 구독자가 발행할 수 없으므로 장치 상태를 위조하는 경로가 생기지 않는다.
+
+user capture-pi
+topic write slf/+/capture/#
+topic write slf/+/alerts
+
+user locker-pi
+topic write slf/+/locker/#
+topic write slf/+/lockers/#
+topic write slf/+/alerts
+
+user backend
+topic read slf/#

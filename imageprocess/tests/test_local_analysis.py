@@ -21,7 +21,7 @@ def test_local_mock_pipeline_saves_explicitly_marked_result(tmp_path, monkeypatc
     assert result['backend'] == 'mock'
     assert result['model_name'] is None
     assert 'MOCK_INFERENCE' in result['warnings']
-    assert result['data']['category'] == 'unknown'
+    assert all(value is None for value in result['data'].values())
     assert all(value >= 0 for value in result['timings_ms'].values())
 
 
@@ -63,16 +63,18 @@ def test_missing_file_returns_failure_without_model_loading(tmp_path, capsys):
 def test_local_category_reaches_model_without_overriding_its_prediction(tmp_path):
     image = tmp_path / 'item.png'
     Image.new('RGB', (96, 64), 'white').save(image)
-    payload = {'category': 'pencil_case', 'color': ['black'], 'material': 'unknown',
-               'brand': None, 'visible_text': [], 'distinctive_features': [],
-               'description': 'A black pencil case.'}
+    payload = {'category': 'pencil_case', 'color': ['black'], 'shape': '직사각형',
+               'surface_texture': None, 'brand': None, 'visible_text': None,
+               'structure': None, 'distinctive_features': None}
     service = Mock()
     service.infer.return_value = json.dumps(payload)
     result = analyze_file(image, Settings(_env_file=None, inference_backend='mock'), service, category=' 필통 ')
     assert service.infer.call_args.kwargs == {'category': '필통'}
     service.load.assert_called_once()
     assert result['input_category'] == '필통'
-    assert result['data']['category'] == 'pencil_case'
+    assert result['data']['category'] == '필통'
+    assert result['data']['color'] == ['검정색']
+    assert result['comparison_metadata']['feature_schema'] == 'fixed_common_v3_ko'
 
 
 def test_cli_accepts_category_without_requesting_notes(tmp_path, monkeypatch, capsys):

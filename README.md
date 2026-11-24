@@ -2,6 +2,7 @@
 
 백엔드 로컬 개발 환경의 준비·실행·테스트 방법은 [backend/README.md](backend/README.md)를 참고한다.
 웹 포털·키오스크 프론트엔드는 [frontend/README.md](frontend/README.md)를 참고한다. 배포 후 `http://52.78.12.168/`에서 접속한다.
+프론트 연동 순서·요청/응답·상태·오류 처리는 [백엔드 전체 기능 명세](backend/docs/functional-spec.md)를 기준으로 확인한다.
 
 ## 파트 전체를 잇는 종단 테스트
 
@@ -49,6 +50,25 @@ MagicDNS 이름이 안 되면 Pi에서 `tailscale ip -4`로 본 `100.x.y.z` 주�
 - 원격 Pi는 테스트 사이에 문 상태와 명령 기록이 남는다. 각 테스트는 두 칸의 문이 닫힌 뒤에 시작한다.
 - 주소나 키가 틀리면 테스트가 Tailscale과 `PI_API_KEY` 확인 방법을 적어 실패한다.
 - Pi 쪽 준비는 [Tailscale 연결](raspberry-pi/deploy/setup.md)을 따른다.
+
+### EC2에서 MQTT 수신을 보며 등록하기
+
+친구 한 명은 배포된 키오스크에서 분실물 등록을 진행하고, 다른 터미널에서는 아래 도구를 켠다.
+브로커 비밀번호 없이 백엔드 조회 API를 사용하며, 상태가 보이면 Pi → EC2 Mosquitto → 백엔드
+구독·저장 → API 전 구간이 동작한 것이다.
+
+키오스크 화면 상단에서는 실제 Pi가 연결된 **Swagger 테스트 키오스크**를 선택한다. 다른 위치
+키오스크는 목록·거리 화면 확인용 더미이며 Pi 주소가 없어 촬영 단계에서 실패한다.
+
+```powershell
+python tests/manual/watch_ec2_mqtt.py --once       # 두 Pi와 보관함 상태가 이미 수신됐는지 검사
+python tests/manual/watch_ec2_mqtt.py              # 등록하는 동안 상태 변경·새 경고 계속 보기
+python tests/manual/watch_ec2_mqtt.py --timeout 120
+```
+
+기본 EC2 주소는 Tailscale의 `http://100.73.97.89`다. 다른 환경은 `--base-url`로 바꾼다.
+이 도구는 백엔드가 구독하는 장치 연결·센서 상태·경고를 보여 준다. MQTT `events` 토픽은 현재
+백엔드 구독 대상이 아니므로 촬영/문 이벤트 원문까지 보려면 `raspberry-pi/tools/watch.py`를 쓴다.
 
 ## 실제 Pi와 S3로 손으로 확인하기
 

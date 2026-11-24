@@ -13,13 +13,14 @@ from app.main import create_app
 
 
 FEATURES = {
-    'category': 'wallet',
-    'color': ['black'],
-    'material': 'leather',
+    'category': '지갑',
+    'color': ['검정색'],
+    'shape': '직사각형',
+    'surface_texture': '주름과 광택이 있는 표면',
     'brand': None,
     'visible_text': ['분실물'],
-    'distinctive_features': ['silver zipper'],
-    'description': 'A small black leather wallet with a silver zipper.',
+    'structure': ['전면 덮개'],
+    'distinctive_features': ['하단 중앙의 음각 표시'],
 }
 
 
@@ -90,6 +91,14 @@ def test_analyze_returns_validated_features_and_correlation_id():
     assert response.headers['x-request-id'] == body['request_id']
     assert len(service.images) == 1
     assert service.images[0].mode == 'RGB'
+
+
+def test_analyze_keeps_explicit_null_fields_in_response():
+    payload = dict.fromkeys(FEATURES)
+    with TestClient(create_app(settings(), FakeVisionService(output=json.dumps(payload)))) as client:
+        response = upload(client)
+    assert response.status_code == 200
+    assert response.json()['data'] == payload
 
 
 def test_invalid_file_is_rejected_before_inference():
@@ -304,7 +313,7 @@ def test_unsafe_request_id_is_replaced():
 
 def test_logs_contain_stages_and_request_id_without_private_input_or_output(caplog):
     output = json.dumps({**FEATURES, 'visible_text': ['private-printed-password'],
-                         'description': 'private-generated-description'})
+                         'distinctive_features': ['특징: private-generated-description']})
     service = FakeVisionService(output=output)
     caplog.set_level(logging.INFO)
     with TestClient(create_app(settings(), service)) as client:
@@ -339,6 +348,25 @@ def test_optional_category_is_passed_to_model_and_reported_separately():
     assert unhinted.status_code == 200
     assert unhinted.json()['input_category'] is None
     assert service.categories == ['필통', None]
+
+
+def test_api_normalizes_english_labels_and_preserves_original_brand_and_text():
+    data = {**FEATURES, 'category': 'wallet', 'color': ['white'],
+            'brand': 'Apple', 'visible_text': ['Designed by Apple']}
+    with TestClient(create_app(settings(), FakeVisionService(output=json.dumps(data)))) as client:
+        response = upload(client)
+    assert response.status_code == 200
+    result = response.json()['data']
+    assert result == {**data, 'category': '지갑', 'color': ['흰색']}
+
+
+def test_api_does_not_return_untranslated_feature_descriptions_as_success():
+    data = {**FEATURES, 'distinctive_features': ['private-English-description']}
+    with TestClient(create_app(settings(), FakeVisionService(output=json.dumps(data)))) as client:
+        response = upload(client)
+    body = assert_error(response, 502, 'INVALID_MODEL_OUTPUT')
+    assert 'distinctive_features' in body['error']['message']
+    assert 'private-English-description' not in json.dumps(body)
 
 
 @pytest.mark.parametrize('category', ['   ', 'a' * 101, '필통\n명령'])

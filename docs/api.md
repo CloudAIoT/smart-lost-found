@@ -1,6 +1,6 @@
 # 웹 → 백엔드 API 계약
 
-2026-11-21 현재 구현 기준. 화면별 흐름, 전체 21개 API의 요청·응답 필드, 상태 전이, 오류·중복 요청 처리와 FE 인수 기준은 [프론트 연동을 위한 백엔드 기능 명세](../backend/docs/functional-spec.md)를 따른다. 이 문서는 API 빠른 참조와 운영자 DB 확인 방법을 제공한다. Pi에 보내는 요청은 [장치 규약](device-protocol.md)을 따른다.
+2026-11-23 현재 구현 기준. 화면별 흐름, 전체 24개 API의 요청·응답 필드, 상태 전이, 오류·중복 요청 처리와 FE 인수 기준은 [프론트 연동을 위한 백엔드 기능 명세](../backend/docs/functional-spec.md)를 따른다. 이 문서는 API 빠른 참조와 운영자 DB 확인 방법을 제공한다. Pi에 보내는 요청은 [장치 규약](device-protocol.md)을 따른다.
 
 업무 API는 모두 `/api` 아래에 있다. 로컬에서는 `LOCAL_DEVELOPMENT=true`, EC2에서는 `BUSINESS_API_ENABLED=true`로 활성화한다. 둘 다 false면 503을 반환한다. 현재 로그인·키오스크 인증은 없으며, 활성화하면 인증 없이 호출할 수 있다. `/health`, `/ready`는 이 설정과 무관하다.
 
@@ -20,11 +20,11 @@ FE의 최초 키오스크 선택·저장·복원은 [FE-K01](web-structure.md#fe
 | GET | `/api/kiosks?limit=20&offset=0` | 개발용 위치 조회. ID·이름·장소 설명·위도·경도, 좌표는 NULL 허용 |
 | GET | `/api/categories` | 등록된 카테고리 ID·code·name. 기본 목록 없음 |
 | POST | `/api/registrations` | 아래 본문으로 생성, 201 |
-| GET | `/api/registrations/{id}` | 등록 상태·선택 입력·사진 ID/순서 조회 |
+| GET | `/api/registrations/{id}` | 등록 상태·선택 입력·사진 ID/순서 조회. 분석 진행 중에는 `analysis_stage`·`analysis_attempt`·`analysis_elapsed_ms`로 진행 표시 |
 | POST | `/api/registrations/{id}/shots/1` | Pi에서 첫 JPEG 촬영·S3 저장 |
 | POST | `/api/registrations/{id}/shots/2` | 사용자가 방향을 바꾼 후 둘째 촬영·저장 |
 | GET | `/api/registrations/{id}/shots/{1 또는 2}/preview` | `{"url":"..."}` 비공개 S3 임시 서명 URL |
-| POST | `/api/registrations/{id}/analysis` | 두 사진의 특징 추출 요청·결과 저장 |
+| POST | `/api/registrations/{id}/analysis` | 두 사진의 특징 추출 요청·결과 저장. 3초 안에 끝나지 않으면 `analysis_status=running`으로 응답 |
 | POST | `/api/registrations/{id}/deposit/open` | 분석 성공 확인·빈 칸 배정·개방 |
 | POST | `/api/registrations/{id}/deposit/complete` | `{"confirmed":true}` 사용자 완료 확인 → 문 조회 → 칸 상태 확인 → 보관 완료 |
 | POST | `/api/registrations/{id}/deposit/reopen` | 본문 없음. `ITEM_NOT_DETECTED`로 막힌 뒤 같은 칸을 다시 연다 |
@@ -172,8 +172,8 @@ sudo docker exec smart-lost-found-prod-backend-1 python -m app.seed_demo_items
 
 | 메서드 | 경로 | 입력·출력 |
 | --- | --- | --- |
-| POST | `/api/ownership/attempts` | `{"description":"도서관에서 남색 필통을 잃어버렸어요"}` → 질문 또는 검색 결과 |
-| GET | `/api/ownership/attempts/{attempt_id}` | 저장된 현재 질문 또는 완료 판정. 만료·이전 질문 제출 후 상태 확인 |
+| POST | `/api/ownership/attempts` | `{"description":"도서관에서 남색 필통을 잃어버렸어요"}` → 질문, 검색 결과, 또는 검색이 길어지면 `pending` |
+| GET | `/api/ownership/attempts/{attempt_id}` | 저장된 현재 질문·완료 판정 또는 진행 중 상태. `pending`이면 `retry_after_ms` 간격으로 재조회 |
 | POST | `/api/ownership/attempts/{attempt_id}/answers` | `{"question_id":"UUID","option_id":"UUID"}` → 다음 질문, `photo_confirmation`, 또는 최종 판정 |
 | GET | `/api/ownership/attempts/{attempt_id}/photo` | 확인용 등록 사진 `image/jpeg`. 응답 헤더 `X-Ownership-Photo-Token`을 다음 요청에 쓴다 |
 | POST | `/api/ownership/attempts/{attempt_id}/photo-confirmation` | `{"confirmed":true,"photo_token":"UUID"}` → `{"attempt","return_code"}`. **반환 코드를 받는 정상 경로** |
@@ -239,6 +239,16 @@ Pi가 [MQTT 규약](mqtt-protocol.md)으로 보낸 센서 상태와 이상 상�
 - `code`는 규약 4절의 6종이지만 그 밖의 값도 올 수 있다. 모르는 `code`는 `message`를 그대로 보여 준다.
 - 보관 기간(기본 14일)이 지난 경고는 지워진다. 경고를 해소 처리하는 API는 없다.
 - `MQTT_HOST`를 설정하지 않은 서버에서는 두 경로가 정상 응답하지만 내용이 비어 있다.
+
+## AI 통신 상태
+
+| 메서드 | 경로 | 입력·출력 |
+| --- | --- | --- |
+| GET | `/api/ai/status` | 모델 호출 실측 소요 시간·결과 코드 분포와 검색 제한값. 공급자를 호출하지 않음 |
+
+사진 분석도 같은 방식이다. `POST /api/registrations/{id}/analysis`가 등록을 `analyzing/running`으로 선점하고 배경에서 분석하며, 3초 안에 끝나지 않으면 그 상태를 그대로 반환한다. FE는 `GET /api/registrations/{id}`를 `analysis_retry_after_ms` 간격으로 호출해 `analysis_stage`(사진 준비·특징 분석·결과 확인)와 경과 시간을 표시한다. 분석 예산은 90초이고, 작업자가 사라진 등록은 조회 시 `draft/failed` + `ANALYSIS_TIMED_OUT`으로 정리되어 다시 요청할 수 있다. 자세한 절차는 [F08](../backend/docs/functional-spec.md#f08-두-사진-분석)에 있다.
+
+소유 확인 검색은 단서 추출·후보 비교·선택지 생성을 이어서 호출하므로 보관 건수와 공급자 응답에 따라 시간이 달라진다. 서버는 확인 시도를 먼저 저장하고 배경에서 검색하며, 3초 안에 끝나지 않으면 `pending`을 돌려준다. FE는 `attempt_id`로 조회를 반복해 진행 상황과 경과 시간을 표시한다. 한 검색의 예산은 25초이고 초과 시 502 `OWNERSHIP_AI_TIMEOUT`이다. 응답 형식과 필드는 [F02-A](../backend/docs/functional-spec.md#f02-a-ai-통신-상태와-소요-시간), 검색 계약은 [F09](../backend/docs/functional-spec.md#6-f09-자연어-검색질문소유-확인)를 따른다.
 
 ## 오류
 

@@ -11,7 +11,7 @@
 5. 확인 가능한 미질문 특징이 남아 있으면 다음 질문을 제공한다. 질문을 마쳤을 때 후보가 하나로 좁혀지면 해당 물품의 등록 사진 한 장을 보여 준다. 확인할 질문이 처음부터 없고 후보가 하나면 바로 사진 단계로 진행한다.
 6. 사용자에게 사진 속 물건이 본인 것인지 묻는다. 맞다고 확인하면 수령 OTP를 발급하고, 아니라고 하면 소유 확인 실패로 종료한다.
 
-검색은 종류·색상·형태·표면 질감·브랜드·문구·구조·구별 특징과 습득 위치를 비교한다. 이전 기록에 저장된 재질도 검색에 사용한다. 최대 100건을 한 배치로 보내고, Gemini는 배치의 각 물품에 포함 또는 제외 판정을 반환한다. 백엔드는 응답 형식과 배치 내 ID의 누락·중복 여부를 확인하고 포함 판정을 후보에 반영한다. 조회 상한인 500건을 넘으면 `search_limit`을 반환한다. 확인 질문에서 서로 다른 등록 값이 5개를 초과하면 다른 특징을 먼저 묻고, 후보가 줄어든 뒤 그 특징을 다시 검토할 수 있다.
+검색은 종류·색상·형태·표면 질감·브랜드·문구·구조·구별 특징과 습득 위치를 비교한다. 이전 기록에 저장된 재질도 검색에 사용한다. 최대 100건을 한 배치로 보내고, Gemini는 배치의 각 물품에 포함 또는 제외 판정을 반환한다. 배치가 여럿이면 최대 3개를 동시에 호출한다. 백엔드는 응답 형식과 배치 내 ID의 누락·중복 여부를 확인하고 포함 판정을 후보에 반영한다. 조회 상한인 500건을 넘으면 `search_limit`을 반환한다. 확인 질문에서 서로 다른 등록 값이 5개를 초과하면 다른 특징을 먼저 묻고, 후보가 줄어든 뒤 그 특징을 다시 검토할 수 있다.
 
 구조에서 부품과 위치가 함께 확인될 때는 해당 부품의 위치만 묻는다. `마우스 휠이 가운데 있음`, `Scroll wheel in the center`, `스크롤 휠이 좌측에 있음`은 같은 부품의 위치로 비교한다. 보기는 가운데·왼쪽·오른쪽·앞쪽·뒤쪽을 섞어서 제공한다. 부품이 빠진 `가운데 있음`, 위치가 빠진 `좌우 클릭 버튼이 있음`, 한 부품에 위치가 여러 곳으로 기록된 경우에는 그 값으로 위치 답변을 채점하지 않는다. 구조 원문은 후보 검색에 계속 사용한다.
 
@@ -25,6 +25,8 @@
 | 배치별 후보 비교, 보기의 한글 변환과 5지선다 오답 생성 | `gemini-4-hydrogen` | `gemini-3.8-flash` | `gemini-3.5-flash-lite` |
 
 단서 추출 요청, 후보 비교 배치, 오답 생성 요청마다 첫 번째 모델부터 시작한다. 호출 오류나 타임아웃이 발생하거나 JSON·단서·배치 ID·보기 검증을 통과하지 못하면 다음 모델을 한 번 호출한다. 정상 응답에서 단서나 후보가 비어 있으면 빈 결과를 사용한다. 실제 보기 다섯 개가 확보되면 오답 생성 호출을 생략한다. Gemini 4 Hydrogen으로 후보를 비교하고 오답을 생성할 때는 추론 수준을 `LOW`로 요청한다.
+
+검색 하나에는 호출 전체를 묶는 예산이 있다(`OWNERSHIP_SEARCH_BUDGET_SECONDS`, 기본 25초). 남은 예산이 없으면 다음 모델을 호출하지 않고 `OWNERSHIP_AI_TIMEOUT`으로 끝내며, 개별 호출의 제한 시간도 남은 예산까지로 줄인다. 단계별 모델 세 개가 세 단계에 걸쳐 각자 30초를 쓰면 프록시 제한을 넘기기 때문이다.
 
 ## 2. DB 데이터와 검토 메타데이터
 
@@ -75,11 +77,15 @@
 
 | 요청 | 본문 | 응답 |
 | --- | --- | --- |
-| `POST /api/ownership/attempts` | `{"description":"도서관 근처에서 검은색 필통을 잃었어요"}` | `question`, `photo_confirmation`, `completed`, `needs_clues`, `no_candidates`, `search_limit` |
-| `GET /api/ownership/attempts/{attempt_id}` | 없음 | 저장된 질문, 사진 확인 단계 또는 완료 상태 |
+| `POST /api/ownership/attempts` | `{"description":"도서관 근처에서 검은색 필통을 잃었어요"}` | `pending`, `question`, `photo_confirmation`, `completed`, `needs_clues`, `no_candidates`, `search_limit` |
+| `GET /api/ownership/attempts/{attempt_id}` | 없음 | 진행 중인 검색의 `pending`, 저장된 질문, 사진 확인 단계 또는 완료 상태 |
 | `POST /api/ownership/attempts/{attempt_id}/answers` | `{"question_id":"질문 UUID","option_id":"선택지 UUID"}` | 다음 질문, `photo_confirmation` 또는 완료 판정 |
 | `GET /api/ownership/attempts/{attempt_id}/photo` | 없음 | 사진 확인 단계의 등록 JPEG와 `X-Ownership-Photo-Token` 응답 헤더 |
 | `POST /api/ownership/attempts/{attempt_id}/photo-confirmation` | `{"confirmed":true,"photo_token":"사진 응답 토큰"}` 또는 `{"confirmed":false}` | 완료 상태인 `attempt`와 발급된 `return_code` 또는 `null` |
+
+검색은 요청 스레드가 아니라 프로세스당 하나인 작업 풀에서 실행한다(`OWNERSHIP_MAX_CONCURRENT_SEARCHES`, 기본 4). 시작 요청은 확인 시도를 먼저 저장하고 작업을 맡긴 뒤 `OWNERSHIP_SYNC_WAIT_SECONDS`(기본 3초)만 기다린다. 그 안에 끝나면 완성된 상태를, 아니면 `pending`과 `attempt_id`를 반환한다. 작업자는 단계가 바뀔 때마다 `ownership_attempts.state.progress`에 단계·경과·배치 수를 기록하므로 조회가 진행 상황을 읽을 수 있다. 검색이 끝나지 않은 시도에는 `progress.deadline_at`이 있고, 프로세스가 재시작되어 작업자가 사라지면 그 시각 이후의 조회가 `OWNERSHIP_AI_TIMEOUT`을 반환한다. 모델 오류는 `progress.error_code`에 남아 조회에서도 같은 코드로 반환된다.
+
+모델 호출의 단계·모델·소요 시간·결과 코드는 `app/ai_metrics.py`의 최근 500건 기록에 남고 `GET /api/ai/status`가 집계해 보여 준다. 프롬프트와 사용자 설명은 기록하지 않는다.
 
 질문에는 문구와 선택지 ID·표시값만 포함한다. 원본 특징 전체, 정답 표시, 내부 후보 ID와 답변별 채점은 돌려주지 않는다. 초기 후보 수는 진행 중 갱신해 노출하지 않는다. 이전 질문으로 답변을 다시 보내거나 서로 다른 요청으로 같은 답을 동시에 제출하면 현재 버전과 일치하는 요청만 저장한다. 모델 오류는 소유 확인 실패로 저장하지 않으므로, 다음 질문 생성 실패 후 이전 답변을 다시 제출할 수 있다. 확인 시도는 20분 뒤 만료되며 DB에 남은 기록의 운영상 삭제·보존 정책은 별도로 필요하다.
 

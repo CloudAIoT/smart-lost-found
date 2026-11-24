@@ -20,6 +20,8 @@
 !frontend/public/**
 !frontend/src/
 !frontend/src/**
+!frontend/tests/
+!frontend/tests/**
 !imageprocess/
 !imageprocess/__init__.py
 !imageprocess/requirements-core.txt

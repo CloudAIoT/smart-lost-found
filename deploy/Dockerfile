@@ -6,7 +6,8 @@ RUN npm ci --no-audit --no-fund
 COPY frontend/index.html frontend/vite.config.js frontend/postcss.config.js frontend/tailwind.config.js ./
 COPY frontend/public ./public
 COPY frontend/src ./src
-RUN npm run build
+COPY frontend/tests ./tests
+RUN npm test && npm run build
 
 FROM python:3.12-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

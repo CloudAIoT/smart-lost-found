@@ -144,6 +144,34 @@ def test_photo_timeout_fits_proxy_deadline(tmp_path, timeout):
     assert not (tmp_path / "backend.env").exists()
 
 
+@pytest.mark.parametrize(("key", "value"), [("OWNERSHIP_SEARCH_BUDGET_SECONDS", "40"),
+                                            ("OWNERSHIP_SYNC_WAIT_SECONDS", "0"),
+                                            ("OWNERSHIP_SEARCH_CONCURRENCY", "5"),
+                                            ("OWNERSHIP_MAX_CONCURRENT_SEARCHES", "8"),
+                                            ("ANALYSIS_SYNC_WAIT_SECONDS", "5"),
+                                            ("MAX_CONCURRENT_ANALYSES", "3")])
+def test_job_tuning_reaches_backend_only(tmp_path, key, value):
+    render({**payload(), key: value}, tmp_path)
+    assert f"{key}={value}\n" in (tmp_path / "backend.env").read_text()
+    assert key not in (tmp_path / "db.env").read_text()
+
+
+@pytest.mark.parametrize(("key", "value"), [("OWNERSHIP_SEARCH_BUDGET_SECONDS", "4"),
+                                            ("OWNERSHIP_SEARCH_BUDGET_SECONDS", "120"),
+                                            ("OWNERSHIP_SEARCH_BUDGET_SECONDS", "25.0"),
+                                            ("OWNERSHIP_SYNC_WAIT_SECONDS", "31"),
+                                            ("OWNERSHIP_SEARCH_CONCURRENCY", "0"),
+                                            ("OWNERSHIP_MAX_CONCURRENT_SEARCHES", "17"),
+                                            ("OWNERSHIP_MAX_CONCURRENT_SEARCHES", "bad"),
+                                            ("ANALYSIS_SYNC_WAIT_SECONDS", "31"),
+                                            ("MAX_CONCURRENT_ANALYSES", "0"),
+                                            ("MAX_CONCURRENT_ANALYSES", "9")])
+def test_job_tuning_outside_its_range_is_rejected(tmp_path, key, value):
+    with pytest.raises(ValueError):
+        render({**payload(), key: value}, tmp_path)
+    assert not (tmp_path / "backend.env").exists()
+
+
 def test_every_published_setting_is_passed_by_the_workflow():
     """publish.py reads os.environ, so a setting the workflow never maps is silently skipped.
 

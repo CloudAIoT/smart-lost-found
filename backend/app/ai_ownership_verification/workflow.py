@@ -1,7 +1,7 @@
 """One question at a time; the server owns the shortlist, progress, and decision."""
 
 from collections import Counter
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from random import SystemRandom
 from uuid import UUID, uuid4
@@ -17,7 +17,7 @@ from .structure_questions import POSITIONS, part_position, structure_positions
 from .workflow_ai import WorkflowAI
 from .workflow_schemas import (
     AnswerRequest, AttemptState, AttemptView, Candidate, Choice, Evidence, FieldName, OptionView,
-    OwnershipResult, PhotoConfirmationRequest, Question, QuestionView, RecordedAnswer,
+    OwnershipResult, PhotoConfirmationRequest, Question, QuestionView, RecordedAnswer, SearchProgress,
 )
 
 
@@ -25,6 +25,11 @@ MAX_WRONG_GROUPS = 2
 OPTION_COUNT = 5
 POLICY_VERSION = "development_v6"
 ATTEMPT_TTL = timedelta(minutes=20)
+# How long a polling client should wait before asking again.
+SEARCH_POLL_INTERVAL_MS = 700
+# A queued job has not spent its budget yet, and a running one may overshoot it slightly.
+QUEUE_GRACE = timedelta(seconds=15)
+WORKER_GRACE = timedelta(seconds=5)
 NON_ANSWERS = UNKNOWN | {"모르겠어요", "기억안남"}
 PROMPTS = {
     "distinctive_features": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
@@ -216,22 +221,99 @@ def advance(session: Session, state: AttemptState, ai: WorkflowAI) -> None:
                              text=question_text, options=options)
 
 
-def start(session: Session, description: str, ai: WorkflowAI) -> AttemptView:
-    clues = ai.extract(description)
-    status, candidates = find_candidates(session, clues, ai)
-    if status != "question":
-        return AttemptView(status=status)
-    state = AttemptState(original_count=len(candidates), candidates=candidates, policy_version=POLICY_VERSION,
-                         mentioned_fields=list(clues.model_dump(exclude_none=True)))
-    advance(session, state, ai)
-    attempt_id = uuid4()
-    session.add(OwnershipAttempt(id=attempt_id, expires_at=now() + ATTEMPT_TTL, version=1,
+def create_pending(session: Session, attempt_id: UUID, budget_seconds: float) -> None:
+    """Store the attempt before the search runs, so the caller has an id to poll right away."""
+    started = now()
+    state = AttemptState(policy_version=POLICY_VERSION, progress=SearchProgress(
+        stage="queued", started_at=started,
+        deadline_at=started + timedelta(seconds=budget_seconds) + QUEUE_GRACE))
+    session.add(OwnershipAttempt(id=attempt_id, expires_at=started + ATTEMPT_TTL, version=1,
                                  state=state.model_dump(mode="json")))
     session.commit()
-    return view(attempt_id, state)
+
+
+def save_state(session: Session, attempt_id: UUID, state: AttemptState) -> None:
+    session.execute(update(OwnershipAttempt).where(OwnershipAttempt.id == attempt_id)
+                    .values(version=OwnershipAttempt.version + 1, state=state.model_dump(mode="json"))
+                    .execution_options(synchronize_session=False))
+    session.commit()
+
+
+def run_search(session: Session, attempt_id: UUID, description: str, ai: WorkflowAI, *,
+               budget_seconds: float, concurrency: int = 1) -> None:
+    """Fill a pending attempt in place. Stage changes are stored so a poll can report progress."""
+    state = AttemptState.model_validate(load_attempt(session, attempt_id).state)
+    progress = state.progress or SearchProgress(stage="queued", started_at=now(), deadline_at=now())
+    state.progress = progress
+    # The budget starts when a worker picks the job up, not when it was queued.
+    progress.deadline_at = now() + timedelta(seconds=budget_seconds) + WORKER_GRACE
+    progress.stage = "clue_extraction"
+    save_state(session, attempt_id, state)
+    try:
+        clues = ai.extract(description)
+        progress.stage = "candidate_search"
+        save_state(session, attempt_id, state)
+
+        def searched(done: int, total: int) -> None:
+            progress.searched_batches = done
+            progress.total_batches = total
+            save_state(session, attempt_id, state)
+
+        status, candidates = find_candidates(session, clues, ai, concurrency=concurrency, on_batches=searched)
+        if status != "question":
+            state.search_status = status
+        else:
+            state.original_count = len(candidates)
+            state.candidates = candidates
+            state.mentioned_fields = list(clues.model_dump(exclude_none=True))
+            advance(session, state, ai)
+    except IntegrationError as error:
+        # The stage is left where it broke: it names the failing call, and the code says why.
+        state.search_status = "failed"
+        progress.error_code = error.code
+    else:
+        progress.stage = "question_ready"
+    progress.finished_at = now()
+    save_state(session, attempt_id, state)
+
+
+def fail_search(session: Session, attempt_id: UUID, code: str) -> None:
+    """Close a pending attempt no worker will finish, so the next poll gets an answer."""
+    row = session.get(OwnershipAttempt, attempt_id)
+    if row is None:
+        return
+    state = AttemptState.model_validate(row.state)
+    if state.progress is None or state.progress.finished_at is not None:
+        return
+    state.search_status = "failed"
+    state.progress.error_code = code
+    state.progress.finished_at = now()
+    save_state(session, attempt_id, state)
+
+
+def utc(moment: datetime) -> datetime:
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def elapsed_ms(progress: SearchProgress) -> int:
+    return max(0, int((utc(progress.finished_at or now()) - utc(progress.started_at)).total_seconds() * 1000))
 
 
 def view(attempt_id: UUID, state: AttemptState) -> AttemptView:
+    progress = state.progress
+    if progress is not None and progress.finished_at is None:
+        if utc(progress.deadline_at) <= now():
+            # No worker finished this one: the process restarted, or the provider outlasted the
+            # budget without raising. Reported as a timeout rather than polled until the TTL.
+            raise IntegrationError("OWNERSHIP_AI_TIMEOUT")
+        return AttemptView(status="pending", attempt_id=attempt_id, stage=progress.stage,
+                           elapsed_ms=elapsed_ms(progress), retry_after_ms=SEARCH_POLL_INTERVAL_MS)
+    if state.search_status == "failed":
+        raise IntegrationError((progress.error_code if progress else None) or "OWNERSHIP_AI_REQUEST_FAILED")
+    spent = elapsed_ms(progress) if progress else None
+    if state.search_status is not None:
+        return AttemptView(status=state.search_status, attempt_id=attempt_id, elapsed_ms=spent,
+                           stage=progress.stage if progress else None)
     question = state.current
     status = "question"
     if state.decision:
@@ -246,6 +328,7 @@ def view(attempt_id: UUID, state: AttemptState) -> AttemptView:
         question=QuestionView(id=question.id, text=question.text,
                               options=[OptionView(id=option.id, label=option.label) for option in question.options])
         if question else None,
+        stage=progress.stage if progress else None, elapsed_ms=spent,
     )
 
 

@@ -1,5 +1,6 @@
 """Public inputs and server-only records for the development workflow."""
 
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -23,6 +24,9 @@ FailureReason = Literal[
 ]
 PolicyVersion = Literal["development_v1", "development_v2", "development_v3", "development_v4", "development_v5",
                         "development_v6"]
+SearchStage = Literal["queued", "clue_extraction", "candidate_search", "question_ready"]
+# A search that ends without a question keeps its outcome on the attempt, so a poll can report it.
+SearchStatus = Literal["needs_clues", "no_candidates", "search_limit", "failed"]
 
 
 class SearchRequest(Contract):
@@ -41,6 +45,18 @@ class SearchClues(Contract):
     distinctive_features: Clue | None = None
     description: Clue | None = None
     location: Clue | None = None
+
+
+class SearchProgress(Contract):
+    """What the background search is doing. Written by the worker, read by polling clients."""
+
+    stage: SearchStage = "queued"
+    started_at: datetime
+    deadline_at: datetime
+    finished_at: datetime | None = None
+    searched_batches: int = 0
+    total_batches: int | None = None
+    error_code: str | None = None
 
 
 class Distractors(Contract):
@@ -119,9 +135,12 @@ class RecordedAnswer(Contract):
 
 
 class AttemptState(Contract):
-    original_count: int
-    candidates: list[Candidate]
-    mentioned_fields: list[FieldName]
+    # A pending attempt is stored before the search runs, so these three start empty.
+    original_count: int = 0
+    candidates: list[Candidate] = Field(default_factory=list)
+    mentioned_fields: list[FieldName] = Field(default_factory=list)
+    progress: SearchProgress | None = None
+    search_status: SearchStatus | None = None
     policy_version: PolicyVersion = "development_v1"
     answers: list[RecordedAnswer] = Field(default_factory=list)
     current: Question | None = None
@@ -160,13 +179,18 @@ class QuestionView(Contract):
 
 class AttemptView(Contract):
     status: Literal[
-        "needs_clues", "no_candidates", "refine_search", "search_limit", "question", "photo_confirmation", "completed",
+        "pending", "needs_clues", "no_candidates", "refine_search", "search_limit", "question",
+        "photo_confirmation", "completed",
     ]
     attempt_id: UUID | None = None
     initial_candidate_count: int | None = None
     question: QuestionView | None = None
     decision: Decision | None = None
     found_item_id: UUID | None = None
+    # Only set while a search is running, or on the response that ends one.
+    stage: SearchStage | None = None
+    elapsed_ms: int | None = None
+    retry_after_ms: int | None = None
 
 
 class OwnershipResult(Contract):

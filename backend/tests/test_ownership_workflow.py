@@ -1,5 +1,8 @@
 import json
+from contextlib import nullcontext
 from datetime import timedelta
+from threading import Barrier, Event, current_thread
+from time import sleep
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -9,7 +12,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.ai_ownership_verification.api import get_ownership_ai
+from app.ai_ownership_verification import search, search_jobs, workflow
+from app.ai_ownership_verification.api import get_ownership_ai, get_search_ai, get_session_factory
 from app.ai_ownership_verification.search import normalized
 from app.ai_ownership_verification.workflow import get_ownership_result
 from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
@@ -150,6 +154,8 @@ def ownership(database_engine):
 
     app.dependency_overrides.update({
         get_session: sessions, get_settings: lambda: settings, get_ownership_ai: lambda: ai,
+        get_search_ai: lambda: (lambda: nullcontext(ai)),
+        get_session_factory: lambda: (lambda: Session(database_engine)),
         get_store: lambda: SimpleNamespace(read=photos.__getitem__),
     })
     try:
@@ -391,7 +397,11 @@ def test_automatic_photo_features_allow_photo_confirmation_and_otp(ownership, ne
 def test_no_match_and_missing_clues_do_not_create_a_judgment(ownership):
     ownership.ai.clues = SearchClues(category="우산", color="검은색")
     missing = begin(ownership)
-    assert missing["status"] == "no_candidates" and missing["attempt_id"] is None
+    # The attempt is stored so a slow search stays pollable, and it carries no judgment.
+    assert missing["status"] == "no_candidates" and missing["decision"] is None
+    assert result_for(ownership, missing) is None
+    polled = ownership.client.get(f'{BASE}/{missing["attempt_id"]}')
+    assert polled.status_code == 200 and polled.json()["status"] == "no_candidates"
     ownership.ai.clues = SearchClues()
     assert begin(ownership)["status"] == "needs_clues"
 
@@ -833,7 +843,9 @@ def test_ownership_uses_each_stage_model_chain_until_a_valid_response(ownership)
         return gemini_json({"labels": ["노란 리본", "작은 은색 구슬", "주황색 고리"]})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
-        app.dependency_overrides[get_ownership_ai] = lambda: GeminiWorkflowAI(settings, http)
+        chained = GeminiWorkflowAI(settings, http)
+        app.dependency_overrides[get_ownership_ai] = lambda: chained
+        app.dependency_overrides[get_search_ai] = lambda: (lambda: nullcontext(chained))
         result = begin(ownership)
     assert {option["label"] for option in result["question"]["options"]} == {
         "파란 원형 핀", "빨간 사각 핀", "노란 리본", "작은 은색 구슬", "주황색 고리",
@@ -844,3 +856,110 @@ def test_ownership_uses_each_stage_model_chain_until_a_valid_response(ownership)
         ("search", "gemini-3.8-flash"), ("search", "gemini-3.5-flash-lite"),
         ("options", "gemini-4-hydrogen"), ("options", "gemini-3.8-flash"), ("options", "gemini-3.5-flash-lite"),
     ]
+
+
+def drain_searches(timeout=10.0):
+    """Wait for the background pool, without touching the shared test connection."""
+    for _ in range(int(timeout / 0.02)):
+        if search_jobs.snapshot()["accepted"] == 0:
+            return
+        sleep(0.02)
+    raise AssertionError("배경 검색이 끝나지 않았습니다")
+
+
+def test_a_slow_search_answers_pending_and_the_poll_returns_the_question(ownership):
+    gate = Event()
+    extract = ownership.ai.extract
+    ownership.ai.extract = lambda description: gate.wait(timeout=10) and extract(description)
+    app.dependency_overrides[get_settings] = lambda: ownership.settings.model_copy(
+        update={"ownership_sync_wait_seconds": 0.05})
+
+    pending = begin(ownership)
+    assert pending["status"] == "pending" and pending["question"] is None
+    assert pending["stage"] in {"queued", "clue_extraction"}
+    assert pending["elapsed_ms"] >= 0 and pending["retry_after_ms"] > 0
+    attempt = f'{BASE}/{pending["attempt_id"]}'
+    assert ownership.client.get(attempt).json()["status"] == "pending"
+
+    gate.set()
+    drain_searches()
+    view = ownership.client.get(attempt).json()
+    assert view["status"] == "question" and view["stage"] == "question_ready"
+    assert view["attempt_id"] == pending["attempt_id"] and view["elapsed_ms"] >= 0
+    assert len(view["question"]["options"]) == 5
+
+
+def test_a_failed_search_reaches_both_the_caller_and_the_poll(ownership):
+    def unreachable(description):
+        raise IntegrationError("OWNERSHIP_AI_UNREACHABLE")
+
+    ownership.ai.extract = unreachable
+    response = ownership.client.post(BASE, json={"description": "검은색 필통을 잃어버렸어요"})
+    assert response.status_code == 502
+    assert response.json() == {"detail": {"code": "OWNERSHIP_AI_UNREACHABLE"}}
+    with Session(ownership.engine) as session:
+        attempt_id = session.scalars(select(OwnershipAttempt.id)).one()
+    # A client that already received an attempt id and polls must get the same failure, not a wait.
+    polled = ownership.client.get(f"{BASE}/{attempt_id}")
+    assert polled.status_code == 502
+    assert polled.json() == {"detail": {"code": "OWNERSHIP_AI_UNREACHABLE"}}
+
+
+def test_a_pending_attempt_past_its_deadline_stops_being_polled(ownership):
+    attempt_id = uuid4()
+    with Session(ownership.engine) as session:
+        workflow.create_pending(session, attempt_id, budget_seconds=1)
+        row = session.get(OwnershipAttempt, attempt_id)
+        state = dict(row.state)
+        progress = dict(state["progress"])
+        progress["deadline_at"] = (now() - timedelta(seconds=1)).isoformat()
+        state["progress"] = progress
+        row.state = state
+        session.commit()
+    response = ownership.client.get(f"{BASE}/{attempt_id}")
+    assert response.status_code == 502
+    assert response.json() == {"detail": {"code": "OWNERSHIP_AI_TIMEOUT"}}
+
+
+def test_candidate_batches_are_searched_in_parallel_and_reported(ownership, monkeypatch):
+    monkeypatch.setattr(search, "SEARCH_BATCH_SIZE", 1)
+    searched, threads, reports = [], set(), []
+    # Both batches must be in flight at once, or the barrier never releases them.
+    together = Barrier(2, timeout=5)
+
+    def similar(clues, items):
+        together.wait()
+        searched.append(set(items))
+        threads.add(current_thread().name)
+        return [SearchMatch(item=key, matched_fields=["category"]) for key in items]
+
+    ownership.ai.similar_items = similar
+    with Session(ownership.engine) as session:
+        status, candidates = search.find_candidates(
+            session, SearchClues(category="필통"), ownership.ai, concurrency=2,
+            on_batches=lambda done, total: reports.append((done, total)))
+    assert status == "question" and len(candidates) == 2
+    assert sorted(searched, key=min) == [{1}, {2}]
+    assert len(threads) == 2 and all(name.startswith("ownership-match") for name in threads)
+    assert reports == [(0, 2), (2, 2)]
+
+
+def test_the_search_budget_stops_model_fallback_before_the_next_call(ownership):
+    settings = GeminiSettings(_env_file=None, gemini_api_key="test-key", gemini_model="gemini-3.5-flash-lite")
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(429)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        spent = GeminiWorkflowAI(settings, http, budget_seconds=0)
+        with pytest.raises(IntegrationError, match="OWNERSHIP_AI_TIMEOUT"):
+            spent.extract("검은색 필통을 잃어버렸어요")
+        assert calls == []
+
+        ai = GeminiWorkflowAI(settings, http, budget_seconds=5)
+        with pytest.raises(IntegrationError, match="OWNERSHIP_AI_RATE_LIMITED"):
+            ai.extract("검은색 필통을 잃어버렸어요")
+    # Three extraction models are still tried while the budget lasts.
+    assert len(calls) == 3

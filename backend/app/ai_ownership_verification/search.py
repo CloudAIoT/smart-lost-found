@@ -2,6 +2,8 @@
 
 import re
 import unicodedata
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from itertools import batched
 
 from pydantic import ValidationError
@@ -10,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Category, FoundItem, Registration, StorageAssignment
 from .workflow_ai import WorkflowAI, validate_search_matches
-from .workflow_schemas import Candidate, Evidence, SearchClues
+from .workflow_schemas import Candidate, Evidence, SearchClues, SearchMatch
 
 
 SEARCH_FIELDS = ("category", "color", "shape", "surface_texture", "brand", "visible_text", "structure",
@@ -109,7 +111,8 @@ def read_facts(
     return facts, proof, registered
 
 
-def find_candidates(session: Session, clues: SearchClues, ai: WorkflowAI) -> tuple[str, list[Candidate]]:
+def find_candidates(session: Session, clues: SearchClues, ai: WorkflowAI, *, concurrency: int = 1,
+                    on_batches: Callable[[int, int], None] | None = None) -> tuple[str, list[Candidate]]:
     provided = {field: value for field, value in clues.model_dump(exclude_none=True).items()
                 if normalized(field, value) not in UNKNOWN}
     searchable = {field: clue for field, clue in provided.items() if field in SEARCH_FIELDS}
@@ -137,11 +140,33 @@ def find_candidates(session: Session, clues: SearchClues, ai: WorkflowAI) -> tup
         features.append(registered)
 
     session.rollback()  # Release the read transaction before calling Gemini.
-    shortlisted = []
-    for batch in batched(enumerate(features, start=1), SEARCH_BATCH_SIZE):
-        items = dict(batch)
+    batches = [dict(batch) for batch in batched(enumerate(features, start=1), SEARCH_BATCH_SIZE)]
+    if on_batches is not None:
+        on_batches(0, len(batches))
+
+    def assess(items: dict[int, dict[str, list[str]]]) -> list[SearchMatch]:
         batch_matches = ai.similar_items(searchable, items)
         validate_search_matches(searchable, items, batch_matches)
+        return batch_matches
+
+    if concurrency > 1 and len(batches) > 1:
+        # The batches are independent, so 500 registered rows need not cost five round trips in a
+        # row. Progress is reported once after the pool: the recorder runs on the caller's session,
+        # which no worker thread may touch.
+        with ThreadPoolExecutor(max_workers=min(concurrency, len(batches)),
+                                thread_name_prefix="ownership-match") as pool:
+            results = list(pool.map(assess, batches))
+        if on_batches is not None:
+            on_batches(len(batches), len(batches))
+    else:
+        results = []
+        for done, items in enumerate(batches, start=1):
+            results.append(assess(items))
+            if on_batches is not None:
+                on_batches(done, len(batches))
+
+    shortlisted = []
+    for batch_matches in results:
         for match in batch_matches:
             candidate = candidates[match.item - 1]
             candidate.initial_matches = sorted(match.matched_fields)

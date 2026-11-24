@@ -58,6 +58,8 @@ class Registration(Entity, Base):
     analysis_status: Mapped[str] = mapped_column(default="pending")
     analysis_input_image_ids: Mapped[list | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     analysis_features: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    # Stage, model attempt, start, deadline and failure code of the most recent analysis.
+    analysis_progress: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     __table_args__ = (
         CheckConstraint("status IN ('draft','capturing','analyzing','ready','opening','awaiting_deposit','stored','blocked')", name="registration_status"),
         CheckConstraint("analysis_status IN ('pending','running','succeeded','failed')", name="analysis_status"),

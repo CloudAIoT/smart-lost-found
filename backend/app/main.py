@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.db import engine, get_session
+from app import ai_jobs
 from app.api import router
 from app.ai_ownership_verification.api import router as ownership_router
 from app.errors import BusinessError, IntegrationError
@@ -40,6 +41,8 @@ async def lifespan(app: FastAPI):
     finally:
         if listener is not None:
             await run_in_threadpool(listener.stop)
+        # Background jobs hold DB sessions, so they stop before the engine goes away.
+        await run_in_threadpool(ai_jobs.shutdown)
         await run_in_threadpool(engine.dispose)
 
 

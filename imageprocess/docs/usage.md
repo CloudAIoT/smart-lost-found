@@ -1,6 +1,6 @@
 # 실행 안내
 
-모든 명령은 팀 저장소의 `imageprocess/` 안에서 실행한다. 백엔드와 Python 패키지·의존성을 별도로 관리한다. 아래 실제 분석 명령은 사용자가 필요할 때 실행하며 모델 다운로드나 API 호출을 수반할 수 있다.
+로컬 실험 명령은 팀 저장소의 `imageprocess/` 안에서 실행한다. 백엔드용 `from imageprocess import ...`는 패키지의 부모인 저장소 루트가 Python 경로에 있어야 한다. 백엔드와 Python 패키지·의존성을 별도로 관리한다. 아래 실제 분석 명령은 사용자가 필요할 때 실행하며 모델 다운로드나 API 호출을 수반할 수 있다.
 
 ## 1. 환경과 의존성
 
@@ -52,6 +52,25 @@ GEMINI_MODEL_NAME=gemini-3.6-flash
 
 ## 3. 사진에서 특징 추출
 
+### 사진 2장 처리
+
+같은 물건을 서로 다른 각도에서 찍은 두 사진을 전달한다. 백엔드용 처리 함수·ID·오류 계약은 [연결 문서](backend-handoff.md)에 있다. 실제 API를 호출하지 않고 확인하려면:
+
+```bash
+python -m app.analyze_item first.jpg second.jpg --category 필통 --prepare-only --output outputs/prepared_item.json
+```
+
+실제 통합 추론은 사용자가 필요할 때 다음처럼 실행한다. 로컬 시험용 ID는 생략 시 생성되며, `--registration-id UUID --image-ids UUID UUID`로 실제 등록과 사진 ID를 지정할 수 있다.
+
+```bash
+python -m app.analyze_item first.jpg second.jpg --backend gemini --category 필통 --output outputs/two_photo_item.json
+```
+
+두 사진은 한 모델 요청에 들어간다. 호출 전에 두 파일을 모두 검사한다. 모든 시각적 특징이 null이면 성공 결과로 저장하지 않는다. 이 도구는 서버의 API나 S3·DB 작업을 실행하지 않는다.
+
+### 단일 사진 실험 도구
+
+
 자신이 준비한 사진을 입력한다. 아래 `사진경로.jpg`는 자리 표시자이다. 이 작업 공간에서 보존한 기존 사진은 `local/images/case.jpg`에 있으며 GitHub에는 포함하지 않는다.
 
 ```bash
@@ -61,7 +80,7 @@ python -m app.analyze_image "사진경로.jpg" --backend mlx --category 필통 -
 
 CLI는 `--backend` 생략 시 **mlx**를 사용한다. `.env`의 `INFERENCE_BACKEND`로 CLI 기본값이 바뀌지 않으므로 비교 시에는 위처럼 명시한다. `--model 모델ID_또는_경로`로 선택한 backend의 모델만 바꿀 수 있다. Gemini 실행 시 전처리된 사진과 카테고리 문맥이 외부 API로 전송된다.
 
-`--category`는 선택 사항이다. `필통`, `지갑`, `가방`, `우산`, `휴대폰`/`스마트폰`, `열쇠`, `기타`는 각각 영어 힌트로 변환한다. 다른 카테고리는 원문을 힌트로 전달한다. 1–100자의 출력 가능한 한 줄 문자열을 허용하며 상세 notes 옵션은 없다. 결과의 `input_category`는 입력, `data.category`는 모델의 분류이다.
+`--category`는 선택 사항이다. `필통`, `지갑` 같은 한글을 그대로 입력할 수 있고 알려진 영어 종류(`pencil_case`, `wallet` 등)는 한글 힌트로 변환한다. 다른 입력은 원문을 힌트로 전달한다. 1–100자의 출력 가능한 한 줄 문자열을 허용하며 상세 notes 옵션은 없다. 결과의 `input_category`는 입력 그대로, `data.category`는 한국어 모델 분류이다. 카테고리·색상·형태·질감·구조·특이 특징 값은 한국어, 브랜드와 읽히는 글자는 원문으로 반환한다. 알려진 영어 종류·색상은 한국어로 정규화하며, 그 외 한국어가 없는 특징은 `INVALID_MODEL_OUTPUT`으로 거부한다. 별도 번역 API나 새 의존성은 필요하지 않다.
 
 성공하면 stdout과 `--output` 파일에 UTF-8 JSON을 출력하고 종료 코드 0을 반환한다. 실패하면 오류 JSON과 종료 코드 1을 반환하며 성공 결과 파일을 새로 쓰지 않는다. 이전에 저장한 같은 이름의 파일은 남아 있을 수 있으므로 현재 실행의 종료 코드와 stdout을 먼저 확인한다.
 
@@ -73,7 +92,29 @@ CLI 결과에는 특징 `data`, 품질 `warnings`, `backend`, `model_name`, 비�
 python -m app.analyze_image "사진경로.jpg" --backend mock --category 필통 --output outputs/mock.json
 ```
 
-mock는 `MOCK_INFERENCE` 경고와 unknown 특징을 반환한다. 품질 평가나 실제 분석 성공의 근거로 사용하지 않는다. 실제 분석 실패 시 mock로 자동 전환하지 않는다.
+mock는 `MOCK_INFERENCE` 경고와 모든 값이 null인 특징을 반환한다. 품질 평가나 실제 분석 성공의 근거로 사용하지 않는다. 실제 분석 실패 시 mock로 자동 전환하지 않는다.
+
+### 사진 폴더 전체 분석
+
+현재 공통 필드 7개와 `distinctive_features`로 사진을 분석하려면 다음을 실행한다. `photos`는 이 개인 작업 공간의 `imageprocess`와 같은 상위 폴더에 있다. 다른 위치에서는 경로를 바꾼다.
+
+```bash
+python -m app.analyze_photos ../photos
+```
+
+기본 backend는 Gemini이며 사진마다 파일명에서 카테고리를 읽어 독립 요청한다. `doll1`과 `doll2`는 둘 다 `plush_toy`로 전달하며 정답 캐릭터 이름은 주지 않는다. 브랜드·캐릭터는 모델이 스스로 시각적으로 식별하고 캐릭터명과 판단 근거를 특이 특징에 담도록 요청한다. 판단할 수 없는 공통 필드와 특이 특징은 null이다.
+
+결과는 새 `outputs/fixed_features/run-*/` 폴더의 사진별 JSON, 공통 필드의 값/null 빈도와 전체 특징을 담은 `report.md`, 입력·실행 상태를 담은 `manifest.json`에 저장한다. 이미지·프롬프트 해시와 시간은 개별 JSON에 포함된다. `--model`, `--output-dir`, `--backend`를 지원하며 Gemini 출력 예산 기본값은 8192 tokens다. 자동 재시도 없이 순차 처리하고 공통 Gemini 오류가 나면 중단한다. 다시 실행하면 처음부터 새 요청을 보낸다.
+
+실패한 사진부터 이어서 처리하려면 정확한 파일명을 `--start-from`에 넣는다. 파일명 정렬 순서에서 해당 사진을 포함한 이후 사진만 분석한다.
+
+```bash
+python -m app.analyze_photos ../photos --start-from doll2.jpg
+```
+
+현재 10장에서는 `doll2.jpg`, `pencilcase.jpg`, `wallet1.jpg`, `wallet2.jpg`만 처리한다. 앞선 6장은 호출하지 않고 기존 결과를 보존한다. 남은 결과와 보고서는 새 실행 폴더에 저장하며 이전 실행 결과와 자동 병합하지 않는다. 파일명이 없으면 API 호출 전에 오류로 종료한다. 이 옵션은 사용량 제한을 해제하는 기능은 아니다.
+
+이전 자유 필드 탐색 실험인 `app.explore_features`는 당시 프롬프트·출력 구조를 유지한다. 고정 필드·새 인식 지침을 검증할 때는 `app.analyze_photos`를 사용한다. 새 프롬프트는 실제 재추론으로 품질을 확인해야 한다.
 
 ## 4. 저장된 결과 비교
 

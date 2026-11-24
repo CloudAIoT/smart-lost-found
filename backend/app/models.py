@@ -1,4 +1,4 @@
-"""Registration/storage schema; identity and ownership verification are deferred."""
+"""Registration, storage and ownership attempt persistence."""
 
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -53,6 +53,7 @@ class Registration(Entity, Base):
     kiosk_id: Mapped[UUID] = mapped_column(ForeignKey("kiosks.id"))
     primary_category_id: Mapped[UUID | None] = mapped_column(ForeignKey("categories.id"))
     secondary_description: Mapped[str | None]
+    found_location: Mapped[str | None] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(default="draft")
     analysis_status: Mapped[str] = mapped_column(default="pending")
     analysis_input_image_ids: Mapped[list | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
@@ -67,7 +68,16 @@ class FoundItem(Entity, Base):
     __tablename__ = "found_items"
     registration_id: Mapped[UUID] = mapped_column(ForeignKey("registrations.id"), unique=True)
     status: Mapped[str] = mapped_column(default="awaiting_deposit")
-    __table_args__ = (CheckConstraint("status IN ('awaiting_deposit','stored','retrieved')", name="item_status"),)
+    __table_args__ = (
+        CheckConstraint("status IN ('awaiting_deposit','stored','retrieved','missing')", name="item_status"),
+    )
+
+
+class OwnershipAttempt(Entity, Base):
+    __tablename__ = "ownership_attempts"
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    version: Mapped[int]
+    state: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
 
 
 class StorageAssignment(Entity, Base):
@@ -78,8 +88,8 @@ class StorageAssignment(Entity, Base):
     deposited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (
-        CheckConstraint("status IN ('reserved','awaiting_deposit','stored','awaiting_pickup','retrieved','cancelled')", name="assignment_status"),
-        CheckConstraint("(status IN ('cancelled','retrieved')) = (ended_at IS NOT NULL)", name="assignment_end"),
+        CheckConstraint("status IN ('reserved','awaiting_deposit','stored','awaiting_pickup','retrieved','cancelled','missing')", name="assignment_status"),
+        CheckConstraint("(status IN ('cancelled','retrieved','missing')) = (ended_at IS NOT NULL)", name="assignment_end"),
         Index("uq_active_locker", "locker_id", unique=True, postgresql_where=text("ended_at IS NULL"), sqlite_where=text("ended_at IS NULL")),
         Index("uq_active_item", "found_item_id", unique=True, postgresql_where=text("ended_at IS NULL"), sqlite_where=text("ended_at IS NULL")),
     )
@@ -137,4 +147,58 @@ class ItemImage(Entity, Base):
         CheckConstraint("shot_order IN (1,2)", name="image_order"),
         CheckConstraint("byte_size > 0", name="image_size"),
         CheckConstraint("content_type = 'image/jpeg'", name="image_type"),
+    )
+
+
+class DeviceState(Base):
+    """Latest device and locker state reported over MQTT.
+
+    State topics are retained, so one row per target is enough: the broker replays the current
+    value whenever the subscriber reconnects. `locker_number` 0 names the device itself, which is
+    where a controller's online/offline and the capture box sensors are kept. There is no foreign
+    key to `kiosks`: telemetry arrives from outside this service and an unknown kiosk id must be
+    recorded or dropped, never raise inside the subscriber.
+    """
+
+    __tablename__ = "device_states"
+    kiosk_id: Mapped[UUID] = mapped_column(primary_key=True)
+    device: Mapped[str] = mapped_column(String(20), primary_key=True)
+    locker_number: Mapped[int] = mapped_column(primary_key=True)
+    connection: Mapped[str | None] = mapped_column(String(20))
+    door: Mapped[str | None] = mapped_column(String(10))
+    weight_g: Mapped[float | None]
+    item: Mapped[str | None] = mapped_column(String(10))
+    reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        CheckConstraint("device IN ('capture','locker')", name="device_state_device"),
+        CheckConstraint("locker_number >= 0", name="device_state_target"),
+        CheckConstraint("connection IS NULL OR connection IN ('online','offline')", name="device_state_connection"),
+        CheckConstraint("door IS NULL OR door IN ('open','closed')", name="device_state_door"),
+        CheckConstraint("item IS NULL OR item IN ('present','empty')", name="device_state_item"),
+    )
+
+
+class DeviceAlert(Entity, Base):
+    """One received alert. Alerts are not retained by the broker, so each one is kept as a row.
+
+    A persistent subscriber session can redeliver a queued QoS 1 alert after a restart, hence the
+    unique key over the reported identity: a replay is dropped instead of counted twice.
+    """
+
+    __tablename__ = "device_alerts"
+    kiosk_id: Mapped[UUID]
+    code: Mapped[str] = mapped_column(String(40))
+    severity: Mapped[str] = mapped_column(String(10))
+    device: Mapped[str] = mapped_column(String(20))
+    locker_number: Mapped[int | None]
+    message: Mapped[str | None] = mapped_column(String(500))
+    detail: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("severity IN ('alarm','warning')", name="device_alert_severity"),
+        CheckConstraint("device IN ('capture','locker')", name="device_alert_device"),
+        CheckConstraint("locker_number IS NULL OR locker_number > 0", name="device_alert_locker"),
+        UniqueConstraint("kiosk_id", "code", "locker_number", "reported_at", name="uq_device_alert_report"),
+        Index("ix_device_alerts_recent", "kiosk_id", "reported_at"),
     )

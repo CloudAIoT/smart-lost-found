@@ -28,7 +28,15 @@ chmod -R a+rX "$release/frontend"
 docker run --rm --user 0 --memory 128m -v "$release:/config" "$image" \
   python /opt/deploy/render_config.py --parameter "$parameter" --region "$region" --output /config
 printf 'BACKEND_IMAGE=%s\n' "$image" > "$release/compose.env"
+# 브로커 포트를 공개할 주소는 SSM 설정에서 오고 Compose가 읽는다. 값이 없으면
+# Compose 기본값 127.0.0.1이 적용되어 1883이 외부로 열리지 않는다.
+grep -m1 '^MQTT_BIND_ADDRESS=' "$release/backend.env" >> "$release/compose.env" || true
 compose=(docker compose --project-name smart-lost-found-prod --env-file "$release/compose.env" -f "$release/compose.yaml")
+# 장치 상태 구독용 브로커. 세 설정 파일을 ssh로 넣어 둔 서버에서만 올린다(deploy/mosquitto/).
+broker=()
+if [[ -f "$root/mosquitto/mosquitto.conf" && -f "$root/mosquitto/passwords" && -f "$root/mosquitto/acl" ]]; then
+  broker=(--profile telemetry)
+fi
 previous="$(readlink -f "$root/current" 2>/dev/null || true)"
 
 # Changing POSTGRES_PASSWORD does not rotate an existing PostgreSQL role password.
@@ -44,6 +52,10 @@ fi
 
 "${compose[@]}" pull db nginx
 "${compose[@]}" up -d --wait --wait-timeout 120 db
+if ((${#broker[@]})); then
+  "${compose[@]}" "${broker[@]}" pull mqtt
+  "${compose[@]}" "${broker[@]}" up -d --no-deps mqtt
+fi
 
 # Keep a pre-migration backup on the persistent host disk; no automatic downgrade.
 mkdir -p "$root/backups"

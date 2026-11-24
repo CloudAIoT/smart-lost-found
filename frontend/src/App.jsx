@@ -115,6 +115,8 @@ const ERROR_MESSAGES = {
   DEPOSIT_NOT_OPENED: '보관함이 아직 열리지 않았습니다.',
   DOOR_NOT_CLOSED: '보관함 문이 닫히지 않았습니다. 문을 닫은 뒤 다시 눌러주세요.',
   ITEM_NOT_STORED: '보관 중인 상태의 물건이 아닙니다.',
+  ITEM_NOT_DETECTED: '물건이 감지되지 않았어요. 다시 넣어 주세요.',
+  ITEM_STILL_INSIDE: '보관함에 물건이 남아 있어요. 다시 열어 꺼내 주세요.',
   PICKUP_NOT_OPENED: '보관함이 아직 열리지 않았습니다.',
   RETURN_CODE_EXPIRED: 'OTP 유효기간이 지났습니다. 웹에서 다시 발급받아 주세요.',
   RETURN_CODE_ALREADY_USED: '이미 사용된 OTP입니다.',
@@ -134,8 +136,12 @@ const ERROR_MESSAGES = {
   CAPTURE_NOT_CONFIGURED: '촬영 장치가 설정되지 않았습니다.',
   IMAGE_STORAGE_NOT_CONFIGURED: '사진 저장소가 설정되지 않았습니다.',
   OWNERSHIP_ATTEMPT_EXPIRED: '확인 시간이 지났습니다. 검색을 다시 시작해 주세요.',
+  OWNERSHIP_ATTEMPT_RESTART_REQUIRED: '소유 확인 방식이 업데이트됐습니다. 검색을 다시 시작해 주세요.',
   OWNERSHIP_RETURN_CODE_ALREADY_ISSUED: '이 소유 확인에서 이미 OTP가 발급됐습니다.',
   OWNERSHIP_ITEM_NO_LONGER_AVAILABLE: '이 물건은 현재 수령할 수 없습니다.',
+  OWNERSHIP_PHOTO_NOT_PENDING: '사진 확인이 끝났거나 아직 시작되지 않았습니다.',
+  OWNERSHIP_PHOTO_UNAVAILABLE: '확인할 등록 사진을 찾을 수 없습니다.',
+  OWNERSHIP_PHOTO_LOAD_REQUIRED: '등록 사진을 불러온 다음 다시 확인해 주세요.',
   OWNERSHIP_AI_NOT_CONFIGURED: '분실물 검색 또는 이미지 분석 서비스가 설정되지 않았습니다.',
   OWNERSHIP_AI_RATE_LIMITED: 'AI 요청이 많습니다. 잠시 후 다시 시도해 주세요.',
   RETURN_CODE_NOT_CONFIGURED: 'OTP 기능이 설정되지 않았습니다.',
@@ -509,6 +515,10 @@ function WebOwner({ onBack, onResult }) {
   const [description, setDescription] = useState('');
   const [attempt, setAttempt] = useState(null);
   const [optionId, setOptionId] = useState('');
+  const [photo, setPhoto] = useState(null);
+  const [photoReady, setPhotoReady] = useState(false);
+  const [photoError, setPhotoError] = useState(false);
+  const [photoRetry, setPhotoRetry] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [photo, setPhoto] = useState(null); // { url, token } - photo_confirmation 단계의 등록 사진
@@ -556,7 +566,7 @@ function WebOwner({ onBack, onResult }) {
     } else if (result.status === 'question' || result.decision === 'supported') {
       setAttempt(result);
     } else if (result.status === 'no_candidates' || result.status === 'completed') {
-      onResult({ status: result.decision || 'not_found' });
+      onResult({ status: result.status === 'no_candidates' ? 'not_found' : 'not_confirmed' });
     } else {
       setError(result.status === 'search_limit'
         ? '검색 가능한 물품 수를 초과했습니다. 잠시 후 다시 시도해 주세요.'
@@ -564,18 +574,23 @@ function WebOwner({ onBack, onResult }) {
     }
   };
 
-  const submit = async (event) => {
+  const submit = async (event, confirmed = true) => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || verified || (photoAttemptId && confirmed && (!photoReady || photoError))) return;
     setBusy(true);
     setError('');
     try {
-      if (attempt?.decision === 'supported') {
-        const code = await api(`/found-items/${attempt.found_item_id}/return-code`, {
+      if (photoAttemptId) {
+        const result = await api(`/ownership/attempts/${photoAttemptId}/photo-confirmation`, {
           method: 'POST',
-          body: { attempt_id: attempt.attempt_id },
+          body: confirmed ? { confirmed, photo_token: photo.token } : { confirmed },
         });
-        onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name });
+        const code = result.return_code;
+        if (code) {
+          onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name });
+        } else {
+          accept(result.attempt);
+        }
       } else if (attempt?.question) {
         const result = await api(`/ownership/attempts/${attempt.attempt_id}/answers`, {
           method: 'POST',
@@ -628,6 +643,9 @@ function WebOwner({ onBack, onResult }) {
   const restart = () => {
     setAttempt(null);
     setOptionId('');
+    setPhoto(null);
+    setPhotoReady(false);
+    setPhotoError(false);
     setError('');
     setPhoto(null);
     setPhotoError('');
@@ -762,8 +780,7 @@ function WebOwnerSuccess({ result, onGoKiosk }) {
 function WebOwnerNotice({ kind, onRetry, onHome }) {
   const messages = {
     not_found: ['찾고 있는 분실물이 없습니다', '설명과 일치하는 보관 물품을 찾지 못했습니다.'],
-    not_confirmed: ['소유를 확인할 수 없습니다', '선택한 답변이 등록된 특징과 일치하지 않습니다.'],
-    insufficient_evidence: ['소유 확인 보류', '현재 확인할 수 있는 특징으로는 물건의 소유를 판단하기 어렵습니다.'],
+    not_confirmed: ['소유 확인에 실패했습니다', '입력한 정보와 답변으로 수령할 물품을 확인하지 못했습니다.'],
   };
   const [title, description] = messages[kind];
   return (
@@ -984,7 +1001,7 @@ function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
         <WebOwner onBack={() => setStep('type')} onResult={handleOwnerResult} />
       )}
       {step === 'success' && ownerResult && <WebOwnerSuccess result={ownerResult} onGoKiosk={onGoKiosk} />}
-      {['not_found', 'not_confirmed', 'insufficient_evidence'].includes(step) && (
+      {['not_found', 'not_confirmed'].includes(step) && (
         <WebOwnerNotice kind={step} onRetry={() => setStep('owner')} onHome={() => setStep('type')} />
       )}
     </div>
@@ -1367,7 +1384,14 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
         setPickupBlocked(false);
         pickupOpenedAtRef.current = new Date().toISOString();
       },
-      { inline: true },
+      {
+        inline: true,
+        // 남아 있는 물건을 알릴 때는 어느 칸인지 같이 말해 주는 편이 찾기 쉽다.
+        mapError: (err) =>
+          err?.code === 'ITEM_STILL_INSIDE'
+            ? `${pickup.locker_number}번 보관함에 물건이 남아 있어요. 다시 열어 꺼내 주세요. (ITEM_STILL_INSIDE)`
+            : errorText(err),
+      },
     );
   };
 

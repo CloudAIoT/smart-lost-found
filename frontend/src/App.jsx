@@ -504,6 +504,24 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
   );
 }
 
+const OWNERSHIP_PENDING_STAGE_LABELS = {
+  searching: '유사한 물품을 찾는 중입니다',
+  matching: '특징을 비교하는 중입니다',
+  question_generation: '확인 질문을 준비하는 중입니다',
+  question: '확인 질문을 준비하는 중입니다',
+  evaluating: '답변을 확인하는 중입니다',
+  decision: '답변을 확인하는 중입니다',
+  photo_analysis: '사진을 분석하는 중입니다',
+};
+
+function ownershipPendingText(stage) {
+  if (!stage) return 'AI가 분석하는 중입니다';
+  return OWNERSHIP_PENDING_STAGE_LABELS[stage] || 'AI가 분석하는 중입니다';
+}
+
+const OWNERSHIP_POLL_INTERVAL_MS = 1500;
+const OWNERSHIP_SLOW_HINT_MS = 8000;
+
 /* ============================================================
  * 웹 포털 - 분실자
  * ============================================================ */
@@ -517,7 +535,21 @@ function WebOwner({ onBack, onResult }) {
   const [photoRetry, setPhotoRetry] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(null); // { stage, elapsedMs } while backend AI search/답변 처리가 진행 중일 때
+  const [aiStatusText, setAiStatusText] = useState('');
   const photoAttemptId = attempt?.status === 'photo_confirmation' ? attempt.attempt_id : null;
+  const pollTimerRef = useRef(null);
+  const pollAttemptIdRef = useRef(null);
+  const pollStartedAtRef = useRef(0);
+
+  const stopPolling = () => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => () => stopPolling(), []);
 
   useEffect(() => {
     if (!photoAttemptId) return;
@@ -548,7 +580,34 @@ function WebOwner({ onBack, onResult }) {
     };
   }, [photoAttemptId, photoRetry]);
 
+  const pollAttempt = async () => {
+    const attemptId = pollAttemptIdRef.current;
+    if (!attemptId) return;
+    try {
+      accept(await api(`/ownership/attempts/${attemptId}`));
+    } catch (err) {
+      stopPolling();
+      setPending(null);
+      setBusy(false);
+      setError(errorText(err));
+    }
+  };
+
   const accept = (result) => {
+    if (result?.status === 'pending') {
+      pollAttemptIdRef.current = result.attempt_id || pollAttemptIdRef.current;
+      if (!pollStartedAtRef.current) pollStartedAtRef.current = Date.now();
+      setPending({ stage: result.stage, elapsedMs: result.elapsed_ms ?? (Date.now() - pollStartedAtRef.current) });
+      stopPolling();
+      pollTimerRef.current = setTimeout(pollAttempt, OWNERSHIP_POLL_INTERVAL_MS);
+      return;
+    }
+    stopPolling();
+    pollAttemptIdRef.current = null;
+    pollStartedAtRef.current = 0;
+    setPending(null);
+    setAiStatusText('');
+    setBusy(false);
     setOptionId('');
     if (result.status === 'question' || result.status === 'photo_confirmation' || result.decision === 'supported') {
       setAttempt(result);
@@ -558,6 +617,21 @@ function WebOwner({ onBack, onResult }) {
       setError(result.status === 'search_limit'
         ? '검색 가능한 물품 수를 초과했습니다. 잠시 후 다시 시도해 주세요.'
         : '물건 종류나 색상, 잃어버린 장소 같은 단서를 더 적어 주세요.');
+    }
+  };
+
+  const checkAiStatus = async () => {
+    try {
+      const status = await api('/ai/status');
+      const healthy = status.healthy ?? status.ok ?? (status.status ? status.status === 'ok' : undefined);
+      const latencyMs = status.avg_latency_ms ?? status.recent_latency_ms ?? status.latency_ms;
+      const parts = [];
+      if (healthy === true) parts.push('AI 서버 상태는 정상입니다.');
+      else if (healthy === false) parts.push('AI 서버 응답이 지연되고 있습니다.');
+      if (typeof latencyMs === 'number') parts.push(`최근 평균 응답 시간 약 ${(latencyMs / 1000).toFixed(1)}초.`);
+      setAiStatusText(parts.length ? parts.join(' ') : '상태를 확인했지만 표시할 수 있는 정보가 없습니다.');
+    } catch (err) {
+      setAiStatusText(errorText(err));
     }
   };
 
@@ -574,6 +648,7 @@ function WebOwner({ onBack, onResult }) {
         });
         const code = result.return_code;
         if (code) {
+          setBusy(false);
           onResult({ status: 'success', code: code.code, expiresAt: code.expires_at, kioskName: code.kiosk_name });
         } else {
           accept(result.attempt);
@@ -592,19 +667,25 @@ function WebOwner({ onBack, onResult }) {
         try {
           accept(await api(`/ownership/attempts/${attempt.attempt_id}`));
         } catch (refreshError) {
+          setBusy(false);
           setError(errorText(refreshError));
         }
       } else {
+        setBusy(false);
         setError(errorText(err));
       }
-    } finally {
-      setBusy(false);
     }
   };
 
   const question = attempt?.question;
   const verified = attempt?.decision === 'supported';
   const restart = () => {
+    stopPolling();
+    pollAttemptIdRef.current = null;
+    pollStartedAtRef.current = 0;
+    setPending(null);
+    setAiStatusText('');
+    setBusy(false);
     setAttempt(null);
     setOptionId('');
     setPhoto(null);
@@ -626,6 +707,23 @@ function WebOwner({ onBack, onResult }) {
       <form onSubmit={submit} className="space-y-4 max-w-xl mx-auto py-2 w-full">
         {verified ? (
           <p className="text-sm text-emerald-300">이미 완료된 소유 확인입니다. 새 OTP가 필요하면 검색을 다시 시작해 주세요.</p>
+        ) : pending ? (
+          <div className="space-y-3 text-center py-6">
+            <div className="inline-flex items-center gap-2 text-sm text-slate-200">
+              <LoaderCircle size={16} className="animate-spin text-emerald-400" />
+              {ownershipPendingText(pending.stage)}
+            </div>
+            <p className="text-xs text-slate-500">경과 시간 약 {Math.max(0, Math.round((pending.elapsedMs ?? 0) / 1000))}초</p>
+            {(pending.elapsedMs ?? 0) > OWNERSHIP_SLOW_HINT_MS && (
+              <div className="space-y-1.5">
+                <p className="text-xs text-amber-300">평소보다 응답이 늦어지고 있어요.</p>
+                <button type="button" onClick={checkAiStatus} className="text-xs text-slate-400 underline underline-offset-2">
+                  AI 상태 확인
+                </button>
+                {aiStatusText && <p className="text-xs text-slate-500">{aiStatusText}</p>}
+              </div>
+            )}
+          </div>
         ) : photoAttemptId ? (
           <div className="space-y-3">
             <h2 className="text-sm font-semibold text-white">사진 속 물건이 본인 물건인가요?</h2>
@@ -670,7 +768,7 @@ function WebOwner({ onBack, onResult }) {
 
         {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
 
-        {!verified && (
+        {!verified && !pending && (
           <button
             type="submit" disabled={busy || (photoAttemptId ? !photoReady || photoError : question ? !optionId : !description.trim())}
             className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold rounded-xl text-sm shadow-lg transition-all"
@@ -678,14 +776,14 @@ function WebOwner({ onBack, onResult }) {
             {busy ? '처리 중...' : photoAttemptId ? '맞아요 · OTP 받기' : question ? '답변 제출' : '분실물 검색'}
           </button>
         )}
-        {photoAttemptId && (
+        {photoAttemptId && !pending && (
           <button type="button" disabled={busy} onClick={(event) => submit(event, false)}
             className="w-full rounded-xl bg-slate-700 py-3 text-sm font-bold text-white hover:bg-slate-600 disabled:opacity-60">
             아니에요 · 종료
           </button>
         )}
-        {attempt && (
-          <button type="button" disabled={busy} onClick={restart} className="text-sm text-slate-300 hover:text-white">
+        {(attempt || pending) && (
+          <button type="button" onClick={restart} className="text-sm text-slate-300 hover:text-white">
             검색 다시 시작
           </button>
         )}

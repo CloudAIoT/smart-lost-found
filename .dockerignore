@@ -1,6 +1,7 @@
 **
 !backend/
 !backend/requirements.txt
+!backend/requirements-dev.txt
 !backend/app/
 !backend/app/**
 !backend/alembic/
@@ -19,6 +20,13 @@
 !frontend/public/**
 !frontend/src/
 !frontend/src/**
+!frontend/tests/
+!frontend/tests/**
+!imageprocess/
+!imageprocess/__init__.py
+!imageprocess/requirements-core.txt
+!imageprocess/app/
+!imageprocess/app/**
 **/__pycache__/
 **/*.pyc
 **/.env

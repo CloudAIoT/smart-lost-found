@@ -23,6 +23,20 @@ class GeminiSettings(BaseSettings):
 
 
 class Settings(GeminiSettings):
+    # Two-photo inference may take longer than ownership text requests.
+    image_analysis_timeout_seconds: int = Field(default=90, ge=5, le=90)
+    # One ownership search runs clue extraction, candidate matching and option generation in a row,
+    # each with model fallback. The budget bounds the whole search so a slow provider ends in a
+    # stable error code instead of the 120s proxy deadline. The search itself runs off the request
+    # thread; the wait only keeps the common fast case on the immediate response shape.
+    ownership_search_budget_seconds: float = Field(default=25, gt=0, le=110)
+    ownership_sync_wait_seconds: float = Field(default=3, ge=0, le=30)
+    ownership_search_concurrency: int = Field(default=3, ge=1, le=10)
+    ownership_max_concurrent_searches: int = Field(default=4, ge=1, le=16)
+    # Photo analysis runs off the request thread the same way, with image_analysis_timeout_seconds
+    # as its budget. Two decoded photos per worker, so this limit stays well below the search one.
+    analysis_sync_wait_seconds: float = Field(default=3, ge=0, le=30)
+    max_concurrent_analyses: int = Field(default=2, ge=1, le=8)
     postgres_db: str
     postgres_user: str
     postgres_password: SecretStr
@@ -31,6 +45,8 @@ class Settings(GeminiSettings):
     # Local fixtures remain separate from deployed API access.
     local_development: bool = False
     business_api_enabled: bool = False
+    # Development stand-in for the Pi. Never enable it where real storage is operated.
+    dev_fake_device: bool = False
     s3_bucket: str | None = None
     s3_region: str | None = None
     preview_ttl_seconds: int | None = Field(default=None, gt=0)
@@ -40,6 +56,14 @@ class Settings(GeminiSettings):
     return_code_ttl_seconds: int | None = Field(default=None, gt=0)
     # Per-kiosk device routing stays in server configuration, never FE input.
     pi_devices: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Device telemetry over MQTT (docs/mqtt-protocol.md). An empty host leaves the subscriber off.
+    mqtt_host: str = ""
+    mqtt_port: int = Field(default=1883, ge=1, le=65535)
+    mqtt_username: str = ""
+    mqtt_password: SecretStr = SecretStr("")
+    # A stable client id is what lets the broker queue QoS 1 alerts across a deployment.
+    mqtt_client_id: str = Field(default="slf-backend", pattern=r"^[A-Za-z0-9._-]{1,64}$")
+    mqtt_alert_retention_days: int = Field(default=14, ge=1, le=365)
 
     @property
     def database_url(self) -> URL:

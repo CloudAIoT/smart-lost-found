@@ -1,0 +1,2881 @@
+{
+  "scope": "Local claimant API flow against synthetic SQLite data using live Gemini.",
+  "data": {
+    "synthetic": true,
+    "item_count": 100,
+    "searchable_count": 90,
+    "distribution": {
+      "normal": 25,
+      "similar": 25,
+      "missing": 40,
+      "excluded": 10
+    }
+  },
+  "case_summary": {
+    "owner_five_questions": {
+      "status": "provider_blocked",
+      "run": "retry_five",
+      "error": "OWNERSHIP_AI_REQUEST_FAILED"
+    },
+    "two_wrong": {
+      "status": "passed",
+      "run": "wrong"
+    },
+    "one_wrong": {
+      "status": "provider_blocked",
+      "run": "retry_wrong",
+      "error": "OWNERSHIP_AI_REQUEST_FAILED"
+    },
+    "bottle_shape_match": {
+      "status": "passed",
+      "run": "input"
+    },
+    "earbuds_missing_brand": {
+      "status": "passed",
+      "run": "input"
+    },
+    "photo_rejected": {
+      "status": "passed",
+      "run": "retry_input"
+    },
+    "helmet_not_in_storage": {
+      "status": "provider_blocked",
+      "run": "retry_helmet",
+      "error": "OWNERSHIP_AI_MODEL_UNAVAILABLE"
+    },
+    "vague_input": {
+      "status": "passed",
+      "run": "retry_input"
+    },
+    "wallet_all_correct_tied": {
+      "status": "passed",
+      "run": "selection"
+    },
+    "umbrella_public_match": {
+      "status": "passed",
+      "run": "selection"
+    },
+    "thermos_no_private_features": {
+      "status": "passed",
+      "run": "retry_thermos"
+    }
+  },
+  "runs": [
+    {
+      "run": "five",
+      "created_at": "2026-11-19T11:46:51.044110+00:00",
+      "models": {
+        "extraction": [
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash-lite"
+        ],
+        "candidate_search_and_distractors": [
+          "gemini-4-hydrogen",
+          "gemini-3.8-flash",
+          "gemini-3.5-flash-lite"
+        ]
+      },
+      "suite": "baseline",
+      "data": {
+        "synthetic": true,
+        "item_count": 100,
+        "searchable_count": 90,
+        "distribution": {
+          "normal": 25,
+          "similar": 25,
+          "missing": 40,
+          "excluded": 10
+        }
+      },
+      "request_limit": 40,
+      "request_timeout_seconds": 15.0,
+      "source_commit": "bcaf37d5eeca2e3464afb8b4ecb1198187a1717c",
+      "source_hashes": {
+        "search.py": "61f58774127a106b40413c8ba0247aaf51a7d65a1665c51c6e28aafea6b3b755",
+        "workflow.py": "12844548dda84c3b80c6cd9299b98cbb09df9a785d2b1487720ec3cfa9346a04",
+        "workflow_ai.py": "168b5a40bf5e14e7260a8df73077029d31c277abfe12ef085669744bfdafc9ba",
+        "workflow_schemas.py": "bc2037e595cdf498e2b09662cc8e26c5ddef4003a5d1ca0007e15074c46ad5c9",
+        "experiments/ownership_live_corpus.py": "f990e3aaae219a539733e6f9a62f27060dd367dd6c408612c8f82efc3a58ce2c",
+        "experiments/run_ownership_live.py": "961ae6fc580a9da648a7b6498c3fd74f0a910070948896ab0580e5d8e3256f96"
+      },
+      "cases": [
+        {
+          "case": "owner_five_questions",
+          "description": "도서관 1층에서 필통을 찾고 있어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "supported",
+            "item": "P01",
+            "initial_count": 5,
+            "rounds": 5,
+            "answers": {
+              "장식": "파란 원형 핀",
+              "문구": "MJ",
+              "재질": "fabric",
+              "브랜드": "Carhartt",
+              "색상": "navy"
+            }
+          },
+          "steps": [],
+          "checks": {
+            "status": false,
+            "decision": false,
+            "otp": false,
+            "otp_record": false,
+            "photo_confirmation": false,
+            "initial_count": false,
+            "rounds": false,
+            "five_unique_options": true,
+            "handoff_item": false,
+            "handoff_decision": false
+          },
+          "search_response_ms": 46282,
+          "actual": {
+            "http": 502,
+            "error": "OWNERSHIP_AI_RATE_LIMITED",
+            "initial_candidates": null,
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": false
+        }
+      ],
+      "requests": 8,
+      "api_events": [
+        {
+          "case": "owner_five_questions",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.1-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "필통",
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": "도서관 1층"
+          },
+          "milliseconds": 3484
+        },
+        {
+          "case": "owner_five_questions",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen"
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "items_compared": 90,
+          "result": [
+            {
+              "item": 29,
+              "matched_fields": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": 40,
+              "matched_fields": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": 58,
+              "matched_fields": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": 72,
+              "matched_fields": [
+                "category",
+                "location"
+              ]
+            },
+            {
+              "item": 85,
+              "matched_fields": [
+                "category",
+                "location"
+              ]
+            }
+          ],
+          "milliseconds": 26884
+        },
+        {
+          "case": "owner_five_questions",
+          "stage": "options:distinctive_features",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash"
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 429
+            }
+          ],
+          "known": [
+            "초록 줄무늬 배지",
+            "빨간 사각 핀",
+            "파란 원형 핀"
+          ],
+          "required_count": 2,
+          "error": "OWNERSHIP_AI_RATE_LIMITED",
+          "milliseconds": 15819
+        }
+      ],
+      "stop_code": "OWNERSHIP_AI_RATE_LIMITED"
+    },
+    {
+      "run": "wrong",
+      "created_at": "2026-11-19T11:46:47.188029+00:00",
+      "models": {
+        "extraction": [
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash-lite"
+        ],
+        "candidate_search_and_distractors": [
+          "gemini-4-hydrogen",
+          "gemini-3.8-flash",
+          "gemini-3.5-flash-lite"
+        ]
+      },
+      "suite": "baseline",
+      "data": {
+        "synthetic": true,
+        "item_count": 100,
+        "searchable_count": 90,
+        "distribution": {
+          "normal": 25,
+          "similar": 25,
+          "missing": 40,
+          "excluded": 10
+        }
+      },
+      "request_limit": 40,
+      "request_timeout_seconds": 15.0,
+      "source_commit": "bcaf37d5eeca2e3464afb8b4ecb1198187a1717c",
+      "source_hashes": {
+        "search.py": "61f58774127a106b40413c8ba0247aaf51a7d65a1665c51c6e28aafea6b3b755",
+        "workflow.py": "12844548dda84c3b80c6cd9299b98cbb09df9a785d2b1487720ec3cfa9346a04",
+        "workflow_ai.py": "168b5a40bf5e14e7260a8df73077029d31c277abfe12ef085669744bfdafc9ba",
+        "workflow_schemas.py": "bc2037e595cdf498e2b09662cc8e26c5ddef4003a5d1ca0007e15074c46ad5c9",
+        "experiments/ownership_live_corpus.py": "f990e3aaae219a539733e6f9a62f27060dd367dd6c408612c8f82efc3a58ce2c",
+        "experiments/run_ownership_live.py": "961ae6fc580a9da648a7b6498c3fd74f0a910070948896ab0580e5d8e3256f96"
+      },
+      "cases": [
+        {
+          "case": "two_wrong",
+          "description": "수첩을 잃어버렸어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "not_confirmed",
+            "initial_count": 1,
+            "rounds": 2,
+            "matches": 0,
+            "failure_reason": "wrong_evidence_limit",
+            "wrong_for": {
+              "장식": "물방울 배지",
+              "문구": "QX"
+            }
+          },
+          "steps": [
+            {
+              "question": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
+              "options": [
+                "열쇠고리",
+                "하트 모양",
+                "원형 메달",
+                "별 모양 뱃지",
+                "물방울 배지"
+              ],
+              "selected": "열쇠고리",
+              "expected_wrong": true,
+              "candidates_before": [
+                {
+                  "item": "N01",
+                  "initial_matches": [
+                    "category"
+                  ]
+                }
+              ],
+              "purpose": "verification",
+              "candidates_after": [
+                {
+                  "item": "N01",
+                  "initial_matches": [
+                    "category"
+                  ]
+                }
+              ],
+              "matched_items": [],
+              "conflicting_items": [
+                "N01"
+              ]
+            },
+            {
+              "question": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
+              "options": [
+                "AZ",
+                "KP",
+                "LM",
+                "RT",
+                "QX"
+              ],
+              "selected": "AZ",
+              "expected_wrong": true,
+              "candidates_before": [
+                {
+                  "item": "N01",
+                  "initial_matches": [
+                    "category"
+                  ]
+                }
+              ],
+              "purpose": "verification",
+              "candidates_after": [],
+              "matched_items": [],
+              "conflicting_items": [
+                "N01"
+              ]
+            }
+          ],
+          "checks": {
+            "status": true,
+            "decision": true,
+            "otp": true,
+            "otp_record": true,
+            "no_photo_requested": true,
+            "initial_count": true,
+            "rounds": true,
+            "five_unique_options": true,
+            "handoff_decision": true,
+            "failure_reason": true,
+            "matched_groups": true
+          },
+          "search_response_ms": 43081,
+          "actual": {
+            "status": "completed",
+            "decision": "not_confirmed",
+            "initial_candidates": [
+              {
+                "item": "N01",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ],
+            "remaining_candidates": [],
+            "otp_issued": false,
+            "handoff": {
+              "item": null,
+              "decision": "not_confirmed",
+              "failure_reason": "wrong_evidence_limit",
+              "matched_evidence_groups": 0,
+              "answered_questions": 2,
+              "policy_version": "development_v4"
+            },
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": true
+        },
+        {
+          "case": "one_wrong",
+          "description": "수첩을 잃어버렸어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "supported",
+            "item": "N01",
+            "initial_count": 1,
+            "rounds": 2,
+            "matches": 1,
+            "wrong_for": {
+              "장식": "물방울 배지"
+            },
+            "answers": {
+              "문구": "QX"
+            }
+          },
+          "steps": [],
+          "checks": {
+            "status": false,
+            "decision": false,
+            "otp": false,
+            "otp_record": false,
+            "photo_confirmation": false,
+            "initial_count": false,
+            "rounds": false,
+            "five_unique_options": true,
+            "handoff_item": false,
+            "handoff_decision": false,
+            "matched_groups": false
+          },
+          "search_response_ms": 2759,
+          "actual": {
+            "http": 502,
+            "error": "OWNERSHIP_AI_RATE_LIMITED",
+            "initial_candidates": null,
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": false
+        }
+      ],
+      "requests": 15,
+      "api_events": [
+        {
+          "case": "two_wrong",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "수첩",
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 1575
+        },
+        {
+          "case": "two_wrong",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen"
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "items_compared": 90,
+          "result": [
+            {
+              "item": 21,
+              "matched_fields": [
+                "category"
+              ]
+            }
+          ],
+          "milliseconds": 23937
+        },
+        {
+          "case": "two_wrong",
+          "stage": "options:distinctive_features",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash"
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "known": [
+            "물방울 배지"
+          ],
+          "required_count": 4,
+          "result": [
+            "하트 모양",
+            "별 모양 뱃지",
+            "열쇠고리",
+            "원형 메달"
+          ],
+          "milliseconds": 17274
+        },
+        {
+          "case": "two_wrong",
+          "stage": "options:visible_text",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "known": [
+            "QX"
+          ],
+          "required_count": 4,
+          "result": [
+            "AZ",
+            "KP",
+            "RT",
+            "LM"
+          ],
+          "milliseconds": 2125
+        },
+        {
+          "case": "one_wrong",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.1-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "수첩",
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 1480
+        },
+        {
+          "case": "one_wrong",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 429
+            }
+          ],
+          "items_compared": 90,
+          "error": "OWNERSHIP_AI_RATE_LIMITED",
+          "milliseconds": 1217
+        }
+      ],
+      "stop_code": "OWNERSHIP_AI_RATE_LIMITED"
+    },
+    {
+      "run": "input",
+      "created_at": "2026-11-19T11:46:50.499563+00:00",
+      "models": {
+        "extraction": [
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash-lite"
+        ],
+        "candidate_search_and_distractors": [
+          "gemini-4-hydrogen",
+          "gemini-3.8-flash",
+          "gemini-3.5-flash-lite"
+        ]
+      },
+      "suite": "user-flows",
+      "data": {
+        "synthetic": true,
+        "item_count": 100,
+        "searchable_count": 90,
+        "distribution": {
+          "normal": 25,
+          "similar": 25,
+          "missing": 40,
+          "excluded": 10
+        }
+      },
+      "request_limit": 40,
+      "request_timeout_seconds": 15.0,
+      "source_commit": "bcaf37d5eeca2e3464afb8b4ecb1198187a1717c",
+      "source_hashes": {
+        "search.py": "61f58774127a106b40413c8ba0247aaf51a7d65a1665c51c6e28aafea6b3b755",
+        "workflow.py": "12844548dda84c3b80c6cd9299b98cbb09df9a785d2b1487720ec3cfa9346a04",
+        "workflow_ai.py": "168b5a40bf5e14e7260a8df73077029d31c277abfe12ef085669744bfdafc9ba",
+        "workflow_schemas.py": "bc2037e595cdf498e2b09662cc8e26c5ddef4003a5d1ca0007e15074c46ad5c9",
+        "experiments/ownership_live_corpus.py": "f990e3aaae219a539733e6f9a62f27060dd367dd6c408612c8f82efc3a58ce2c",
+        "experiments/run_ownership_live.py": "961ae6fc580a9da648a7b6498c3fd74f0a910070948896ab0580e5d8e3256f96"
+      },
+      "cases": [
+        {
+          "case": "bottle_shape_match",
+          "description": "파란 물병을 잃어버렸어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "supported",
+            "initial_items": [
+              "T01",
+              "T02",
+              "T03",
+              "T04",
+              "T05"
+            ],
+            "remaining_items": [
+              "T01"
+            ],
+            "item": "T01",
+            "rounds": 1,
+            "matches": 0,
+            "answers": {
+              "형태": "원통형"
+            }
+          },
+          "steps": [
+            {
+              "question": "기억하는 물건의 형태를 골라 주세요.",
+              "options": [
+                "피라미드형",
+                "원추형",
+                "원통형",
+                "직육면체",
+                "구형"
+              ],
+              "selected": "원통형",
+              "expected_wrong": false,
+              "candidates_before": [
+                {
+                  "item": "T01",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                },
+                {
+                  "item": "T02",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                },
+                {
+                  "item": "T04",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                },
+                {
+                  "item": "T05",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                },
+                {
+                  "item": "T03",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                }
+              ],
+              "purpose": "narrowing",
+              "candidates_after": [
+                {
+                  "item": "T01",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                }
+              ],
+              "matched_items": [
+                "T01"
+              ],
+              "conflicting_items": [
+                "T02",
+                "T04",
+                "T05",
+                "T03"
+              ]
+            }
+          ],
+          "checks": {
+            "status": true,
+            "decision": true,
+            "otp": true,
+            "otp_record": true,
+            "photo_confirmation": true,
+            "initial_items": true,
+            "remaining_items": true,
+            "rounds": true,
+            "five_unique_options": true,
+            "handoff_item": true,
+            "handoff_decision": true,
+            "matched_groups": true
+          },
+          "search_response_ms": 33633,
+          "actual": {
+            "status": "completed",
+            "decision": "supported",
+            "initial_candidates": [
+              {
+                "item": "T01",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              },
+              {
+                "item": "T02",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              },
+              {
+                "item": "T04",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              },
+              {
+                "item": "T05",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              },
+              {
+                "item": "T03",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              }
+            ],
+            "remaining_candidates": [
+              {
+                "item": "T01",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              }
+            ],
+            "otp_issued": true,
+            "handoff": {
+              "item": "T01",
+              "decision": "supported",
+              "failure_reason": null,
+              "matched_evidence_groups": 0,
+              "answered_questions": 1,
+              "policy_version": "development_v4"
+            },
+            "photo_confirmation": {
+              "jpeg_received": true,
+              "confirmed": true
+            },
+            "otp_records_created": 1
+          },
+          "passed": true
+        },
+        {
+          "case": "earbuds_missing_brand",
+          "description": "흰색 Apple 이어폰을 잃어버렸어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "supported",
+            "initial_items": [
+              "M01"
+            ],
+            "remaining_items": [
+              "M01"
+            ],
+            "item": "M01",
+            "rounds": 0,
+            "matches": 0
+          },
+          "steps": [],
+          "checks": {
+            "status": true,
+            "decision": true,
+            "otp": true,
+            "otp_record": true,
+            "photo_confirmation": true,
+            "initial_items": true,
+            "remaining_items": true,
+            "rounds": true,
+            "five_unique_options": true,
+            "handoff_item": true,
+            "handoff_decision": true,
+            "matched_groups": true
+          },
+          "search_response_ms": 7857,
+          "actual": {
+            "status": "completed",
+            "decision": "supported",
+            "initial_candidates": [
+              {
+                "item": "M01",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              }
+            ],
+            "remaining_candidates": [
+              {
+                "item": "M01",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              }
+            ],
+            "otp_issued": true,
+            "handoff": {
+              "item": "M01",
+              "decision": "supported",
+              "failure_reason": null,
+              "matched_evidence_groups": 0,
+              "answered_questions": 0,
+              "policy_version": "development_v4"
+            },
+            "photo_confirmation": {
+              "jpeg_received": true,
+              "confirmed": true
+            },
+            "otp_records_created": 1
+          },
+          "passed": true
+        },
+        {
+          "case": "photo_rejected",
+          "description": "보온병을 찾고 있어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "not_confirmed",
+            "initial_items": [
+              "M03"
+            ],
+            "remaining_items": [
+              "M03"
+            ],
+            "rounds": 0,
+            "confirm_photo": false,
+            "failure_reason": "photo_rejected"
+          },
+          "steps": [],
+          "checks": {
+            "status": false,
+            "decision": false,
+            "otp": true,
+            "otp_record": true,
+            "photo_confirmation": false,
+            "initial_items": false,
+            "remaining_items": false,
+            "rounds": true,
+            "five_unique_options": true,
+            "handoff_decision": false,
+            "failure_reason": false
+          },
+          "search_response_ms": 2476,
+          "actual": {
+            "http": 502,
+            "error": "OWNERSHIP_AI_RATE_LIMITED",
+            "initial_candidates": null,
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": false
+        },
+        {
+          "case": "helmet_not_in_storage",
+          "not_run": "OWNERSHIP_AI_RATE_LIMITED"
+        },
+        {
+          "case": "vague_input",
+          "not_run": "OWNERSHIP_AI_RATE_LIMITED"
+        }
+      ],
+      "requests": 16,
+      "api_events": [
+        {
+          "case": "bottle_shape_match",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "물병",
+            "color": "파란",
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 1822
+        },
+        {
+          "case": "bottle_shape_match",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen"
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "items_compared": 90,
+          "result": [
+            {
+              "item": 30,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            },
+            {
+              "item": 37,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            },
+            {
+              "item": 42,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            },
+            {
+              "item": 63,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            },
+            {
+              "item": 75,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            }
+          ],
+          "milliseconds": 29430
+        },
+        {
+          "case": "bottle_shape_match",
+          "stage": "options:shape",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "known": [
+            "원통형",
+            "직육면체"
+          ],
+          "required_count": 3,
+          "result": [
+            "구형",
+            "원추형",
+            "피라미드형"
+          ],
+          "milliseconds": 2179
+        },
+        {
+          "case": "earbuds_missing_brand",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.1-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "이어폰",
+            "color": "흰색",
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": "Apple",
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 2417
+        },
+        {
+          "case": "earbuds_missing_brand",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "items_compared": 90,
+          "result": [
+            {
+              "item": 62,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            }
+          ],
+          "milliseconds": 5342
+        },
+        {
+          "case": "photo_rejected",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "보온병",
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 1307
+        },
+        {
+          "case": "photo_rejected",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 429
+            }
+          ],
+          "items_compared": 90,
+          "error": "OWNERSHIP_AI_RATE_LIMITED",
+          "milliseconds": 1124
+        }
+      ],
+      "stop_code": "OWNERSHIP_AI_RATE_LIMITED"
+    },
+    {
+      "run": "selection",
+      "created_at": "2026-11-19T11:46:51.207942+00:00",
+      "models": {
+        "extraction": [
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash-lite"
+        ],
+        "candidate_search_and_distractors": [
+          "gemini-4-hydrogen",
+          "gemini-3.8-flash",
+          "gemini-3.5-flash-lite"
+        ]
+      },
+      "suite": "user-flows",
+      "data": {
+        "synthetic": true,
+        "item_count": 100,
+        "searchable_count": 90,
+        "distribution": {
+          "normal": 25,
+          "similar": 25,
+          "missing": 40,
+          "excluded": 10
+        }
+      },
+      "request_limit": 40,
+      "request_timeout_seconds": 15.0,
+      "source_commit": "bcaf37d5eeca2e3464afb8b4ecb1198187a1717c",
+      "source_hashes": {
+        "search.py": "61f58774127a106b40413c8ba0247aaf51a7d65a1665c51c6e28aafea6b3b755",
+        "workflow.py": "12844548dda84c3b80c6cd9299b98cbb09df9a785d2b1487720ec3cfa9346a04",
+        "workflow_ai.py": "168b5a40bf5e14e7260a8df73077029d31c277abfe12ef085669744bfdafc9ba",
+        "workflow_schemas.py": "bc2037e595cdf498e2b09662cc8e26c5ddef4003a5d1ca0007e15074c46ad5c9",
+        "experiments/ownership_live_corpus.py": "f990e3aaae219a539733e6f9a62f27060dd367dd6c408612c8f82efc3a58ce2c",
+        "experiments/run_ownership_live.py": "961ae6fc580a9da648a7b6498c3fd74f0a910070948896ab0580e5d8e3256f96"
+      },
+      "cases": [
+        {
+          "case": "wallet_all_correct_tied",
+          "description": "잃어버린 지갑이 있는지 찾아주세요.",
+          "expected": {
+            "status": "completed",
+            "decision": "not_confirmed",
+            "initial_items": [
+              "W01",
+              "W02",
+              "W03",
+              "W04",
+              "W05"
+            ],
+            "remaining_items": [
+              "W01",
+              "W02"
+            ],
+            "rounds": 2,
+            "answers": {
+              "장식": "은색 나뭇잎",
+              "문구": "AB"
+            }
+          },
+          "steps": [
+            {
+              "question": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
+              "options": [
+                "검은색 줄무늬",
+                "붉은색 점",
+                "은색 나뭇잎",
+                "갈색 고리",
+                "황금색 별"
+              ],
+              "selected": "은색 나뭇잎",
+              "expected_wrong": false,
+              "candidates_before": [
+                {
+                  "item": "W05",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W03",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W01",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W02",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W04",
+                  "initial_matches": [
+                    "category"
+                  ]
+                }
+              ],
+              "purpose": "verification",
+              "candidates_after": [
+                {
+                  "item": "W05",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W03",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W01",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W02",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W04",
+                  "initial_matches": [
+                    "category"
+                  ]
+                }
+              ],
+              "matched_items": [
+                "W01",
+                "W02"
+              ],
+              "conflicting_items": [
+                "W05",
+                "W03",
+                "W04"
+              ]
+            },
+            {
+              "question": "물건에 적힌 문구 중 기억나는 것을 골라 주세요.",
+              "options": [
+                "GH",
+                "AB",
+                "EF",
+                "IJ",
+                "CD"
+              ],
+              "selected": "AB",
+              "expected_wrong": false,
+              "candidates_before": [
+                {
+                  "item": "W05",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W03",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W01",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W02",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W04",
+                  "initial_matches": [
+                    "category"
+                  ]
+                }
+              ],
+              "purpose": "verification",
+              "candidates_after": [
+                {
+                  "item": "W01",
+                  "initial_matches": [
+                    "category"
+                  ]
+                },
+                {
+                  "item": "W02",
+                  "initial_matches": [
+                    "category"
+                  ]
+                }
+              ],
+              "matched_items": [
+                "W01",
+                "W02"
+              ],
+              "conflicting_items": [
+                "W05",
+                "W03",
+                "W04"
+              ]
+            }
+          ],
+          "checks": {
+            "status": true,
+            "decision": true,
+            "otp": true,
+            "otp_record": true,
+            "no_photo_requested": true,
+            "initial_items": true,
+            "remaining_items": true,
+            "rounds": true,
+            "five_unique_options": true,
+            "handoff_decision": true
+          },
+          "search_response_ms": 18494,
+          "actual": {
+            "status": "completed",
+            "decision": "not_confirmed",
+            "initial_candidates": [
+              {
+                "item": "W05",
+                "initial_matches": [
+                  "category"
+                ]
+              },
+              {
+                "item": "W03",
+                "initial_matches": [
+                  "category"
+                ]
+              },
+              {
+                "item": "W01",
+                "initial_matches": [
+                  "category"
+                ]
+              },
+              {
+                "item": "W02",
+                "initial_matches": [
+                  "category"
+                ]
+              },
+              {
+                "item": "W04",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ],
+            "remaining_candidates": [
+              {
+                "item": "W01",
+                "initial_matches": [
+                  "category"
+                ]
+              },
+              {
+                "item": "W02",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ],
+            "otp_issued": false,
+            "handoff": {
+              "item": null,
+              "decision": "not_confirmed",
+              "failure_reason": "multiple_candidates",
+              "matched_evidence_groups": 0,
+              "answered_questions": 2,
+              "policy_version": "development_v4"
+            },
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": true
+        },
+        {
+          "case": "umbrella_public_match",
+          "description": "검은색 우산을 잃어버렸어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "supported",
+            "initial_items": [
+              "U01",
+              "U02",
+              "U03",
+              "U04",
+              "U05"
+            ],
+            "remaining_items": [
+              "U01"
+            ],
+            "item": "U01",
+            "rounds": 1,
+            "matches": 0,
+            "answers": {
+              "재질": "nylon"
+            }
+          },
+          "steps": [
+            {
+              "question": "기억하는 물건의 재질을 골라 주세요.",
+              "options": [
+                "vinyl",
+                "leather",
+                "polyester",
+                "nylon",
+                "canvas"
+              ],
+              "selected": "nylon",
+              "expected_wrong": false,
+              "candidates_before": [
+                {
+                  "item": "U03",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                },
+                {
+                  "item": "U05",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                },
+                {
+                  "item": "U02",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                },
+                {
+                  "item": "U01",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                },
+                {
+                  "item": "U04",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                }
+              ],
+              "purpose": "narrowing",
+              "candidates_after": [
+                {
+                  "item": "U01",
+                  "initial_matches": [
+                    "category",
+                    "color"
+                  ]
+                }
+              ],
+              "matched_items": [
+                "U01"
+              ],
+              "conflicting_items": [
+                "U03",
+                "U05",
+                "U02",
+                "U04"
+              ]
+            }
+          ],
+          "checks": {
+            "status": true,
+            "decision": true,
+            "otp": true,
+            "otp_record": true,
+            "photo_confirmation": true,
+            "initial_items": true,
+            "remaining_items": true,
+            "rounds": true,
+            "five_unique_options": true,
+            "handoff_item": true,
+            "handoff_decision": true,
+            "matched_groups": true
+          },
+          "search_response_ms": 12793,
+          "actual": {
+            "status": "completed",
+            "decision": "supported",
+            "initial_candidates": [
+              {
+                "item": "U03",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              },
+              {
+                "item": "U05",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              },
+              {
+                "item": "U02",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              },
+              {
+                "item": "U01",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              },
+              {
+                "item": "U04",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              }
+            ],
+            "remaining_candidates": [
+              {
+                "item": "U01",
+                "initial_matches": [
+                  "category",
+                  "color"
+                ]
+              }
+            ],
+            "otp_issued": true,
+            "handoff": {
+              "item": "U01",
+              "decision": "supported",
+              "failure_reason": null,
+              "matched_evidence_groups": 0,
+              "answered_questions": 1,
+              "policy_version": "development_v4"
+            },
+            "photo_confirmation": {
+              "jpeg_received": true,
+              "confirmed": true
+            },
+            "otp_records_created": 1
+          },
+          "passed": true
+        },
+        {
+          "case": "thermos_no_private_features",
+          "description": "보온병을 찾고 있어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "supported",
+            "initial_items": [
+              "M03"
+            ],
+            "remaining_items": [
+              "M03"
+            ],
+            "item": "M03",
+            "rounds": 0,
+            "matches": 0
+          },
+          "steps": [],
+          "checks": {
+            "status": false,
+            "decision": false,
+            "otp": false,
+            "otp_record": false,
+            "photo_confirmation": false,
+            "initial_items": false,
+            "remaining_items": false,
+            "rounds": true,
+            "five_unique_options": true,
+            "handoff_item": false,
+            "handoff_decision": false,
+            "matched_groups": false
+          },
+          "search_response_ms": 2809,
+          "actual": {
+            "http": 502,
+            "error": "OWNERSHIP_AI_RATE_LIMITED",
+            "initial_candidates": null,
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": false
+        }
+      ],
+      "requests": 20,
+      "api_events": [
+        {
+          "case": "wallet_all_correct_tied",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "지갑",
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 1613
+        },
+        {
+          "case": "wallet_all_correct_tied",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "items_compared": 90,
+          "result": [
+            {
+              "item": 1,
+              "matched_fields": [
+                "category"
+              ]
+            },
+            {
+              "item": 16,
+              "matched_fields": [
+                "category"
+              ]
+            },
+            {
+              "item": 33,
+              "matched_fields": [
+                "category"
+              ]
+            },
+            {
+              "item": 38,
+              "matched_fields": [
+                "category"
+              ]
+            },
+            {
+              "item": 47,
+              "matched_fields": [
+                "category"
+              ]
+            }
+          ],
+          "milliseconds": 13965
+        },
+        {
+          "case": "wallet_all_correct_tied",
+          "stage": "options:distinctive_features",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "known": [
+            "갈색 고리",
+            "은색 나뭇잎"
+          ],
+          "required_count": 3,
+          "result": [
+            "검은색 줄무늬",
+            "황금색 별",
+            "붉은색 점"
+          ],
+          "milliseconds": 2768
+        },
+        {
+          "case": "wallet_all_correct_tied",
+          "stage": "options:visible_text",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash"
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "known": [
+            "CD",
+            "AB"
+          ],
+          "required_count": 3,
+          "result": [
+            "EF",
+            "GH",
+            "IJ"
+          ],
+          "milliseconds": 16921
+        },
+        {
+          "case": "umbrella_public_match",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "우산",
+            "color": "검은색",
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 1146
+        },
+        {
+          "case": "umbrella_public_match",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 200
+            }
+          ],
+          "items_compared": 90,
+          "result": [
+            {
+              "item": 9,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            },
+            {
+              "item": 52,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            },
+            {
+              "item": 57,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            },
+            {
+              "item": 74,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            },
+            {
+              "item": 77,
+              "matched_fields": [
+                "category",
+                "color"
+              ]
+            }
+          ],
+          "milliseconds": 9604
+        },
+        {
+          "case": "umbrella_public_match",
+          "stage": "options:material",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "known": [
+            "vinyl",
+            "nylon"
+          ],
+          "required_count": 3,
+          "result": [
+            "canvas",
+            "leather",
+            "polyester"
+          ],
+          "milliseconds": 1954
+        },
+        {
+          "case": "thermos_no_private_features",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.1-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "보온병",
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 1626
+        },
+        {
+          "case": "thermos_no_private_features",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 429
+            }
+          ],
+          "items_compared": 90,
+          "error": "OWNERSHIP_AI_RATE_LIMITED",
+          "milliseconds": 1138
+        }
+      ],
+      "stop_code": "OWNERSHIP_AI_RATE_LIMITED"
+    },
+    {
+      "run": "retry_input",
+      "created_at": "2026-11-19T11:50:09.020690+00:00",
+      "models": {
+        "extraction": [
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash-lite"
+        ],
+        "candidate_search_and_distractors": [
+          "gemini-4-hydrogen",
+          "gemini-3.8-flash",
+          "gemini-3.5-flash-lite"
+        ]
+      },
+      "suite": "user-flows",
+      "data": {
+        "synthetic": true,
+        "item_count": 100,
+        "searchable_count": 90,
+        "distribution": {
+          "normal": 25,
+          "similar": 25,
+          "missing": 40,
+          "excluded": 10
+        }
+      },
+      "request_limit": 40,
+      "request_timeout_seconds": 15.0,
+      "source_commit": "bcaf37d5eeca2e3464afb8b4ecb1198187a1717c",
+      "source_hashes": {
+        "search.py": "61f58774127a106b40413c8ba0247aaf51a7d65a1665c51c6e28aafea6b3b755",
+        "workflow.py": "12844548dda84c3b80c6cd9299b98cbb09df9a785d2b1487720ec3cfa9346a04",
+        "workflow_ai.py": "168b5a40bf5e14e7260a8df73077029d31c277abfe12ef085669744bfdafc9ba",
+        "workflow_schemas.py": "bc2037e595cdf498e2b09662cc8e26c5ddef4003a5d1ca0007e15074c46ad5c9",
+        "experiments/ownership_live_corpus.py": "f990e3aaae219a539733e6f9a62f27060dd367dd6c408612c8f82efc3a58ce2c",
+        "experiments/run_ownership_live.py": "961ae6fc580a9da648a7b6498c3fd74f0a910070948896ab0580e5d8e3256f96"
+      },
+      "cases": [
+        {
+          "case": "photo_rejected",
+          "description": "보온병을 찾고 있어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "not_confirmed",
+            "initial_items": [
+              "M03"
+            ],
+            "remaining_items": [
+              "M03"
+            ],
+            "rounds": 0,
+            "confirm_photo": false,
+            "failure_reason": "photo_rejected"
+          },
+          "steps": [],
+          "checks": {
+            "status": true,
+            "decision": true,
+            "otp": true,
+            "otp_record": true,
+            "photo_confirmation": true,
+            "initial_items": true,
+            "remaining_items": true,
+            "rounds": true,
+            "five_unique_options": true,
+            "handoff_decision": true,
+            "failure_reason": true
+          },
+          "search_response_ms": 26237,
+          "actual": {
+            "status": "completed",
+            "decision": "not_confirmed",
+            "initial_candidates": [
+              {
+                "item": "M03",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ],
+            "remaining_candidates": [
+              {
+                "item": "M03",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ],
+            "otp_issued": false,
+            "handoff": {
+              "item": "M03",
+              "decision": "not_confirmed",
+              "failure_reason": "photo_rejected",
+              "matched_evidence_groups": 0,
+              "answered_questions": 0,
+              "policy_version": "development_v4"
+            },
+            "photo_confirmation": {
+              "jpeg_received": true,
+              "confirmed": false
+            },
+            "otp_records_created": 0
+          },
+          "passed": true
+        },
+        {
+          "case": "helmet_not_in_storage",
+          "description": "검은색 헬멧을 잃어버렸어요.",
+          "expected": {
+            "status": "no_candidates",
+            "decision": null,
+            "initial_items": [],
+            "remaining_items": [],
+            "rounds": 0
+          },
+          "steps": [],
+          "checks": {
+            "status": false,
+            "decision": true,
+            "otp": true,
+            "otp_record": true,
+            "no_photo_requested": true,
+            "initial_items": true,
+            "remaining_items": true,
+            "rounds": true,
+            "five_unique_options": true
+          },
+          "search_response_ms": 4433,
+          "actual": {
+            "http": 502,
+            "error": "OWNERSHIP_AI_REQUEST_FAILED",
+            "initial_candidates": null,
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": false
+        },
+        {
+          "case": "vague_input",
+          "description": "잘 모르겠어요.",
+          "expected": {
+            "status": "needs_clues",
+            "decision": null,
+            "initial_items": [],
+            "remaining_items": [],
+            "rounds": 0
+          },
+          "steps": [],
+          "checks": {
+            "status": true,
+            "decision": true,
+            "otp": true,
+            "otp_record": true,
+            "no_photo_requested": true,
+            "initial_items": true,
+            "remaining_items": true,
+            "rounds": true,
+            "five_unique_options": true
+          },
+          "search_response_ms": 1784,
+          "actual": {
+            "status": "needs_clues",
+            "decision": null,
+            "initial_candidates": [],
+            "remaining_candidates": [],
+            "otp_issued": false,
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": true
+        }
+      ],
+      "requests": 10,
+      "api_events": [
+        {
+          "case": "photo_rejected",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.1-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "보온병",
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 5933
+        },
+        {
+          "case": "photo_rejected",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen"
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "items_compared": 90,
+          "result": [
+            {
+              "item": 79,
+              "matched_fields": [
+                "category"
+              ]
+            }
+          ],
+          "milliseconds": 20259
+        },
+        {
+          "case": "helmet_not_in_storage",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "헬멧",
+            "color": "검은색",
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 1373
+        },
+        {
+          "case": "helmet_not_in_storage",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 503
+            }
+          ],
+          "items_compared": 90,
+          "error": "OWNERSHIP_AI_REQUEST_FAILED",
+          "milliseconds": 3047
+        },
+        {
+          "case": "vague_input",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": null,
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 1780
+        }
+      ],
+      "stop_code": null
+    },
+    {
+      "run": "retry_helmet",
+      "created_at": "2026-11-19T11:51:41.877761+00:00",
+      "models": {
+        "extraction": [
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash-lite"
+        ],
+        "candidate_search_and_distractors": [
+          "gemini-4-hydrogen",
+          "gemini-3.8-flash",
+          "gemini-3.5-flash-lite"
+        ]
+      },
+      "suite": "user-flows",
+      "data": {
+        "synthetic": true,
+        "item_count": 100,
+        "searchable_count": 90,
+        "distribution": {
+          "normal": 25,
+          "similar": 25,
+          "missing": 40,
+          "excluded": 10
+        }
+      },
+      "request_limit": 25,
+      "request_timeout_seconds": 15.0,
+      "source_commit": "bcaf37d5eeca2e3464afb8b4ecb1198187a1717c",
+      "source_hashes": {
+        "search.py": "61f58774127a106b40413c8ba0247aaf51a7d65a1665c51c6e28aafea6b3b755",
+        "workflow.py": "12844548dda84c3b80c6cd9299b98cbb09df9a785d2b1487720ec3cfa9346a04",
+        "workflow_ai.py": "168b5a40bf5e14e7260a8df73077029d31c277abfe12ef085669744bfdafc9ba",
+        "workflow_schemas.py": "bc2037e595cdf498e2b09662cc8e26c5ddef4003a5d1ca0007e15074c46ad5c9",
+        "experiments/ownership_live_corpus.py": "f990e3aaae219a539733e6f9a62f27060dd367dd6c408612c8f82efc3a58ce2c",
+        "experiments/run_ownership_live.py": "961ae6fc580a9da648a7b6498c3fd74f0a910070948896ab0580e5d8e3256f96"
+      },
+      "cases": [
+        {
+          "case": "helmet_not_in_storage",
+          "description": "검은색 헬멧을 잃어버렸어요.",
+          "expected": {
+            "status": "no_candidates",
+            "decision": null,
+            "initial_items": [],
+            "remaining_items": [],
+            "rounds": 0
+          },
+          "steps": [],
+          "checks": {
+            "status": false,
+            "decision": true,
+            "otp": true,
+            "otp_record": true,
+            "no_photo_requested": true,
+            "initial_items": true,
+            "remaining_items": true,
+            "rounds": true,
+            "five_unique_options": true
+          },
+          "search_response_ms": 2843,
+          "actual": {
+            "http": 502,
+            "error": "OWNERSHIP_AI_MODEL_UNAVAILABLE",
+            "initial_candidates": null,
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": false
+        }
+      ],
+      "requests": 3,
+      "api_events": [
+        {
+          "case": "helmet_not_in_storage",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.1-flash-lite",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-2.5-flash-lite",
+              "http_status": 404
+            }
+          ],
+          "error": "OWNERSHIP_AI_MODEL_UNAVAILABLE",
+          "milliseconds": 2836
+        }
+      ],
+      "stop_code": "OWNERSHIP_AI_MODEL_UNAVAILABLE"
+    },
+    {
+      "run": "retry_wrong",
+      "created_at": "2026-11-19T11:51:54.505625+00:00",
+      "models": {
+        "extraction": [
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash-lite"
+        ],
+        "candidate_search_and_distractors": [
+          "gemini-4-hydrogen",
+          "gemini-3.8-flash",
+          "gemini-3.5-flash-lite"
+        ]
+      },
+      "suite": "baseline",
+      "data": {
+        "synthetic": true,
+        "item_count": 100,
+        "searchable_count": 90,
+        "distribution": {
+          "normal": 25,
+          "similar": 25,
+          "missing": 40,
+          "excluded": 10
+        }
+      },
+      "request_limit": 25,
+      "request_timeout_seconds": 15.0,
+      "source_commit": "bcaf37d5eeca2e3464afb8b4ecb1198187a1717c",
+      "source_hashes": {
+        "search.py": "61f58774127a106b40413c8ba0247aaf51a7d65a1665c51c6e28aafea6b3b755",
+        "workflow.py": "12844548dda84c3b80c6cd9299b98cbb09df9a785d2b1487720ec3cfa9346a04",
+        "workflow_ai.py": "168b5a40bf5e14e7260a8df73077029d31c277abfe12ef085669744bfdafc9ba",
+        "workflow_schemas.py": "bc2037e595cdf498e2b09662cc8e26c5ddef4003a5d1ca0007e15074c46ad5c9",
+        "experiments/ownership_live_corpus.py": "f990e3aaae219a539733e6f9a62f27060dd367dd6c408612c8f82efc3a58ce2c",
+        "experiments/run_ownership_live.py": "961ae6fc580a9da648a7b6498c3fd74f0a910070948896ab0580e5d8e3256f96"
+      },
+      "cases": [
+        {
+          "case": "one_wrong",
+          "description": "수첩을 잃어버렸어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "supported",
+            "item": "N01",
+            "initial_count": 1,
+            "rounds": 2,
+            "matches": 1,
+            "wrong_for": {
+              "장식": "물방울 배지"
+            },
+            "answers": {
+              "문구": "QX"
+            }
+          },
+          "steps": [
+            {
+              "question": "물건에 있던 장식이나 구별되는 특징 중 기억나는 것을 골라 주세요.",
+              "options": [
+                "하트 배지",
+                "별모양 배지",
+                "원형 배지",
+                "물방울 배지",
+                "열쇠 모양 배지"
+              ],
+              "selected": "하트 배지",
+              "expected_wrong": true,
+              "candidates_before": [
+                {
+                  "item": "N01",
+                  "initial_matches": [
+                    "category"
+                  ]
+                }
+              ]
+            }
+          ],
+          "checks": {
+            "status": false,
+            "decision": false,
+            "otp": false,
+            "otp_record": false,
+            "photo_confirmation": false,
+            "initial_count": true,
+            "rounds": false,
+            "five_unique_options": true,
+            "handoff_item": false,
+            "handoff_decision": false,
+            "matched_groups": false
+          },
+          "search_response_ms": 25091,
+          "actual": {
+            "http": 502,
+            "error": "OWNERSHIP_AI_REQUEST_FAILED",
+            "initial_candidates": [
+              {
+                "item": "N01",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ],
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": false
+        }
+      ],
+      "requests": 10,
+      "api_events": [
+        {
+          "case": "one_wrong",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "수첩",
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 1444
+        },
+        {
+          "case": "one_wrong",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "items_compared": 90,
+          "result": [
+            {
+              "item": 21,
+              "matched_fields": [
+                "category"
+              ]
+            }
+          ],
+          "milliseconds": 6819
+        },
+        {
+          "case": "one_wrong",
+          "stage": "options:distinctive_features",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen"
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "known": [
+            "물방울 배지"
+          ],
+          "required_count": 4,
+          "result": [
+            "하트 배지",
+            "별모양 배지",
+            "원형 배지",
+            "열쇠 모양 배지"
+          ],
+          "milliseconds": 16743
+        },
+        {
+          "case": "one_wrong",
+          "stage": "options:visible_text",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 503
+            }
+          ],
+          "known": [
+            "QX"
+          ],
+          "required_count": 4,
+          "error": "OWNERSHIP_AI_REQUEST_FAILED",
+          "milliseconds": 1302
+        }
+      ],
+      "stop_code": null
+    },
+    {
+      "run": "retry_thermos",
+      "created_at": "2026-11-19T11:52:28.997648+00:00",
+      "models": {
+        "extraction": [
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash-lite"
+        ],
+        "candidate_search_and_distractors": [
+          "gemini-4-hydrogen",
+          "gemini-3.8-flash",
+          "gemini-3.5-flash-lite"
+        ]
+      },
+      "suite": "user-flows",
+      "data": {
+        "synthetic": true,
+        "item_count": 100,
+        "searchable_count": 90,
+        "distribution": {
+          "normal": 25,
+          "similar": 25,
+          "missing": 40,
+          "excluded": 10
+        }
+      },
+      "request_limit": 25,
+      "request_timeout_seconds": 15.0,
+      "source_commit": "bcaf37d5eeca2e3464afb8b4ecb1198187a1717c",
+      "source_hashes": {
+        "search.py": "61f58774127a106b40413c8ba0247aaf51a7d65a1665c51c6e28aafea6b3b755",
+        "workflow.py": "12844548dda84c3b80c6cd9299b98cbb09df9a785d2b1487720ec3cfa9346a04",
+        "workflow_ai.py": "168b5a40bf5e14e7260a8df73077029d31c277abfe12ef085669744bfdafc9ba",
+        "workflow_schemas.py": "bc2037e595cdf498e2b09662cc8e26c5ddef4003a5d1ca0007e15074c46ad5c9",
+        "experiments/ownership_live_corpus.py": "f990e3aaae219a539733e6f9a62f27060dd367dd6c408612c8f82efc3a58ce2c",
+        "experiments/run_ownership_live.py": "961ae6fc580a9da648a7b6498c3fd74f0a910070948896ab0580e5d8e3256f96"
+      },
+      "cases": [
+        {
+          "case": "thermos_no_private_features",
+          "description": "보온병을 찾고 있어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "supported",
+            "initial_items": [
+              "M03"
+            ],
+            "remaining_items": [
+              "M03"
+            ],
+            "item": "M03",
+            "rounds": 0,
+            "matches": 0
+          },
+          "steps": [],
+          "checks": {
+            "status": true,
+            "decision": true,
+            "otp": true,
+            "otp_record": true,
+            "photo_confirmation": true,
+            "initial_items": true,
+            "remaining_items": true,
+            "rounds": true,
+            "five_unique_options": true,
+            "handoff_item": true,
+            "handoff_decision": true,
+            "matched_groups": true
+          },
+          "search_response_ms": 9527,
+          "actual": {
+            "status": "completed",
+            "decision": "supported",
+            "initial_candidates": [
+              {
+                "item": "M03",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ],
+            "remaining_candidates": [
+              {
+                "item": "M03",
+                "initial_matches": [
+                  "category"
+                ]
+              }
+            ],
+            "otp_issued": true,
+            "handoff": {
+              "item": "M03",
+              "decision": "supported",
+              "failure_reason": null,
+              "matched_evidence_groups": 0,
+              "answered_questions": 0,
+              "policy_version": "development_v4"
+            },
+            "photo_confirmation": {
+              "jpeg_received": true,
+              "confirmed": true
+            },
+            "otp_records_created": 1
+          },
+          "passed": true
+        }
+      ],
+      "requests": 5,
+      "api_events": [
+        {
+          "case": "thermos_no_private_features",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 503
+            },
+            {
+              "model": "gemini-3.1-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "보온병",
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": null
+          },
+          "milliseconds": 3130
+        },
+        {
+          "case": "thermos_no_private_features",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "items_compared": 90,
+          "result": [
+            {
+              "item": 79,
+              "matched_fields": [
+                "category"
+              ]
+            }
+          ],
+          "milliseconds": 6353
+        }
+      ],
+      "stop_code": null
+    },
+    {
+      "run": "retry_five",
+      "created_at": "2026-11-19T11:52:41.415805+00:00",
+      "models": {
+        "extraction": [
+          "gemini-3.5-flash-lite",
+          "gemini-3.1-flash-lite",
+          "gemini-2.5-flash-lite"
+        ],
+        "candidate_search_and_distractors": [
+          "gemini-4-hydrogen",
+          "gemini-3.8-flash",
+          "gemini-3.5-flash-lite"
+        ]
+      },
+      "suite": "baseline",
+      "data": {
+        "synthetic": true,
+        "item_count": 100,
+        "searchable_count": 90,
+        "distribution": {
+          "normal": 25,
+          "similar": 25,
+          "missing": 40,
+          "excluded": 10
+        }
+      },
+      "request_limit": 25,
+      "request_timeout_seconds": 15.0,
+      "source_commit": "bcaf37d5eeca2e3464afb8b4ecb1198187a1717c",
+      "source_hashes": {
+        "search.py": "61f58774127a106b40413c8ba0247aaf51a7d65a1665c51c6e28aafea6b3b755",
+        "workflow.py": "12844548dda84c3b80c6cd9299b98cbb09df9a785d2b1487720ec3cfa9346a04",
+        "workflow_ai.py": "168b5a40bf5e14e7260a8df73077029d31c277abfe12ef085669744bfdafc9ba",
+        "workflow_schemas.py": "bc2037e595cdf498e2b09662cc8e26c5ddef4003a5d1ca0007e15074c46ad5c9",
+        "experiments/ownership_live_corpus.py": "f990e3aaae219a539733e6f9a62f27060dd367dd6c408612c8f82efc3a58ce2c",
+        "experiments/run_ownership_live.py": "961ae6fc580a9da648a7b6498c3fd74f0a910070948896ab0580e5d8e3256f96"
+      },
+      "cases": [
+        {
+          "case": "owner_five_questions",
+          "description": "도서관 1층에서 필통을 찾고 있어요.",
+          "expected": {
+            "status": "completed",
+            "decision": "supported",
+            "item": "P01",
+            "initial_count": 5,
+            "rounds": 5,
+            "answers": {
+              "장식": "파란 원형 핀",
+              "문구": "MJ",
+              "재질": "fabric",
+              "브랜드": "Carhartt",
+              "색상": "navy"
+            }
+          },
+          "steps": [],
+          "checks": {
+            "status": false,
+            "decision": false,
+            "otp": false,
+            "otp_record": false,
+            "photo_confirmation": false,
+            "initial_count": false,
+            "rounds": false,
+            "five_unique_options": true,
+            "handoff_item": false,
+            "handoff_decision": false
+          },
+          "search_response_ms": 3359,
+          "actual": {
+            "http": 502,
+            "error": "OWNERSHIP_AI_REQUEST_FAILED",
+            "initial_candidates": null,
+            "photo_confirmation": null,
+            "otp_records_created": 0
+          },
+          "passed": false
+        }
+      ],
+      "requests": 4,
+      "api_events": [
+        {
+          "case": "owner_five_questions",
+          "stage": "extract",
+          "provider_attempts": [
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 200
+            }
+          ],
+          "result": {
+            "category": "필통",
+            "color": null,
+            "shape": null,
+            "surface_texture": null,
+            "material": null,
+            "brand": null,
+            "visible_text": null,
+            "structure": null,
+            "distinctive_features": null,
+            "description": null,
+            "location": "도서관 1층"
+          },
+          "milliseconds": 1364
+        },
+        {
+          "case": "owner_five_questions",
+          "stage": "search",
+          "provider_attempts": [
+            {
+              "model": "gemini-4-hydrogen",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.8-flash",
+              "http_status": 429
+            },
+            {
+              "model": "gemini-3.5-flash-lite",
+              "http_status": 503
+            }
+          ],
+          "items_compared": 90,
+          "error": "OWNERSHIP_AI_REQUEST_FAILED",
+          "milliseconds": 1973
+        }
+      ],
+      "stop_code": null
+    }
+  ]
+}

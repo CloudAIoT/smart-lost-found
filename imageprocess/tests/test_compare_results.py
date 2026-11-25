@@ -38,3 +38,30 @@ def test_failed_results_are_not_compared_as_valid_features(tmp_path, capsys):
     assert main([str(path), str(path), '--output', str(tmp_path/'report.md')]) == 1
     assert json.loads(capsys.readouterr().out)['error']['code'] == 'COMPARISON_FAILED'
     assert not (tmp_path/'report.md').exists()
+
+
+def test_old_and_new_schemas_can_be_compared_without_inventing_missing_fields(tmp_path):
+    from app.models.schemas import Features
+    old, new = result(), result()
+    new['data'] = dict.fromkeys(Features.model_fields)
+    a, b, output = tmp_path/'old.json', tmp_path/'new.json', tmp_path/'comparison.md'
+    a.write_text(json.dumps(old))
+    b.write_text(json.dumps(new))
+    assert main([str(a), str(b), '--output', str(output)]) == 0
+    text = output.read_text()
+    assert '| material |' in text and '| surface_texture |' in text
+    assert '해당 규격에 없는 필드' in text and '| color |' in text
+    assert old['data']['material'] == 'unknown' and new['data']['surface_texture'] is None
+
+
+def test_english_fixed_v2_results_are_preserved_when_compared_with_korean_outputs(tmp_path):
+    from app.compare_results import read_result
+    from app.models.schemas import Features
+    old = {'success': True, 'data': {**dict.fromkeys(Features.model_fields), 'category': 'wallet', 'color': ['white']}}
+    new = {'success': True, 'data': {**dict.fromkeys(Features.model_fields), 'category': '지갑', 'color': ['흰색']}}
+    a, b, output = tmp_path/'v2.json', tmp_path/'ko.json', tmp_path/'comparison.md'
+    a.write_text(json.dumps(old))
+    b.write_text(json.dumps(new))
+    assert main([str(a), str(b), '--output', str(output)]) == 0
+    assert read_result(a)['data'] == old['data']
+    assert read_result(b)['data'] == new['data']

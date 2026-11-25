@@ -40,8 +40,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements*.txt
-      - run: pip install -r backend/requirements-dev.txt
+          cache-dependency-path: |
+            backend/requirements*.txt
+            imageprocess/requirements-core.txt
+      - run: pip install -r backend/requirements-dev.txt -r imageprocess/requirements-core.txt
       - name: Backend tests including PostgreSQL concurrency
         working-directory: backend
         run: python -m pytest -q
@@ -96,6 +98,21 @@ jobs:
       MAX_IMAGE_BYTES: ${{ vars.MAX_IMAGE_BYTES }}
       PREVIEW_TTL_SECONDS: ${{ vars.PREVIEW_TTL_SECONDS }}
       RETURN_CODE_TTL_SECONDS: ${{ vars.RETURN_CODE_TTL_SECONDS }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+      IMAGE_ANALYSIS_TIMEOUT_SECONDS: ${{ vars.IMAGE_ANALYSIS_TIMEOUT_SECONDS || '90' }}
+      DEV_FAKE_DEVICE: ${{ vars.DEV_FAKE_DEVICE }}
+      OWNERSHIP_SEARCH_BUDGET_SECONDS: ${{ vars.OWNERSHIP_SEARCH_BUDGET_SECONDS }}
+      OWNERSHIP_SYNC_WAIT_SECONDS: ${{ vars.OWNERSHIP_SYNC_WAIT_SECONDS }}
+      OWNERSHIP_SEARCH_CONCURRENCY: ${{ vars.OWNERSHIP_SEARCH_CONCURRENCY }}
+      OWNERSHIP_MAX_CONCURRENT_SEARCHES: ${{ vars.OWNERSHIP_MAX_CONCURRENT_SEARCHES }}
+      ANALYSIS_SYNC_WAIT_SECONDS: ${{ vars.ANALYSIS_SYNC_WAIT_SECONDS }}
+      MAX_CONCURRENT_ANALYSES: ${{ vars.MAX_CONCURRENT_ANALYSES }}
+      MQTT_HOST: ${{ vars.MQTT_HOST }}
+      MQTT_PORT: ${{ vars.MQTT_PORT }}
+      MQTT_USERNAME: ${{ vars.MQTT_USERNAME }}
+      MQTT_CLIENT_ID: ${{ vars.MQTT_CLIENT_ID }}
+      MQTT_ALERT_RETENTION_DAYS: ${{ vars.MQTT_ALERT_RETENTION_DAYS }}
+      MQTT_BIND_ADDRESS: ${{ vars.MQTT_BIND_ADDRESS }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -127,4 +144,6 @@ jobs:
         env:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           PI_DEVICES: ${{ secrets.PI_DEVICES }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
         run: python deploy/publish.py

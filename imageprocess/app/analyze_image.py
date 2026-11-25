@@ -8,6 +8,7 @@ from time import perf_counter
 
 from app.core.config import Settings
 from app.core.errors import ServiceError
+from app.models.schemas import FEATURE_SCHEMA_VERSION
 from app.services.preprocessing import preprocess
 from app.services.vision_service import VisionService, build_prompt, normalize_category, parse_features
 
@@ -72,6 +73,7 @@ def analyze_file(path: Path, settings: Settings, service=None, *, category: str 
         'data': features.model_dump(),
         'warnings': flags,
         'comparison_metadata': {
+            'feature_schema': FEATURE_SCHEMA_VERSION,
             'image_sha256': hashlib.sha256(content).hexdigest(),
             'prepared_image_sha256': hashlib.sha256(prepared.image.tobytes()).hexdigest(),
             'prepared_size': list(prepared.image.size),

@@ -11,6 +11,7 @@ from sqlalchemy import exists, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.device_telemetry import locker_item
 from app.integrations import (AnalysisInput, AnalysisResult, DeviceGateway, FeatureAnalyzer, ImageStore,
                               IntegrationError, validate_jpeg)
 from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, ReturnCode, StorageAssignment, now
@@ -24,6 +25,13 @@ def registration(session: Session, registration_id: UUID) -> Registration:
     value = session.get(Registration, registration_id)
     if value is None:
         raise BusinessError("REGISTRATION_NOT_FOUND", 404)
+    return value
+
+
+def kiosk(session: Session, kiosk_id: UUID) -> Kiosk:
+    value = session.get(Kiosk, kiosk_id)
+    if value is None:
+        raise BusinessError("KIOSK_NOT_FOUND", 404)
     return value
 
 
@@ -41,12 +49,13 @@ def claim(session: Session, registration_id: UUID, allowed: tuple[str, ...], tar
     return registration(session, registration_id)
 
 
-def create_registration(session: Session, kiosk_id: UUID, category_id: UUID | None, description: str | None) -> Registration:
-    if session.get(Kiosk, kiosk_id) is None:
-        raise BusinessError("KIOSK_NOT_FOUND", 404)
+def create_registration(session: Session, kiosk_id: UUID, category_id: UUID | None, description: str | None,
+                        *, found_location: str | None = None) -> Registration:
+    kiosk(session, kiosk_id)
     if category_id is not None and session.get(Category, category_id) is None:
         raise BusinessError("CATEGORY_NOT_FOUND", 404)
-    value = Registration(kiosk_id=kiosk_id, primary_category_id=category_id, secondary_description=description)
+    value = Registration(kiosk_id=kiosk_id, primary_category_id=category_id, secondary_description=description,
+                         found_location=found_location)
     session.add(value)
     session.commit()
     return value
@@ -73,7 +82,7 @@ def capture(session: Session, registration_id: UUID, shot: int, gateway: DeviceG
     session.commit()
     # IDs and intent have been committed before the first external call.
     try:
-        jpeg = gateway.capture(reg.kiosk_id, command.command_id, registration_id, expires_at)
+        jpeg = gateway.capture(reg.kiosk_id, command.command_id, registration_id, expires_at, shot)
         validate_jpeg(jpeg, max_bytes)
         received = now()
         key = f"registrations/{registration_id}/{command.command_id}.jpg"
@@ -93,20 +102,91 @@ def capture(session: Session, registration_id: UUID, shot: int, gateway: DeviceG
     return value
 
 
-def analyze(session: Session, registration_id: UUID, analyzer: FeatureAnalyzer, store: ImageStore) -> Registration:
+# A worker may overshoot the analysis deadline slightly before it writes the outcome.
+ANALYSIS_GRACE = timedelta(seconds=10)
+
+
+def analysis_moment(progress: dict | None, field: str) -> datetime | None:
+    moment = (progress or {}).get(field)
+    if not isinstance(moment, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(moment)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def analysis_elapsed_ms(progress: dict | None) -> int | None:
+    started = analysis_moment(progress, "started_at")
+    if started is None:
+        return None
+    finished = analysis_moment(progress, "finished_at") or now()
+    return max(0, int((finished - started).total_seconds() * 1000))
+
+
+def expire_stale_analysis(session: Session, registration_id: UUID) -> None:
+    """Release a registration whose analysis worker never finished, so the user can retry.
+
+    A missing deadline means the row predates recorded progress, and a synchronous analysis cannot
+    outlive the process that served it. Either way no worker is coming, and leaving the row in
+    `analyzing/running` blocks the registration until it expires out of the flow entirely.
+    """
+    reg = session.get(Registration, registration_id)
+    if reg is None or reg.analysis_status != "running":
+        return
+    deadline = analysis_moment(reg.analysis_progress, "deadline_at")
+    if deadline is not None and deadline > now():
+        return
+    fail_analysis(session, reg, "ANALYSIS_TIMED_OUT")
+
+
+def fail_analysis(session: Session, reg: Registration, code: str) -> None:
+    reg.analysis_status = "failed"
+    reg.status = "draft"
+    reg.analysis_features = None
+    reg.analysis_progress = {**(reg.analysis_progress or {}), "stage": "failed",
+                             "error_code": code, "finished_at": now().isoformat()}
+    session.commit()
+
+
+def record_analysis_stage(session: Session, reg: Registration, stage: str, attempt: int = 0) -> None:
+    """Store the current stage so a polling client can say what the server is doing."""
+    reg.analysis_progress = {**(reg.analysis_progress or {}), "stage": stage, "attempt": attempt}
+    session.commit()
+
+
+def start_analysis(session: Session, registration_id: UUID, budget_seconds: float) -> Registration | None:
+    """Claim the registration for analysis. None means a stored success already answers the call."""
+    expire_stale_analysis(session, registration_id)
     reg = registration(session, registration_id)
     if reg.status == "ready" and reg.analysis_status == "succeeded":
-        return reg
+        return None
     reg = claim(session, registration_id, ("draft",), "analyzing")
     current = images(session, registration_id)
     if [image.shot_order for image in current] != [1, 2]:
         session.rollback()
         raise BusinessError("TWO_IMAGES_REQUIRED")
+    started = now()
+    reg.analysis_status = "running"
+    reg.analysis_input_image_ids = [str(image.id) for image in current]
+    reg.analysis_features = None
+    reg.analysis_progress = {
+        "stage": "queued", "attempt": 0, "started_at": started.isoformat(),
+        "deadline_at": (started + timedelta(seconds=budget_seconds) + ANALYSIS_GRACE).isoformat(),
+        "error_code": None,
+    }
+    session.commit()
+    return reg
+
+
+def run_analysis(session: Session, registration_id: UUID, analyzer: FeatureAnalyzer,
+                 store: ImageStore) -> Registration:
+    """Analyze a claimed registration. The caller owns the claim; this owns the outcome."""
+    reg = registration(session, registration_id)
+    current = images(session, registration_id)
     ids = tuple(image.id for image in current)
     keys = [image.object_key for image in current]
-    reg.analysis_status = "running"
-    reg.analysis_input_image_ids = [str(value) for value in ids]
-    session.commit()
     try:
         inputs = tuple(AnalysisInput(image_id=value, jpeg=store.read(key)) for value, key in zip(ids, keys))
         result = analyzer.analyze(registration_id, inputs)
@@ -119,15 +199,14 @@ def analyze(session: Session, registration_id: UUID, analyzer: FeatureAnalyzer, 
             json.dumps(result.features, allow_nan=False)
         except (ValueError, TypeError, RecursionError):
             raise IntegrationError("INVALID_ANALYSIS_RESULT") from None
-    except IntegrationError:
-        reg.analysis_status = "failed"
-        reg.status = "draft"
-        reg.analysis_features = None
-        session.commit()
+    except IntegrationError as error:
+        fail_analysis(session, reg, error.code)
         raise
     reg.analysis_features = result.features
     reg.analysis_status = "succeeded"
     reg.status = "ready"
+    reg.analysis_progress = {**(reg.analysis_progress or {}), "stage": "succeeded",
+                             "error_code": None, "finished_at": now().isoformat()}
     session.commit()
     return reg
 
@@ -200,6 +279,11 @@ def complete_deposit(session: Session, registration_id: UUID, gateway: DeviceGat
     door = gateway.door(reg.kiosk_id, locker.locker_number)
     if door != "closed":
         raise BusinessError("DOOR_NOT_CLOSED")
+    # An empty locker contradicts the deposit the user just declared. The device says so again a
+    # second later as ITEM_NOT_DEPOSITED, which would otherwise land behind a finished screen.
+    # Nothing is written: the registration stays awaiting_deposit and reopen_deposit can run.
+    if reported_item(session, locker, assignment) == "empty":
+        raise BusinessError("ITEM_NOT_DETECTED")
     # The API call itself is the explicit user confirmation. A sensor poll never completes a deposit.
     # Reload under a row lock after the sensor call. Two completion requests must
     # preserve the first deposited_at rather than overwrite it from stale objects.
@@ -251,8 +335,7 @@ def latest_assignment(session: Session, found_item_id: UUID) -> StorageAssignmen
 def issue_return_code(session: Session, found_item_id: UUID, *, ttl: int) -> tuple[str, ReturnCode]:
     """Mint a code for a stored item. The plaintext is returned once and never stored.
 
-    Ownership is NOT checked here. Once the question/answer evaluation (A04) exists it
-    becomes the precondition of this call; until then any caller can mint a code.
+    The public API checks and claims a successful ownership attempt before calling this service.
     """
     item = found_item(session, found_item_id)
     if item.status != "stored":
@@ -287,6 +370,10 @@ def open_pickup(session: Session, code: str, kiosk_id: UUID, gateway: DeviceGate
     # A completed open is replayed rather than opening the door a second time.
     if assignment.status == "awaiting_pickup":
         return assignment
+    # ITEM_MISSING revokes unspent codes. Report the business reason before the generic code
+    # state so a stolen item is consistently refused as no longer stored.
+    if item.status == "missing" or assignment.status == "missing":
+        raise BusinessError("ITEM_NOT_STORED")
     if record.status == "used":
         raise BusinessError("RETURN_CODE_ALREADY_USED")
     if record.status in ("locked", "revoked"):
@@ -321,11 +408,102 @@ def open_pickup(session: Session, code: str, kiosk_id: UUID, gateway: DeviceGate
             record.failed_attempts += 1
         session.commit()
         raise
+    # The device call ran outside the transaction. ITEM_MISSING may have closed this assignment
+    # and revoked its opening code while we were waiting, so refresh before writing the success
+    # path. A stale ORM object must never resurrect a stolen item as awaiting_pickup.
+    session.refresh(item)
+    session.refresh(assignment)
+    session.refresh(record)
+    if item.status == "missing" or assignment.status == "missing":
+        command.status = "succeeded"
+        session.commit()
+        raise BusinessError("ITEM_NOT_STORED")
     command.status = "succeeded"
     record.status = "used"
     record.used_at = now()
     assignment.status = "awaiting_pickup"
     session.commit()
+    return assignment
+
+
+def last_open_at(session: Session, assignment_id: UUID) -> datetime | None:
+    """When this assignment's locker door was last opened. None when no open ever succeeded.
+
+    Both deposit (`open`) and pickup (`pickup_open`) count, and a reopen counts as the newest:
+    what the locker reported before the door last opened describes a moment the user has
+    already been told to correct.
+    """
+    value = session.scalar(select(DeviceCommand.created_at)
+                           .where(DeviceCommand.storage_assignment_id == assignment_id,
+                                  DeviceCommand.action.in_(("open", "pickup_open")),
+                                  DeviceCommand.status == "succeeded")
+                           .order_by(DeviceCommand.created_at.desc()).limit(1))
+    return None if value is None else as_utc(value)
+
+
+def reported_item(session: Session, locker: Locker, assignment: StorageAssignment) -> str | None:
+    """What this locker says it holds right now, or None when no reading may answer (D03/D06)."""
+    return locker_item(session, locker.kiosk_id, locker.locker_number,
+                       since=last_open_at(session, assignment.id))
+
+
+def open_command(session: Session, registration_id: UUID, assignment: StorageAssignment,
+                 action: str, *, ttl: int) -> tuple[DeviceCommand, datetime]:
+    """Persist the intent to open before the device is touched, as every open path does."""
+    expires_at = now() + timedelta(seconds=ttl)
+    command = DeviceCommand(command_id=str(uuid4()), registration_id=registration_id, action=action,
+                            storage_assignment_id=assignment.id, expires_at=expires_at)
+    session.add(command)
+    session.commit()
+    return command, expires_at
+
+
+def send_open(session: Session, command: DeviceCommand, locker: Locker, expires_at: datetime,
+              gateway: DeviceGateway) -> None:
+    """Open one locker for a command already committed, recording how the attempt ended.
+
+    Business state is left exactly as it was: the user is still mid-deposit or mid-pickup, and
+    a failed reopen must leave them able to ask again rather than stranding the assignment.
+    """
+    try:
+        gateway.open(locker.kiosk_id, locker.locker_number, command.command_id, expires_at)
+    except IntegrationError as error:
+        command.status = "unknown" if error.uncertain else "failed"
+        command.error_code = error.code
+        session.commit()
+        raise
+    command.status = "succeeded"
+    session.commit()
+
+
+def reopen_deposit(session: Session, registration_id: UUID, gateway: DeviceGateway, *,
+                   ttl: int) -> StorageAssignment:
+    """Open the same locker again so the user can put the item in after a refused completion."""
+    reg = registration(session, registration_id)
+    assignment = assignment_for(session, registration_id)
+    if reg.status != "awaiting_deposit" or assignment is None or assignment.status != "awaiting_deposit":
+        raise BusinessError("DEPOSIT_NOT_OPENED")
+    locker = session.get(Locker, assignment.locker_id)
+    command, expires_at = open_command(session, registration_id, assignment, "open", ttl=ttl)
+    send_open(session, command, locker, expires_at, gateway)
+    return assignment
+
+
+def reopen_pickup(session: Session, found_item_id: UUID, gateway: DeviceGateway, *,
+                  ttl: int) -> StorageAssignment:
+    """Open the same locker again after a refused pickup completion.
+
+    The return code is not involved: it was spent on the first open and stays spent. Only an
+    assignment already waiting for this pickup can be reopened, so a used code cannot be
+    replayed through here.
+    """
+    item = found_item(session, found_item_id)
+    assignment = latest_assignment(session, found_item_id)
+    if assignment is None or assignment.status != "awaiting_pickup":
+        raise BusinessError("PICKUP_NOT_OPENED")
+    locker = session.get(Locker, assignment.locker_id)
+    command, expires_at = open_command(session, item.registration_id, assignment, "pickup_open", ttl=ttl)
+    send_open(session, command, locker, expires_at, gateway)
     return assignment
 
 
@@ -340,6 +518,11 @@ def complete_pickup(session: Session, found_item_id: UUID, gateway: DeviceGatewa
     door = gateway.door(locker.kiosk_id, locker.locker_number)
     if door != "closed":
         raise BusinessError("DOOR_NOT_CLOSED")
+    # The item is still in there, which the device repeats a second later as ITEM_NOT_TAKEN.
+    # Nothing is written, so the assignment stays awaiting_pickup and reopen_pickup can open the
+    # same locker again without reissuing the code.
+    if reported_item(session, locker, assignment) == "present":
+        raise BusinessError("ITEM_STILL_INSIDE")
     # The API call itself is the explicit user confirmation. Reload under a row lock
     # after the sensor call so two completions cannot both end the assignment.
     item = session.scalar(select(FoundItem).where(FoundItem.id == found_item_id)

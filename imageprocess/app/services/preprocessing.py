@@ -4,8 +4,8 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
-from app.core.config import Settings
-from app.core.errors import ServiceError
+from ..core.config import Settings
+from ..core.errors import ServiceError
 
 
 @dataclass

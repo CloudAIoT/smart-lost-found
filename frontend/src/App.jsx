@@ -1133,12 +1133,14 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
   }, [kioskId]);
 
   // 수령 - 보관함 열림 화면에서, 이미 폴링 중인 경고 목록에 이 보관함의 ITEM_NOT_TAKEN이 있으면
-  // 수령 완료 확인 대신 안내를 띄운다. 보관함을 연 시각 이후의 경고만 본다.
+  // 안내와 다시 열기를 표시한다. 완료 가능 여부는 완료 API가 판단한다. 보관함을 연 시각 이후의 경고만 본다.
   useEffect(() => {
     if (!(step === 'pickup-open' && pickup?.locker_number && !pickup?.dev)) return;
     const hit = alerts.some((a) => a.code === 'ITEM_NOT_TAKEN' && a.locker_number === pickup.locker_number
       && (!pickupOpenedAtRef.current || a.reported_at >= pickupOpenedAtRef.current));
-    if (hit) setPickupBlocked(true);
+    if (hit) {
+      setPickupBlocked(true);
+    }
   }, [alerts, step, pickup?.locker_number, pickup?.dev]);
 
   // 등록 - 보관함 개방 화면에서, 경고 목록에 이 보관함의 ITEM_NOT_DEPOSITED가 있으면 투입 안내를 띄운다.
@@ -1151,7 +1153,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
   // 장치 온라인/오프라인 폴링: GET /api/kiosks/{kiosk_id}/device-status (backend kiosk_device_states).
   // 응답 필드: { device, locker_number, connection, door, weight_g, item, reported_at, updated_at }.
-  // locker_number 0은 장치(컨트롤러) 자체를 가리킨다.
+  // locker_number가 null이면 장치 자체이며, 정수이면 해당 칸을 가리킨다.
   useEffect(() => {
     if (!kioskId) {
       setDeviceStatus([]);
@@ -1467,10 +1469,10 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       {/* 장치 온라인/오프라인 (GET /api/kiosks/{kiosk_id}/device-status) */}
       {deviceStatus.length > 0 && (
         <div className="flex flex-wrap gap-3 pt-2 text-[11px] text-slate-400">
-          {deviceStatus.filter((d) => d.locker_number == null).map((d) => (
+          {deviceStatus.filter((d) => d.locker_number === null).map((d) => (
             <span key={d.device} className="inline-flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${d.connection === 'online' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-              {d.device === 'capture' ? '촬영 장치' : '보관함 컨트롤러'} {d.connection === 'online' ? '온라인' : '오프라인'}
+              <span className={`w-2 h-2 rounded-full ${d.connection === 'online' ? 'bg-emerald-500' : d.connection === 'offline' ? 'bg-rose-500' : 'bg-slate-500'}`} />
+              {d.device === 'capture' ? '촬영 장치' : '보관함 컨트롤러'} {d.connection === 'online' ? '온라인' : d.connection === 'offline' ? '오프라인' : '상태 미확인'}
             </span>
           ))}
         </div>
@@ -1828,7 +1830,16 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
             )}
           </div>
           {inlineError && <p className="text-xs text-rose-300">{inlineError}</p>}
-          {pickupBlocked ? (
+          <div className="flex flex-wrap justify-center gap-3">
+            {pickupBlocked && (
+              <button
+                disabled={disabled}
+                onClick={reopenPickup}
+                className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 text-xs font-bold rounded-xl shadow inline-flex items-center gap-1"
+              >
+                <RefreshCw size={14} /> 보관함 다시 열기
+              </button>
+            )}
             <button
               disabled={disabled}
               onClick={reopenPickup}
@@ -1844,7 +1855,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
             >
               수령 완료
             </button>
-          )}
+          </div>
         </div>
       )}
 
@@ -1917,8 +1928,8 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       <div className="border-t border-slate-800 pt-3 flex justify-between items-center gap-3 text-[11px] text-slate-500">
         <button
           onClick={reset}
-          disabled={disabled || step === 'reg-deposit' || step === 'pickup-open'}
-          title={step === 'reg-deposit' || step === 'pickup-open' ? '보관함 문을 닫고 완료 버튼을 눌러주세요' : undefined}
+          disabled={disabled || step === 'reg-deposit'}
+          title={step === 'reg-deposit' ? '보관함 문을 닫고 완료 버튼을 눌러주세요' : undefined}
           className="inline-flex items-center gap-1.5 bg-slate-800 hover:bg-rose-600 border border-slate-700 hover:border-rose-500 text-slate-200 hover:text-white font-bold text-xs px-4 py-2 rounded-xl shadow disabled:opacity-40 disabled:hover:bg-slate-800 disabled:hover:border-slate-700 transition-colors"
         >
           <House size={16} /> 처음으로

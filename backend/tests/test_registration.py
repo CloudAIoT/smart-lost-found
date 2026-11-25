@@ -1,24 +1,33 @@
+from datetime import datetime, timedelta, timezone
+from contextlib import nullcontext
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
+import base64
 import json
 import sys
-from threading import Barrier
+from threading import Barrier, Event
+from time import sleep
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+import httpx
 from PIL import Image
+from pydantic import SecretStr
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from app.api import get_analyzer, get_gateway, get_store
+from app import ai_jobs
+from app.api import get_analyzer_factory, get_gateway, get_session_factory, get_store
 from app.config import Settings, get_settings
 from app.db import Base, get_session
-from app.integrations import AnalysisResult, IntegrationError
+from app.integrations import AnalysisResult, IntegrationError, S3ImageStore
+from app.inspect_analysis import inspect_analysis
 from app.main import app
-from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, StorageAssignment
+from app.models import (Category, DeviceCommand, DeviceState, FoundItem, ItemImage, Kiosk, Locker,
+                        Registration, StorageAssignment)
 from app.services import BusinessError, complete_deposit, open_deposit, search_stored_items
 
 
@@ -32,8 +41,8 @@ class FakeDevice:
         self.error = None
         self.on_open = None
 
-    def capture(self, kiosk_id, command_id, registration_id, expires_at):
-        self.captures.append((kiosk_id, command_id, registration_id))
+    def capture(self, kiosk_id, command_id, registration_id, expires_at, shot_order):
+        self.captures.append((kiosk_id, command_id, registration_id, shot_order))
         self.expiries.append(expires_at)
         if self.error:
             raise self.error
@@ -76,6 +85,8 @@ class FakeAnalyzer:
         self.wrong_images = False
         self.features = {"test_only_private_mark": "secret-scratch"}
         self.calls = 0
+        # Set by the analyzer factory below, so a test can report stages the way Gemini does.
+        self.on_stage = None
 
     def analyze(self, registration_id, images):
         self.calls += 1
@@ -104,11 +115,17 @@ def env(database_engine):
     settings = Settings(_env_file=None, postgres_db="test", postgres_user="test", postgres_password="test",
                         local_development=True, command_ttl_seconds=30, max_image_bytes=1024 * 1024,
                         return_code_ttl_seconds=300)
+    def analyzer_factory(category, on_stage):
+        analyzer.on_stage = on_stage
+        return nullcontext(analyzer)
+
     def sessions():
         with Session(engine) as session:
             yield session
     app.dependency_overrides.update({get_session: sessions, get_gateway: lambda: gateway,
-        get_store: lambda: store, get_analyzer: lambda: analyzer, get_settings: lambda: settings})
+        get_store: lambda: store, get_settings: lambda: settings,
+        get_analyzer_factory: lambda: analyzer_factory,
+        get_session_factory: lambda: (lambda: Session(engine))})
     try:
         with TestClient(app) as client:
             yield SimpleNamespace(client=client, engine=engine, gateway=gateway, store=store,
@@ -144,6 +161,7 @@ def test_full_deposit_and_duplicates(env):
     assert len(env.gateway.captures) == 2
     assert env.gateway.captures[0][1] != env.gateway.captures[1][1]
     assert env.gateway.captures[0][2] == env.gateway.captures[1][2]
+    assert [capture[3] for capture in env.gateway.captures] == [1, 2]
     assert env.client.post(base + "/shots/1").status_code == 200
     assert len(env.gateway.captures) == 2
     assert env.client.post(base + "/analysis").status_code == 200
@@ -207,6 +225,77 @@ def test_order_and_analysis_gates(env):
     assert env.gateway.opens == []
     env.analyzer.wrong_images = False
     assert env.client.post(base + "/analysis").status_code == 200
+
+
+@pytest.mark.parametrize("first_failure", [None, "provider", "schema"])
+def test_registration_api_reads_two_s3_photos_and_persists_gemini_json(env, monkeypatch, first_failure):
+    value = start(env)
+    base = f"/api/registrations/{value}"
+    for shot, color in enumerate(("red", "blue"), 1):
+        with Image.new("RGB", (2304, 1296), color=color) as photo, BytesIO() as jpeg:
+            photo.save(jpeg, format="JPEG")
+            env.gateway.jpeg = jpeg.getvalue()
+        assert env.client.post(f"{base}/shots/{shot}").status_code == 200
+    features = {
+        "category": "laptop", "color": ["silver"], "shape": "직사각형",
+        "surface_texture": "매끄러운 표면", "brand": "Samsung", "visible_text": ["SAMSUNG"],
+        "structure": ["힌지"], "distinctive_features": ["왼쪽 모서리의 작은 흠집"],
+    }
+    requests, reads = [], []
+
+    def respond(request):
+        requests.append(request)
+        assert 0 < request.extensions["timeout"]["read"] <= 90
+        parts = json.loads(request.content)["contents"][0]["parts"]
+        assert len(parts) == 3
+        for part, channel in zip(parts[1:], (0, 2)):
+            with Image.open(BytesIO(base64.b64decode(part["inline_data"]["data"]))) as photo:
+                assert photo.size == (1280, 720)
+                assert photo.getpixel((10, 10))[channel] > 200
+        if len(requests) == 1 and first_failure == "provider":
+            return httpx.Response(503, json={"error": {"message": "temporarily unavailable"}})
+        data = {**features, "color": 123} if len(requests) == 1 and first_failure == "schema" else features
+        return httpx.Response(200, json={"candidates": [{
+            "finishReason": "STOP", "content": {"parts": [{"text": json.dumps(data)}]},
+        }]})
+
+    class S3:
+        def get_object(self, *, Bucket, Key):
+            assert Bucket == "test-bucket"
+            reads.append(Key)
+            return {"Body": BytesIO(env.store.objects[Key])}
+
+    real_client = httpx.Client
+    monkeypatch.setattr("app.api.httpx.Client", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(respond), **kwargs))
+    env.settings.gemini_api_key = SecretStr("test-key")
+    env.settings.gemini_model = "test-model"
+    del app.dependency_overrides[get_analyzer_factory]
+    app.dependency_overrides[get_store] = lambda: S3ImageStore(S3(), "test-bucket", 60, 1024 * 1024)
+
+    response = env.client.post(base + "/analysis")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "ready"
+    assert response.json()["analysis_status"] == "succeeded"
+    assert "analysis_features" not in response.json()
+    assert "왼쪽 모서리" not in response.text
+    with Session(env.engine) as session:
+        report = inspect_analysis(session, UUID(value))
+        assert report["verified"]
+        # Persist Korean labels even when a provider returns known English aliases.
+        assert report["analysis_features"] == {**features, "category": "노트북", "color": ["은색"]}
+        assert report["analysis_input_image_ids"] == [image["id"] for image in response.json()["images"]]
+        keys = list(session.scalars(select(ItemImage.object_key).where(
+            ItemImage.registration_id == UUID(value)).order_by(ItemImage.shot_order)))
+    call_count = 2 if first_failure else 1
+    # Provider/model retries reuse the same S3 bytes and preprocessed images.
+    assert reads == keys
+    expected_models = ["test-model"] + (["gemini-3.1-flash-lite"] if first_failure else [])
+    assert [request.url.path.split("/")[-1].removesuffix(":generateContent") for request in requests] == expected_models
+    assert env.client.post(base + "/analysis").status_code == 200
+    assert len(requests) == call_count
+    assert len(reads) == 2
+    assert env.settings.gemini_timeout_seconds == 30
 
 
 def deeply_nested_features():
@@ -282,7 +371,8 @@ def test_unstorable_features_fail_closed_and_allow_a_normal_retry(env, case):
 def test_analyzer_recursion_error_is_not_reported_as_an_invalid_result(env):
     # Only the result serialization check turns a RecursionError into INVALID_ANALYSIS_RESULT.
     # Catching it around the analyzer call too would report an unknown analyzer failure as a
-    # handled validation failure, so this unrecovered case must keep leaking.
+    # handled validation failure, so an unknown failure must keep leaking to the caller. The
+    # background worker still releases the claim, because nobody else would finish the run.
     from uuid import UUID
     value = start(env)
     photos(env, value)
@@ -292,8 +382,10 @@ def test_analyzer_recursion_error_is_not_reported_as_an_invalid_result(env):
         env.client.post(base + "/analysis")
     with Session(env.engine) as session:
         reg = session.get(Registration, UUID(value))
-        assert (reg.status, reg.analysis_status) == ("analyzing", "running")
+        assert (reg.status, reg.analysis_status) == ("draft", "failed")
+        assert reg.analysis_progress["error_code"] == "ANALYSIS_FAILED"
         assert reg.analysis_features is None
+    assert env.client.get(base).json()["analysis_error_code"] == "ANALYSIS_FAILED"
     assert env.client.post(base + "/deposit/open").status_code == 409
     assert env.gateway.opens == []
 
@@ -383,7 +475,7 @@ def test_disabled_by_default_and_no_public_search(env):
 
 
 def test_unconfigured_ai_fails_closed(env):
-    app.dependency_overrides.pop(get_analyzer)
+    app.dependency_overrides.pop(get_analyzer_factory)
     value = start(env)
     photos(env, value)
     response = env.client.post(f"/api/registrations/{value}/analysis")
@@ -474,3 +566,167 @@ def test_postgres_concurrent_completion_preserves_first_timestamp(env):
     with ThreadPoolExecutor(max_workers=2) as pool:
         timestamps = list(pool.map(complete, [1, 2]))
     assert timestamps[0] == timestamps[1]
+
+
+def report_locker(env, item, *, locker_number=1, seconds_ago=0.0, online=True):
+    """Write what the locker told the server over MQTT, exactly as the subscriber would.
+
+    The controller row (locker_number 0) carries the connection; without an online controller a
+    locker reading is too old to trust, so tests that expect a decision must write both.
+    """
+    moment = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
+    with Session(env.engine) as session:
+        session.merge(DeviceState(kiosk_id=UUID(env.kiosk_id), device="locker", locker_number=0,
+                                  connection="online" if online else "offline",
+                                  reported_at=moment, updated_at=moment))
+        if item is not None:
+            session.merge(DeviceState(kiosk_id=UUID(env.kiosk_id), device="locker",
+                                      locker_number=locker_number, door="closed",
+                                      weight_g=120.0 if item == "present" else 0.0, item=item,
+                                      reported_at=moment, updated_at=moment))
+        session.commit()
+
+
+def test_deposit_waits_until_the_locker_reports_the_item(env):
+    """An empty locker contradicts the deposit the user declared, and the device says so a second
+    later as ITEM_NOT_DEPOSITED. The completion is refused until the item is actually in there."""
+    value = ready(env)
+    base = f"/api/registrations/{value}"
+    assert env.client.post(base + "/deposit/open").status_code == 200
+
+    report_locker(env, "empty")
+    blocked = env.client.post(base + "/deposit/complete", json={"confirmed": True})
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["detail"]["code"] == "ITEM_NOT_DETECTED"
+    assert env.client.get(base).json()["status"] == "awaiting_deposit"
+    with Session(env.engine) as session:
+        # Refusing wrote nothing: the locker is still held for this registration.
+        assignment = session.scalar(select(StorageAssignment))
+        assert (assignment.status, assignment.deposited_at) == ("awaiting_deposit", None)
+        assert session.scalar(select(FoundItem)).status == "awaiting_deposit"
+
+    # The door is shut, so the user needs it opened again before the item can go in.
+    opens_before = len(env.gateway.opens)
+    reopened = env.client.post(base + "/deposit/reopen")
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["locker_number"] == 1
+    assert len(env.gateway.opens) == opens_before + 1
+
+    report_locker(env, "present")
+    done = env.client.post(base + "/deposit/complete", json={"confirmed": True})
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "stored"
+
+
+@pytest.mark.parametrize("reading", ["none", "older_than_the_open", "controller_offline"])
+def test_completion_ignores_a_reading_that_cannot_answer(env, reading):
+    """No row, a reading older than the open, or an offline controller all leave the old rule in
+    place: the user's confirmation plus a closed door. MQTT being absent must change nothing."""
+    if reading == "older_than_the_open":
+        report_locker(env, "empty", seconds_ago=600)
+    value = ready(env)
+    base = f"/api/registrations/{value}"
+    assert env.client.post(base + "/deposit/open").status_code == 200
+    if reading == "controller_offline":
+        report_locker(env, "empty", online=False)
+    done = env.client.post(base + "/deposit/complete", json={"confirmed": True})
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "stored"
+
+
+
+def drain_analyses(timeout=10.0):
+    """Wait for the analysis pool without touching the shared test connection."""
+    for _ in range(int(timeout / 0.02)):
+        if ai_jobs.snapshot(ai_jobs.ANALYSIS)["accepted"] == 0:
+            return
+        sleep(0.02)
+    raise AssertionError("배경 분석이 끝나지 않았습니다")
+
+
+def gated_analysis(env, outcome=None):
+    """Park the analyzer inside the call so the request has to answer without a result."""
+    gate = Event()
+    analyze = env.analyzer.analyze
+
+    def waiting(registration_id, images):
+        env.analyzer.on_stage("inferring", 2)
+        assert gate.wait(timeout=10)
+        if outcome is not None:
+            raise outcome
+        return analyze(registration_id, images)
+
+    env.analyzer.analyze = waiting
+    env.settings.analysis_sync_wait_seconds = 0.05
+    return gate, analyze
+
+
+def test_slow_analysis_answers_running_and_the_poll_reports_the_stage(env):
+    value = start(env)
+    photos(env, value)
+    base = f"/api/registrations/{value}"
+    gate, _ = gated_analysis(env)
+
+    started = env.client.post(base + "/analysis")
+    assert started.status_code == 200, started.text
+    body = started.json()
+    assert (body["status"], body["analysis_status"]) == ("analyzing", "running")
+    assert body["analysis_stage"] == "inferring" and body["analysis_attempt"] == 2
+    assert body["analysis_elapsed_ms"] >= 0 and body["analysis_retry_after_ms"] > 0
+    polled = env.client.get(base).json()
+    assert polled["analysis_status"] == "running" and polled["analysis_error_code"] is None
+
+    gate.set()
+    drain_analyses()
+    done = env.client.get(base).json()
+    assert (done["status"], done["analysis_status"]) == ("ready", "succeeded")
+    assert done["analysis_stage"] == "succeeded" and done["analysis_retry_after_ms"] is None
+    assert done["analysis_elapsed_ms"] >= 0
+    assert env.client.post(base + "/deposit/open").status_code == 200
+
+
+def test_analysis_failing_after_the_response_is_read_from_the_registration(env):
+    value = start(env)
+    photos(env, value)
+    base = f"/api/registrations/{value}"
+    gate, original = gated_analysis(env, outcome=IntegrationError("INVALID_MODEL_OUTPUT"))
+
+    assert env.client.post(base + "/analysis").json()["analysis_status"] == "running"
+    gate.set()
+    drain_analyses()
+    # The caller already received 200, so the failure must be readable, not raised again.
+    failed = env.client.get(base)
+    assert failed.status_code == 200
+    body = failed.json()
+    assert (body["status"], body["analysis_status"]) == ("draft", "failed")
+    assert body["analysis_error_code"] == "INVALID_MODEL_OUTPUT"
+    assert body["analysis_retry_after_ms"] is None
+    assert env.client.post(base + "/deposit/open").status_code == 409
+    env.analyzer.analyze = original
+    env.settings.analysis_sync_wait_seconds = 3
+    assert env.client.post(base + "/analysis").json()["analysis_status"] == "succeeded"
+
+
+@pytest.mark.parametrize("progress", ["expired", "missing"])
+def test_an_abandoned_analysis_is_released_instead_of_blocking_the_registration(env, progress):
+    from uuid import UUID
+    value = start(env)
+    photos(env, value)
+    base = f"/api/registrations/{value}"
+    with Session(env.engine) as session:
+        reg = session.get(Registration, UUID(value))
+        reg.status, reg.analysis_status = "analyzing", "running"
+        # A worker that died, or a row written before progress was recorded at all.
+        reg.analysis_progress = None if progress == "missing" else {
+            "stage": "inferring", "attempt": 1,
+            "started_at": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+            "deadline_at": (datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat(),
+        }
+        session.commit()
+
+    released = env.client.get(base).json()
+    assert (released["status"], released["analysis_status"]) == ("draft", "failed")
+    assert released["analysis_error_code"] == "ANALYSIS_TIMED_OUT"
+    retried = env.client.post(base + "/analysis")
+    assert retried.status_code == 200
+    assert retried.json()["analysis_status"] == "succeeded"

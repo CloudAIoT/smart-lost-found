@@ -1,0 +1,307 @@
+{
+  "scope": "Curated feature excerpts from ten single-photo cases; no two-photo live evaluation.",
+  "reviewed_on": "2026-11-16",
+  "model": "gemini-3.6-flash",
+  "feature_schema": "fixed_common_v2",
+  "settings": {
+    "max_image_side": 1280,
+    "temperature_requested": 0,
+    "max_output_tokens": 8192
+  },
+  "successful_cases": 10,
+  "mean_inference_seconds": 7.891465,
+  "median_inference_seconds": 7.8777550000000005,
+  "min_inference_seconds": 5.55404,
+  "max_inference_seconds": 9.94699,
+  "successful_response_total_tokens": 35577,
+  "cases": [
+    {
+      "case_id": "airpod",
+      "input_category": "wireless_earbuds",
+      "photos_per_item": 1,
+      "features": {
+        "category": "wireless_earbud_case",
+        "color": [
+          "white"
+        ],
+        "shape": "모서리가 둥근 얇은 직사각형 모양",
+        "surface_texture": "매끄럽고 광택이 있는 유광 플라스틱 표면",
+        "brand": "Apple",
+        "visible_text": null,
+        "structure": [
+          "상단 개폐식 덮개",
+          "전면 중앙의 홈 구조",
+          "하단 충전 포트"
+        ],
+        "distinctive_features": [
+          "Apple AirPods Pro 스타일의 무선 이어폰 충전 케이스",
+          "전면 표면에 미세한 스크래치 및 얼룩 흔적"
+        ]
+      },
+      "inference_ms": 6513.99,
+      "review": "Apple과 AirPods Pro 스타일은 외형 기반 판단이다. 브랜드 표기가 보이지 않아 모델명 확정에는 추가 확인이 필요하다."
+    },
+    {
+      "case_id": "book",
+      "input_category": "book",
+      "photos_per_item": 1,
+      "features": {
+        "category": "book",
+        "color": [
+          "yellow",
+          "white",
+          "blue"
+        ],
+        "shape": "직사각형",
+        "surface_texture": "매끄러운 종이 질감",
+        "brand": null,
+        "visible_text": [
+          "「 진로지도교수상담 사례집 」",
+          "ACE+",
+          "잘 가르치는 대학",
+          "감사의 마음을 대신 전해드립니다 :",
+          "나 - 경력개발센터 - 지도교수님",
+          "숭실대학교",
+          "Soongsil University",
+          "경력개발센터"
+        ],
+        "structure": [
+          "무선 제본 형태의 종이 책자"
+        ],
+        "distinctive_features": [
+          "노란색 표지 중앙에 큰 흰색 말풍선 모양 그래픽이 디자인되어 있음",
+          "말풍선 내부 중앙에 노트북을 두고 앉아 있는 인물 일러스트와 다양한 아이콘(말풍선, 돋보기, 따봉 손 모양)이 위치함",
+          "표지 하단에 숭실대학교 심볼 로고와 '숭실대학교 Soongsil University 경력개발센터' 문구가 표기됨",
+          "우측 상단에 파란색 'ACE+ 잘 가르치는 대학' 로고가 위치함"
+        ]
+      },
+      "inference_ms": 7500.39,
+      "review": "표지 문구와 로고를 추출했다. 무선 제본 방식의 단정은 사진 한 장의 근거로 충분하지 않을 수 있다."
+    },
+    {
+      "case_id": "cap",
+      "input_category": "cap",
+      "photos_per_item": 1,
+      "features": {
+        "category": "baseball_cap",
+        "color": [
+          "green",
+          "brown",
+          "black",
+          "red"
+        ],
+        "shape": "앞쪽에 챙이 있는 둥근 크라운 형태의 볼캡",
+        "surface_texture": "입체적인 붉은색 자수가 도드라진 매끄러운 직물 질감",
+        "brand": "aeae",
+        "visible_text": [
+          "aeae",
+          "ae",
+          "Chapeau No,msbk",
+          "Préparez-vous pour les vacances",
+          "clothes archive"
+        ],
+        "structure": [
+          "곡선형 전면 챙",
+          "소프트 패브릭 크라운"
+        ],
+        "distinctive_features": [
+          "전체적인 얼룩무늬 카무플라주 패턴",
+          "전면 전체를 채운 붉은색 자수 글자 및 로고 그래픽",
+          "전면 하단부의 붉은색 두 원형 자수 디자인"
+        ]
+      },
+      "inference_ms": 8411.32,
+      "review": "카모플라주와 붉은 자수·원형 그래픽을 추출했다. 긴 외국어 자수의 세부 철자는 검토 대상이다."
+    },
+    {
+      "case_id": "charger",
+      "input_category": "charger",
+      "photos_per_item": 1,
+      "features": {
+        "category": "charger",
+        "color": [
+          "white",
+          "grey"
+        ],
+        "shape": "모서리가 둥근 직사각형 형태",
+        "surface_texture": "광택이 있는 매끄러운 플라스틱 표면과 직물 느낌의 브레이디드 케이블 질감",
+        "brand": "Apple",
+        "visible_text": null,
+        "structure": [
+          "탈착 가능한 2핀 전원 플러그(덕헤드)",
+          "USB-C 커넥터가 장착된 케이블"
+        ],
+        "distinctive_features": [
+          "회색 패브릭 피복(브레이디드) 재질의 USB-C 케이블이 충전기 본체 둘레에 감겨 있음",
+          "2핀 라운드 형태의 전원 플러그가 연결된 구조"
+        ]
+      },
+      "inference_ms": 8224.34,
+      "review": "본체·케이블·커넥터를 추출했다. 감김 모양은 쉽게 변하는 촬영 당시 상태다."
+    },
+    {
+      "case_id": "cosmetic",
+      "input_category": "cosmetic",
+      "photos_per_item": 1,
+      "features": {
+        "category": "compact_powder",
+        "color": [
+          "purple"
+        ],
+        "shape": "납작한 원기둥 모양",
+        "surface_texture": "매끄러운 무광 플라스틱 마감",
+        "brand": "IPKN",
+        "visible_text": [
+          "personal",
+          "Correcting",
+          "IPKN&"
+        ],
+        "structure": [
+          "원형 용기와 상단 뚜껑 결합 구조"
+        ],
+        "distinctive_features": [
+          "연보라색 뚜껑 상단에 흰색 글씨로 'personal', 'Correcting', 'IPKN&' 텍스트가 큼직하게 디자인되어 인쇄되어 있음"
+        ]
+      },
+      "inference_ms": 6801.02,
+      "review": "IPKN과 원형 보라색 용기를 추출했다. 닫힌 용기에서 compact_powder로 세분한 판단은 추가 확인이 필요하다."
+    },
+    {
+      "case_id": "doll1",
+      "input_category": "plush_toy",
+      "photos_per_item": 1,
+      "features": {
+        "category": "plush_toy",
+        "color": [
+          "green",
+          "yellow",
+          "blue"
+        ],
+        "shape": "둥그스름한 타원형",
+        "surface_texture": "부드럽고 짧은 털 질감",
+        "brand": "San-X",
+        "visible_text": null,
+        "structure": [
+          "상단에 끈과 금속 볼체인이 연결됨",
+          "돌출된 주둥이와 짧은 팔다리 구조"
+        ],
+        "distinctive_features": [
+          "스미코구라시(Sumikkogurashi)의 '펭귄?'(Penguin?) 캐릭터 미니 인형",
+          "파란색 점 모양 눈 자수 디테일",
+          "양볼 옆 노란색 타원형 자수 디테일",
+          "상단에 가방 고리용 금속 볼체인 연결"
+        ]
+      },
+      "inference_ms": 9946.99,
+      "review": "사용자가 알려준 명칭은 주댕치이나 모델은 스미코구라시의 펭귄?으로 오인식했다. San-X 브랜드도 검토가 필요하다."
+    },
+    {
+      "case_id": "doll2",
+      "input_category": "plush_toy",
+      "photos_per_item": 1,
+      "features": {
+        "category": "plush_toy",
+        "color": [
+          "yellow",
+          "pink"
+        ],
+        "shape": "둥그스름한 머리에 긴 귀가 달린 토끼 캐릭터 봉제 인형 모양",
+        "surface_texture": "짧고 부드러운 털이 촘촘하게 덮인 봉제 원단 질감",
+        "brand": null,
+        "visible_text": [
+          "ちいかわ"
+        ],
+        "structure": [
+          "상단의 긴 귀 형태 돌출부 2개",
+          "작은 팔과 다리 돌출 부위",
+          "측면 박음질 처리된 직물 태그 1개"
+        ],
+        "distinctive_features": [
+          "'치이카와(Chiikawa)' 시리즈의 '우사기' 캐릭터 디자인",
+          "검은색 실 자수로 표현된 특징적인 눈, 입, 눈썹 모양의 이목구비",
+          "귀 안쪽 면의 분홍색 배치",
+          "일본어 'ちいかわ' 문구가 표기된 노란색 직물 태그 부착"
+        ]
+      },
+      "inference_ms": 9749.84,
+      "review": "우사기로 식별하여 사용자 제공 명칭과 일치했다. 제조사는 null로 남겼다."
+    },
+    {
+      "case_id": "pencilcase",
+      "input_category": "pencil_case",
+      "photos_per_item": 1,
+      "features": {
+        "category": "pencil_case",
+        "color": [
+          "black"
+        ],
+        "shape": "직사각형",
+        "surface_texture": "격자 형태의 결이 보이는 캔버스 직물 표면",
+        "brand": "Carhartt",
+        "visible_text": [
+          "carhartt"
+        ],
+        "structure": [
+          "측면 지퍼 개폐 방식",
+          "상단 직물 고리 스트랩"
+        ],
+        "distinctive_features": [
+          "전면 중앙에 주황색 심볼과 브랜드명이 새겨진 사각 로고 패치가 부착됨",
+          "우측 상단 표면에 파란색 원형 뱃지와 은색 날개 모양 금속 뱃지가 꽂혀 있음"
+        ]
+      },
+      "inference_ms": 8681.55,
+      "review": "Carhartt와 파란 원형 핀·은색 날개 핀을 각각 구분했다."
+    },
+    {
+      "case_id": "wallet1",
+      "input_category": "wallet",
+      "photos_per_item": 1,
+      "features": {
+        "category": "card_holder",
+        "color": [
+          "black"
+        ],
+        "shape": "모서리가 둥근 직사각형",
+        "surface_texture": "미세한 가로 결 패턴이 있는 질감",
+        "brand": "Apple",
+        "visible_text": null,
+        "structure": [
+          "상단 카드 슬롯",
+          "테두리 박음질 마감"
+        ],
+        "distinctive_features": [
+          "전면 중앙에 음각으로 刻印된 애플 사과 로고",
+          "상단 입구로 흰색 카드의 일부가 노출되어 있음"
+        ]
+      },
+      "inference_ms": 5554.04,
+      "review": "사과 음각 로고를 인식했다. 노출된 카드는 수납 상태이며 고정 식별 특징과 구분해야 한다."
+    },
+    {
+      "case_id": "wallet2",
+      "input_category": "wallet",
+      "photos_per_item": 1,
+      "features": {
+        "category": "card_wallet",
+        "color": [
+          "black"
+        ],
+        "shape": "직사각형",
+        "surface_texture": "불규칙한 주름과 광택이 있는 표면",
+        "brand": null,
+        "visible_text": null,
+        "structure": [
+          "덮개가 있는 폴딩 구조",
+          "테두리를 따라 봉제선이 있는 구조"
+        ],
+        "distinctive_features": [
+          "전체적으로 크랙/링클 주름 패턴이 있는 광택 재질",
+          "앞면 하단 중앙에 음각으로 각인된 로고/문구가 있음"
+        ]
+      },
+      "inference_ms": 7531.17,
+      "review": "광택·주름·덮개·음각 표시를 추출하고 읽기 어려운 문구와 브랜드는 null로 남겼다."
+    }
+  ]
+}

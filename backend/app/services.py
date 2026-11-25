@@ -16,6 +16,7 @@ from app.integrations import (AnalysisInput, AnalysisResult, DeviceGateway, Feat
                               IntegrationError, validate_jpeg)
 from app.models import Category, DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, Registration, ReturnCode, StorageAssignment, now
 from app.errors import BusinessError
+from app.kiosk_operations import require_operational
 
 # 40 bits of entropy rendered as 8 unpadded base32 characters, typed on a kiosk keyboard.
 RETURN_CODE_BYTES = 5
@@ -52,6 +53,7 @@ def claim(session: Session, registration_id: UUID, allowed: tuple[str, ...], tar
 def create_registration(session: Session, kiosk_id: UUID, category_id: UUID | None, description: str | None,
                         *, found_location: str | None = None) -> Registration:
     kiosk(session, kiosk_id)
+    require_operational(session, kiosk_id)
     if category_id is not None and session.get(Category, category_id) is None:
         raise BusinessError("CATEGORY_NOT_FOUND", 404)
     value = Registration(kiosk_id=kiosk_id, primary_category_id=category_id, secondary_description=description,
@@ -64,7 +66,7 @@ def create_registration(session: Session, kiosk_id: UUID, category_id: UUID | No
 def capture(session: Session, registration_id: UUID, shot: int, gateway: DeviceGateway, store: ImageStore, *, ttl: int, max_bytes: int) -> ItemImage:
     if shot not in (1, 2):
         raise BusinessError("INVALID_SHOT_ORDER", 422)
-    registration(session, registration_id)
+    require_operational(session, registration(session, registration_id).kiosk_id)
     existing = session.scalar(select(ItemImage).where(ItemImage.registration_id == registration_id, ItemImage.shot_order == shot))
     if existing:
         return existing
@@ -160,6 +162,7 @@ def start_analysis(session: Session, registration_id: UUID, budget_seconds: floa
     """Claim the registration for analysis. None means a stored success already answers the call."""
     expire_stale_analysis(session, registration_id)
     reg = registration(session, registration_id)
+    require_operational(session, reg.kiosk_id)
     if reg.status == "ready" and reg.analysis_status == "succeeded":
         return None
     reg = claim(session, registration_id, ("draft",), "analyzing")
@@ -218,6 +221,7 @@ def assignment_for(session: Session, registration_id: UUID) -> StorageAssignment
 
 def open_deposit(session: Session, registration_id: UUID, gateway: DeviceGateway, *, ttl: int) -> StorageAssignment:
     reg = registration(session, registration_id)
+    require_operational(session, reg.kiosk_id)
     if reg.status in ("awaiting_deposit", "stored"):
         return assignment_for(session, registration_id)
     reg = claim(session, registration_id, ("ready",), "opening")
@@ -270,6 +274,7 @@ def open_deposit(session: Session, registration_id: UUID, gateway: DeviceGateway
 
 def complete_deposit(session: Session, registration_id: UUID, gateway: DeviceGateway) -> StorageAssignment:
     reg = registration(session, registration_id)
+    require_operational(session, reg.kiosk_id, lock=False)
     assignment = assignment_for(session, registration_id)
     if reg.status == "stored":
         return assignment
@@ -277,6 +282,7 @@ def complete_deposit(session: Session, registration_id: UUID, gateway: DeviceGat
         raise BusinessError("DEPOSIT_NOT_OPENED")
     locker = session.get(Locker, assignment.locker_id)
     door = gateway.door(reg.kiosk_id, locker.locker_number)
+    require_operational(session, reg.kiosk_id)
     if door != "closed":
         raise BusinessError("DOOR_NOT_CLOSED")
     # An empty locker contradicts the deposit the user just declared. The device says so again a
@@ -340,6 +346,7 @@ def issue_return_code(session: Session, found_item_id: UUID, *, ttl: int) -> tup
     item = found_item(session, found_item_id)
     if item.status != "stored":
         raise BusinessError("ITEM_NOT_STORED")
+    require_operational(session, registration(session, item.registration_id).kiosk_id)
     # Reissuing invalidates any earlier code so only one can open the locker.
     session.execute(update(ReturnCode).where(ReturnCode.found_item_id == found_item_id,
                     ReturnCode.status.in_(("active", "opening"))).values(status="revoked"))
@@ -367,6 +374,7 @@ def open_pickup(session: Session, code: str, kiosk_id: UUID, gateway: DeviceGate
     # The code names one locker in one kiosk. This is a target check, not caller authentication.
     if locker.kiosk_id != kiosk_id:
         raise BusinessError("RETURN_CODE_WRONG_KIOSK")
+    require_operational(session, kiosk_id)
     # A completed open is replayed rather than opening the door a second time.
     if assignment.status == "awaiting_pickup":
         return assignment
@@ -480,6 +488,7 @@ def reopen_deposit(session: Session, registration_id: UUID, gateway: DeviceGatew
                    ttl: int) -> StorageAssignment:
     """Open the same locker again so the user can put the item in after a refused completion."""
     reg = registration(session, registration_id)
+    require_operational(session, reg.kiosk_id)
     assignment = assignment_for(session, registration_id)
     if reg.status != "awaiting_deposit" or assignment is None or assignment.status != "awaiting_deposit":
         raise BusinessError("DEPOSIT_NOT_OPENED")
@@ -498,6 +507,7 @@ def reopen_pickup(session: Session, found_item_id: UUID, gateway: DeviceGateway,
     replayed through here.
     """
     item = found_item(session, found_item_id)
+    require_operational(session, registration(session, item.registration_id).kiosk_id)
     assignment = latest_assignment(session, found_item_id)
     if assignment is None or assignment.status != "awaiting_pickup":
         raise BusinessError("PICKUP_NOT_OPENED")
@@ -509,6 +519,7 @@ def reopen_pickup(session: Session, found_item_id: UUID, gateway: DeviceGateway,
 
 def complete_pickup(session: Session, found_item_id: UUID, gateway: DeviceGateway) -> StorageAssignment:
     item = found_item(session, found_item_id)
+    require_operational(session, registration(session, item.registration_id).kiosk_id, lock=False)
     assignment = latest_assignment(session, found_item_id)
     if item.status == "retrieved":
         return assignment
@@ -516,6 +527,7 @@ def complete_pickup(session: Session, found_item_id: UUID, gateway: DeviceGatewa
         raise BusinessError("PICKUP_NOT_OPENED")
     locker = session.get(Locker, assignment.locker_id)
     door = gateway.door(locker.kiosk_id, locker.locker_number)
+    require_operational(session, locker.kiosk_id)
     if door != "closed":
         raise BusinessError("DOOR_NOT_CLOSED")
     # The item is still in there, which the device repeats a second later as ITEM_NOT_TAKEN.

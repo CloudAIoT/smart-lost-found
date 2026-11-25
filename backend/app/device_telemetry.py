@@ -197,6 +197,9 @@ def store_alert(session: Session, kiosk_id: UUID, body: dict) -> str:
         detail=detail if isinstance(detail, dict) else None,
         reported_at=reported_at,
     )
+    # Serialize incident intake with short business commits and operator resolution.
+    from app.models import Kiosk
+    session.execute(select(Kiosk.id).where(Kiosk.id == kiosk_id).with_for_update())
     session.add(alert)
     # Force the unique report key to be checked before changing business state. A broker replay
     # raises here; apply_message rolls the transaction back and the incident is not applied twice.
@@ -242,10 +245,11 @@ def mark_stored_item_missing(session: Session, kiosk_id: UUID, number: int) -> b
 
 
 def prune_alerts(session: Session, retention_days: int) -> int:
-    """Drop alerts older than the retention window. Called once at startup, not per message."""
+    """Prune expired warnings only. Alarms and resolution audit records survive retention."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     try:
-        removed = session.execute(delete(DeviceAlert).where(DeviceAlert.reported_at < cutoff)).rowcount
+        removed = session.execute(delete(DeviceAlert).where(DeviceAlert.reported_at < cutoff,
+                                  DeviceAlert.severity == "warning", DeviceAlert.resolved_at.is_(None))).rowcount
         session.commit()
         return removed or 0
     except SQLAlchemyError:
@@ -292,8 +296,12 @@ def received_at(row: DeviceState) -> datetime:
 
 
 def recent_alerts(session: Session, *, kiosk_id: UUID | None = None, severity: str | None = None,
-                  since: datetime | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
+                  since: datetime | None = None, limit: int = 50, offset: int = 0,
+                  unresolved_only: bool = False, audit: bool = False) -> list[dict]:
+    from app.kiosk_operations import alert_view
     query = select(DeviceAlert)
+    if unresolved_only:
+        query = query.where(DeviceAlert.resolved_at.is_(None))
     if kiosk_id is not None:
         query = query.where(DeviceAlert.kiosk_id == kiosk_id)
     if severity is not None:
@@ -304,6 +312,4 @@ def recent_alerts(session: Session, *, kiosk_id: UUID | None = None, severity: s
                                                         else since.replace(tzinfo=timezone.utc)))
     rows = session.scalars(query.order_by(DeviceAlert.reported_at.desc(), DeviceAlert.id)
                            .limit(limit).offset(offset))
-    return [{"id": row.id, "kiosk_id": row.kiosk_id, "code": row.code, "severity": row.severity,
-             "device": row.device, "locker_number": row.locker_number, "message": row.message,
-             "detail": row.detail, "reported_at": row.reported_at} for row in rows]
+    return [alert_view(row, audit=audit) for row in rows]

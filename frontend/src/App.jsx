@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, API_BASE } from './api.js';
+import { createKioskAlerts } from './kioskAlerts.js';
+import { Link, Outlet, useMatch, useOutletContext } from 'react-router-dom';
+import { loadAllKiosks, useKioskSetting } from './kioskSettings.js';
+import KioskNavigationGuard from './KioskNavigationGuard.jsx';
+import KioskOperationGuard from './KioskOperationGuard.jsx';
+import AdminAlerts from './AdminAlerts.jsx';
 import { aiStatusText as formatAiStatus, analysisPendingText, analyzeAndOpenRegistration, ownershipPendingText, waitForOwnership } from './aiProgress.js';
 import {
   Archive,
@@ -10,7 +16,6 @@ import {
   CircleCheck,
   DoorOpen,
   Footprints,
-  Globe,
   HandHeart,
   House,
   Info,
@@ -21,7 +26,6 @@ import {
   LockOpen,
   MapPin,
   MapPinned,
-  Monitor,
   RefreshCw,
   RotateCw,
   TriangleAlert,
@@ -65,6 +69,7 @@ const ERROR_MESSAGES = {
   VALIDATION_ERROR: '입력값이 올바르지 않습니다.',
   BUSINESS_API_DISABLED: '서버의 업무 API가 비활성화되어 있습니다.',
   KIOSK_NOT_FOUND: '등록되지 않은 키오스크입니다.',
+  KIOSK_ALARM_ACTIVE: '장치 이상으로 이용이 중단되었습니다. 관리자의 조치 완료를 기다려 주세요.',
   CATEGORY_NOT_FOUND: '선택한 카테고리를 찾을 수 없습니다.',
   REGISTRATION_NOT_FOUND: '등록 정보를 찾을 수 없습니다.',
   IMAGE_NOT_FOUND: '촬영된 사진을 찾을 수 없습니다.',
@@ -329,7 +334,7 @@ function KioskMap({ kiosks, userPos, focus }) {
 /* ============================================================
  * 웹 포털 - 습득자: 키오스크 위치 조회 (GET /api/kiosks)
  * ============================================================ */
-function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
+function WebFinder({ kiosks, kiosksError, onReload, onBack }) {
   const [userPos, setUserPos] = useState(null);
   const [geoStatus, setGeoStatus] = useState('pending');
   const [focus, setFocus] = useState(null);
@@ -464,12 +469,6 @@ function WebFinder({ kiosks, kiosksError, onReload, onBack, onGoKiosk }) {
             상기 안내된 키오스크로 직접 방문하여 [분실물 등록] 버튼을 누르시면 보관함에 전달하실 수 있습니다.
           </p>
         </div>
-        <button
-          onClick={onGoKiosk}
-          className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold whitespace-nowrap inline-flex items-center justify-center gap-1"
-        >
-          키오스크 모드로 이동 <ArrowRight size={12} />
-        </button>
       </div>
     </div>
   );
@@ -732,7 +731,7 @@ function WebOwner({ onBack, onResult }) {
   );
 }
 
-function WebOwnerSuccess({ result, onGoKiosk }) {
+function WebOwnerSuccess({ result }) {
   return (
     <div className="space-y-6 text-center py-6">
       <div className="inline-flex p-3 bg-emerald-500/20 text-emerald-400 rounded-full mb-1">
@@ -761,12 +760,6 @@ function WebOwnerSuccess({ result, onGoKiosk }) {
           <TriangleAlert size={12} className="text-amber-400 shrink-0 mt-px" /> OTP는 다시 조회할 수 없습니다. 현장 키오스크에서 [분실물 수령]을 누른 후 8자리 OTP를 입력하세요.
         </p>
       </div>
-      <button
-        onClick={onGoKiosk}
-        className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg inline-flex items-center gap-1"
-      >
-        키오스크로 이동 <ArrowRight size={12} />
-      </button>
     </div>
   );
 }
@@ -803,11 +796,11 @@ function WebOwnerNotice({ kind, onRetry, onHome }) {
 }
 
 /* ============================================================
- * 웹 포털 컨테이너
+ * 운영자 장치 상태
  * ============================================================ */
 // 장치 상태 보기(관리자): GET /api/kiosks/{id}/device-status, GET /api/alerts 를 보여주는 간단한 표.
 // 프론트 자체 판정 없이 백엔드가 집계한 상태를 그대로 보여준다.
-function WebDeviceStatus({ kiosks, kiosksError, onBack }) {
+function WebDeviceStatus({ kiosks, kiosksError }) {
   const [kioskId, setKioskId] = useState('');
   const [rows, setRows] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -818,35 +811,41 @@ function WebDeviceStatus({ kiosks, kiosksError, onBack }) {
     if (!kioskId && kiosks.length > 0) setKioskId(kiosks[0].id);
   }, [kiosks, kioskId]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal) => {
     if (!kioskId) return;
     setLoading(true);
     setError('');
     try {
       const [status, alertList] = await Promise.all([
-        api(`/kiosks/${kioskId}/device-status`),
-        api(`/alerts?kiosk_id=${kioskId}`),
+        api(`/kiosks/${kioskId}/device-status`, { signal }),
+        api(`/alerts?kiosk_id=${kioskId}`, { signal }),
       ]);
+      signal.throwIfAborted();
       setRows(Array.isArray(status) ? status : []);
       setAlerts(Array.isArray(alertList) ? alertList.slice(0, 10) : []);
     } catch (err) {
-      setError(errorText(err));
+      if (!signal.aborted) setError(errorText(err));
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, [kioskId]);
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 10000);
-    return () => clearInterval(t);
+    const controller = new AbortController();
+    load(controller.signal);
+    const t = setInterval(() => load(controller.signal), 10000);
+    return () => { controller.abort(); clearInterval(t); };
   }, [load]);
 
   return (
     <div className="space-y-5">
-      <BackHeader onBack={onBack} title="장치 상태" desc="키오스크별 보관함 센서 상태와 최근 경고를 확인합니다." />
+      <div>
+        <h2 className="text-xl font-bold text-white">장치 상태</h2>
+        <p className="text-xs text-slate-400 mt-1">키오스크별 보관함 센서 상태와 최근 경고를 확인합니다.</p>
+      </div>
       {kiosksError && <p className="text-xs text-rose-300">{kiosksError}</p>}
       <select
+        aria-label="조회할 키오스크"
         value={kioskId}
         onChange={(e) => setKioskId(e.target.value)}
         className="bg-slate-900 border border-slate-700 rounded-md text-sm text-slate-200 px-3 py-2 focus:outline-none"
@@ -871,20 +870,16 @@ function WebDeviceStatus({ kiosks, kiosksError, onBack }) {
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className="border-t border-slate-800">
-                <td className="py-2 px-3">{r.device === 'capture' ? '촬영 장치' : r.locker_number == null ? '보관함 컨트롤러' : `${r.locker_number}번 보관함`}</td>
+                <td className="py-2 px-3">{r.device === 'capture' ? '촬영 장치' : r.locker_number === null ? '보관함 컨트롤러' : `${r.locker_number}번 보관함`}</td>
                 <td className="py-2 px-3">
-                  {r.connection == null ? (
-                    <span className="text-slate-500">-</span>
-                  ) : (
-                    <span className={`inline-flex items-center gap-1.5 ${r.connection === 'online' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${r.connection === 'online' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                      {r.connection === 'online' ? '온라인' : '오프라인'}
-                    </span>
-                  )}
+                  <span className={`inline-flex items-center gap-1.5 ${r.connection === 'online' ? 'text-emerald-400' : r.connection === 'offline' ? 'text-rose-400' : 'text-slate-500'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${r.connection === 'online' ? 'bg-emerald-500' : r.connection === 'offline' ? 'bg-rose-500' : 'bg-slate-500'}`} />
+                    {r.connection === 'online' ? '온라인' : r.connection === 'offline' ? '오프라인' : '-'}
+                  </span>
                 </td>
                 <td className="py-2 px-3">{r.door === 'open' ? '열림' : r.door === 'closed' ? '닫힘' : '-'}</td>
                 <td className="py-2 px-3">{r.weight_g ?? '-'}</td>
-                <td className="py-2 px-3">{r.item === 'present' ? '감지됨' : '-'}</td>
+                <td className="py-2 px-3">{r.item === 'present' ? '감지됨' : r.item === 'empty' ? '비어 있음' : '-'}</td>
                 <td className="py-2 px-3 text-slate-500">{r.updated_at ? new Date(r.updated_at).toLocaleTimeString('ko-KR') : '-'}</td>
               </tr>
             ))}
@@ -908,6 +903,7 @@ function WebDeviceStatus({ kiosks, kiosksError, onBack }) {
                 <span className="flex items-center gap-1.5">
                   <TriangleAlert size={13} /> {ALERT_LABELS[a.code] || a.message || a.code || '알 수 없는 경고'}
                   {a.locker_number ? ` · ${a.locker_number}번` : ''}
+                  {a.resolved_at ? ' · 조치 완료' : ''}
                 </span>
                 <span className="text-[10px] text-slate-500 shrink-0">
                   {a.reported_at ? new Date(a.reported_at).toLocaleTimeString('ko-KR') : ''}
@@ -921,7 +917,7 @@ function WebDeviceStatus({ kiosks, kiosksError, onBack }) {
   );
 }
 
-function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
+function WebPortal({ kiosks, kiosksError, onReload }) {
   const [step, setStep] = useState('type');
   const [ownerResult, setOwnerResult] = useState(null);
 
@@ -979,26 +975,16 @@ function WebPortal({ kiosks, kiosksError, onReload, onGoKiosk }) {
               </div>
             </button>
           </div>
-          <button
-            onClick={() => setStep('devices')}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2"
-          >
-            <Monitor size={13} /> 장치 상태 보기 (관리자)
-          </button>
         </div>
       )}
 
-      {step === 'devices' && (
-        <WebDeviceStatus kiosks={kiosks} kiosksError={kiosksError} onBack={() => setStep('type')} />
-      )}
-
       {step === 'finder' && (
-        <WebFinder kiosks={kiosks} kiosksError={kiosksError} onReload={onReload} onBack={() => setStep('type')} onGoKiosk={onGoKiosk} />
+        <WebFinder kiosks={kiosks} kiosksError={kiosksError} onReload={onReload} onBack={() => setStep('type')} />
       )}
       {step === 'owner' && (
         <WebOwner onBack={() => setStep('type')} onResult={handleOwnerResult} />
       )}
-      {step === 'success' && ownerResult && <WebOwnerSuccess result={ownerResult} onGoKiosk={onGoKiosk} />}
+      {step === 'success' && ownerResult && <WebOwnerSuccess result={ownerResult} />}
       {['not_found', 'not_confirmed'].includes(step) && (
         <WebOwnerNotice kind={step} onRetry={() => setStep('owner')} onHome={() => setStep('type')} />
       )}
@@ -1041,8 +1027,64 @@ function ShotBox({ label, imageUrl, scanning }) {
   );
 }
 
-function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload }) {
-  const [kioskId, setKioskId] = useState('');
+function KioskSettingForm({ kiosks, kiosksError, kiosksLoading, setting }) {
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900 p-4 text-left">
+      <label htmlFor="kiosk-setting" className="text-sm font-bold">사용할 키오스크 선택</label>
+      <select id="kiosk-setting" value={setting.draft} onChange={(event) => setting.setDraft(event.target.value)}
+        disabled={kiosksLoading || !!kiosksError}
+        className="w-full bg-slate-950 border border-slate-600 rounded-lg p-2 text-sm">
+        <option value="">키오스크를 선택하세요</option>
+        {kiosks.map((k) => <option key={k.id} value={k.id}>{k.name}{k.location_description ? ` · ${k.location_description}` : ''}</option>)}
+      </select>
+      <div className="flex gap-3">
+        <button onClick={setting.confirm} disabled={!setting.draft || kiosksLoading || !!kiosksError}
+          className="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm disabled:opacity-40">이 키오스크로 설정</button>
+        {setting.kioskId && <button onClick={setting.cancel} className="text-sm text-slate-300">변경 취소</button>}
+      </div>
+    </div>
+  );
+}
+
+// 일반 이용 화면에는 관리 링크를 두지 않는다. 운영자는 이 URL을 직접 연다.
+export function KioskSettingsPage() {
+  const context = useOutletContext();
+  const { kiosks, kiosksError, kiosksLoading, setting, onReload, onReturn } = context;
+  const kiosk = kiosks.find((k) => k.id === setting.kioskId);
+  return (
+    <section className="w-full max-w-xl mx-auto bg-slate-950 border border-slate-700 rounded-2xl p-6 space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-white">키오스크 설정</h2>
+        <p className="text-xs text-slate-400 mt-1">이 단말에서 사용할 키오스크를 관리합니다.</p>
+      </div>
+      {(kiosksLoading || kiosksError || kiosks.length === 0) && (
+        <div className="text-sm text-rose-300 space-y-2">
+          <p>{kiosksLoading ? '키오스크 설정을 확인하는 중입니다.' : kiosksError || '서버에 등록된 키오스크가 없습니다.'}</p>
+          <button onClick={onReload} disabled={kiosksLoading} className="underline">다시 불러오기</button>
+        </div>
+      )}
+      {setting.notice && <p role="status" className="text-sm text-amber-300">{setting.notice}</p>}
+      {kiosk && <div>
+        <p className="text-xs text-slate-400">현재 설정</p>
+        <p className="font-bold mt-1">{kiosk.name}</p>
+        {kiosk.location_description && <p className="text-sm text-slate-400">{kiosk.location_description}</p>}
+      </div>}
+      {!setting.kioskId || setting.editing ? <KioskSettingForm {...context} /> : (
+        <div className="flex gap-3 text-sm">
+          <button onClick={setting.change} disabled={kiosksLoading || !!kiosksError}
+            className="bg-slate-800 rounded-lg px-4 py-2 disabled:opacity-40">키오스크 변경</button>
+          <button onClick={setting.clear} className="border border-slate-700 rounded-lg px-4 py-2">설정 초기화</button>
+        </div>
+      )}
+      <Link to="/kiosk" onClick={onReturn} className="inline-flex items-center gap-2 text-sm text-indigo-300 underline">
+        <ArrowLeft size={14} /> 키오스크 화면으로 돌아가기
+      </Link>
+    </section>
+  );
+}
+
+function KioskView({ kiosks, kiosksError, kiosksLoading, categories, categoriesError, onReload }) {
+  const settingsPage = useMatch('/kiosk/settings');
   const [step, setStep] = useState('main');
   const [busy, setBusy] = useState('');
   const [failMessage, setFailMessage] = useState('');
@@ -1065,11 +1107,21 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
   const [code, setCode] = useState('');
   const [pickup, setPickup] = useState(null);
   const [pickupBlocked, setPickupBlocked] = useState(false); // ITEM_STILL_INSIDE(409) 또는 경고 목록의 ITEM_NOT_TAKEN
+  const [workComplete, setWorkComplete] = useState(false);
+  const [uncertainWork, setUncertainWork] = useState(false);
+  const resumeStep = useRef('main');
+  const pendingWork = !workComplete && !!(registration || pickup || uncertainWork);
+  const navigationLocked = !!busy || pendingWork || !['main', 'reg-done', 'pickup-done'].includes(step);
+  const setting = useKioskSetting(kiosks, { loading: kiosksLoading, error: kiosksError, locked: navigationLocked });
+  const { kioskId, operation } = setting;
+
+  useEffect(() => {
+    if (!['main', 'fail', 'reg-done', 'pickup-done'].includes(step)) resumeStep.current = step;
+  }, [step]);
 
   // 장치 경고·상태
   const [alerts, setAlerts] = useState([]);
-  const alertsSinceRef = useRef(null); // 화면 진입 시각에 한 번만 고정한다(이후 전진시키지 않음 — F14 요청사항 종합반영2)
-  const seenAlertIdsRef = useRef(new Set()); // 한 번이라도 받은 경고 id 전체. 표시/해제 여부와 무관하게 재노출을 막는다.
+  const [kioskAlerts] = useState(() => createKioskAlerts());
   const pickupOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_TAKEN 경고만 본다
   const depositOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_DEPOSITED 경고만 본다
   const [deviceStatus, setDeviceStatus] = useState([]); // GET /kiosks/{id}/device-status (장치 온라인/오프라인)
@@ -1079,58 +1131,38 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     return () => clearInterval(t);
   }, []);
 
-  useEffect(() => {
-    if (!kioskId && kiosks.length > 0) setKioskId(kiosks[0].id);
-  }, [kiosks, kioskId]);
-
   const kiosk = kiosks.find((k) => k.id === kioskId);
 
-  // 장치 경고 폴링: GET /api/alerts?kiosk_id=&since=&limit=&offset= (backend recent_alerts).
+  // 장치 경고 폴링: GET /api/alerts?kiosk_id=&since= (backend recent_alerts).
   // 응답 필드: { id, kiosk_id, code, severity, device, locker_number, message, detail, reported_at }.
-  // F14 요청사항 종합반영2: since는 화면 진입 시각에 한 번만 고정하고 이후 전진시키지 않는다(늦게 들어오는 경고를 놓치지 않기 위함).
-  // since가 고정이라 누적 건수가 backend limit(기본 50, 최대 200)을 넘을 수 있어 offset으로 끝까지 이어 받는다.
-  // 중복 제거는 화면 표시·'확인' 여부와 무관하게, 지금까지 받은 적 있는 id 전체(seenAlertIdsRef)로 판단한다.
+  // 화면 진입 시각을 since로 고정하고, 수신 id와 표시 목록은 키오스크별로 유지한다.
   useEffect(() => {
-    setAlerts([]);
-    seenAlertIdsRef.current = new Set();
-    alertsSinceRef.current = new Date().toISOString();
-    if (!kioskId) return;
-    let cancelled = false;
-    const since = alertsSinceRef.current;
-    const fetchAllSinceEntry = async () => {
-      const collected = [];
-      let offset = 0;
-      const limit = 200;
-      for (;;) {
-        const data = await api(`/alerts?kiosk_id=${kioskId}&since=${encodeURIComponent(since)}&limit=${limit}&offset=${offset}`);
-        const list = Array.isArray(data) ? data : [];
-        collected.push(...list);
-        if (list.length < limit) break;
-        offset += limit;
-      }
-      return collected;
-    };
+    if (!kioskId) {
+      setAlerts([]);
+      return;
+    }
+    setAlerts(kioskAlerts.get(kioskId));
+    const controller = new AbortController();
+    let polling = false;
     const poll = async () => {
+      if (polling || controller.signal.aborted) return;
+      polling = true;
       try {
-        const list = await fetchAllSinceEntry();
-        if (cancelled || list.length === 0) return;
-        const fresh = list.filter((a) => a.id != null && !seenAlertIdsRef.current.has(a.id));
-        if (fresh.length === 0) return;
-        fresh.forEach((a) => seenAlertIdsRef.current.add(a.id));
-        setAlerts((prev) => [...fresh, ...prev]
-          .sort((a, b) => (b.reported_at || '').localeCompare(a.reported_at || ''))
-          .slice(0, 5));
+        const list = await kioskAlerts.load(kioskId, { signal: controller.signal });
+        if (!controller.signal.aborted) setAlerts(list);
       } catch {
         // 경고 조회 실패는 화면 흐름을 막지 않는다.
+      } finally {
+        polling = false;
       }
     };
     poll();
     const t = setInterval(poll, 8000);
     return () => {
-      cancelled = true;
+      controller.abort();
       clearInterval(t);
     };
-  }, [kioskId]);
+  }, [kioskId, kioskAlerts]);
 
   // 수령 - 보관함 열림 화면에서, 이미 폴링 중인 경고 목록에 이 보관함의 ITEM_NOT_TAKEN이 있으면
   // 안내와 다시 열기를 표시한다. 완료 가능 여부는 완료 API가 판단한다. 보관함을 연 시각 이후의 경고만 본다.
@@ -1177,31 +1209,38 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
   }, [kioskId]);
 
   const reset = () => {
-    analysisRequestRef.current?.abort();
-    analysisRequestRef.current = null;
+    if (busy || operation.locked) return;
     setStep('main');
-    setBusy('');
     setFailMessage('');
     setInlineError('');
+    setCode('');
+    setShot2GuideOpen(false);
+    // 화면 초기화는 서버 취소가 아니다. 완료 전에는 같은 키오스크에서 이어서 진행한다.
+    if (pendingWork) return;
+    analysisRequestRef.current?.abort();
+    analysisRequestRef.current = null;
+    setBusy('');
     setCategoryLabel('');
     setOtherText('');
     setRegistration(null);
     setPreviews({});
-    setShot2GuideOpen(false);
     setRetakeOrder(null);
     setDepositBlocked(false);
-    setCode('');
     setPickup(null);
     setPickupBlocked(false);
+    setWorkComplete(false);
+    setUncertainWork(false);
   };
 
   // 요청 실행 래퍼: 진행 중 표시, 실패 시 실패 화면 또는 화면 내 오류 표시
   const run = useCallback(async (message, fn, { inline = false, mapError } = {}) => {
+    if (operation.locked) return;
     setBusy(message);
     setInlineError('');
     try {
       await fn();
     } catch (err) {
+      if (err.code === 'KIOSK_ALARM_ACTIVE') { operation.suspend(); return; }
       const text = mapError ? mapError(err) : errorText(err);
       if (inline) setInlineError(text);
       else {
@@ -1211,7 +1250,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     } finally {
       setBusy('');
     }
-  }, []);
+  }, [operation.locked, operation.suspend]);
 
   const loadPreview = async (regId, order) => {
     try {
@@ -1232,13 +1271,20 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
         primary_category_id: matchCategoryId(categories, categoryLabel),
         secondary_description: categoryLabel === '기타' ? otherText.trim() : categoryLabel || null,
       };
-      const data = await api('/registrations', { method: 'POST', body });
+      let data;
+      try {
+        data = await api('/registrations', { method: 'POST', body });
+      } catch (err) {
+        if (err.status === 0 || err.status >= 500) setUncertainWork(true);
+        throw err;
+      }
+      setWorkComplete(false);
       setRegistration(data);
       setStep('reg-shot1');
     });
 
   // [POST /api/registrations/{id}/shots/{1|2}] 촬영
-  // 카메라 전원 꺼짐 등 장치 자체 오류는 500으로 내려오며, 이 경우 안내 후 등록을 종료한다.
+  // 카메라 오류도 기존 등록은 유지한다. 오류 안내 뒤 같은 등록의 촬영을 다시 시도할 수 있다.
   // 참고: 현재 백엔드는 같은 사진 번호의 재요청에 기존 저장 결과를 반환하므로(docs/api.md),
   // 재촬영이 실제로 새 사진을 저장하려면 백엔드의 재촬영 지원이 먼저 필요하다.
   const capture = (order) =>
@@ -1270,7 +1316,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
   // [POST analysis] → poll [GET registration] → [POST deposit/open]
   const analyzeAndOpen = async () => {
-    if (analysisRequestRef.current || busy) return;
+    if (analysisRequestRef.current || busy || operation.locked) return;
     const controller = new AbortController();
     analysisRequestRef.current = controller;
     const { signal } = controller;
@@ -1292,6 +1338,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       setStep('reg-deposit');
     } catch (err) {
       // Keep the photos and registration so retry can resume a still-running job.
+      if (err.code === 'KIOSK_ALARM_ACTIVE') operation.suspend();
       if (!signal.aborted) setInlineError(errorText(err));
     } finally {
       if (analysisRequestRef.current === controller) {
@@ -1314,6 +1361,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
           });
           setRegistration(data);
           setDepositBlocked(false);
+          setWorkComplete(true);
           setStep('reg-done');
         } catch (err) {
           if (err.code === 'ITEM_NOT_DETECTED') setDepositBlocked(true);
@@ -1338,6 +1386,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
   // [POST /api/pickup/open]
   const openPickup = () => {
+    if (operation.locked || busy) return;
     const normalized = normalizeOtp(code);
     if (!OTP_PATTERN.test(normalized)) {
       setInlineError(`OTP ${OTP_LENGTH}자리를 입력해 주세요.`);
@@ -1346,6 +1395,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     if (DEV_OTP && normalized === DEV_OTP) {
       setInlineError('');
       setPickup({ found_item_id: null, kiosk_id: kioskId, locker_number: 0, dev: true });
+      setWorkComplete(false);
       setPickupBlocked(false);
       pickupOpenedAtRef.current = new Date().toISOString();
       setStep('pickup-open');
@@ -1354,7 +1404,15 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     run(
       'OTP를 확인하고 보관함을 여는 중...',
       async () => {
-        const data = await api('/pickup/open', { method: 'POST', body: { code: normalized, kiosk_id: kioskId } });
+        let data;
+        try {
+          data = await api('/pickup/open', { method: 'POST', body: { code: normalized, kiosk_id: kioskId } });
+        } catch (err) {
+          if (err.status === 0 || err.status >= 500) setUncertainWork(true);
+          throw err;
+        }
+        setUncertainWork(false);
+        setWorkComplete(false);
         setPickup(data);
         setPickupBlocked(false);
         pickupOpenedAtRef.current = new Date().toISOString();
@@ -1366,7 +1424,9 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
   // [POST /api/pickup/{found_item_id}/complete] 409 ITEM_STILL_INSIDE면 다시 열기(pickup/reopen)로 유도한다.
   const completePickup = () => {
+    if (operation.locked || busy) return;
     if (pickup?.dev) {
+      setWorkComplete(true);
       setStep('pickup-done');
       return;
     }
@@ -1377,6 +1437,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
           const data = await api(`/pickup/${pickup.found_item_id}/complete`, { method: 'POST', body: { confirmed: true } });
           setPickup(data);
           setPickupBlocked(false);
+          setWorkComplete(true);
           setStep('pickup-done');
         } catch (err) {
           if (err.code === 'ITEM_STILL_INSIDE') setPickupBlocked(true);
@@ -1396,6 +1457,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
   // [POST /api/pickup/{found_item_id}/reopen] 물건이 남아 있을 때 보관함을 다시 연다.
   const reopenPickup = () => {
+    if (operation.locked || busy) return;
     if (pickup?.dev || !pickup?.found_item_id) {
       setPickupBlocked(false);
       return;
@@ -1419,47 +1481,50 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     );
   };
 
-  const disabled = !!busy;
-  const noKiosk = !kioskId;
+  const disabled = !!busy || operation.locked;
+  const noKiosk = !kiosk || !!kiosksError || kiosksLoading;
 
   // 뒤로가기: 재촬영 중에는 확인(reg-review) 화면으로 돌아간다.
   const backTargets = {
     'reg-info': 'main',
-    'reg-shot1': retakeOrder === 1 ? 'reg-review' : 'reg-info',
+    'reg-shot1': retakeOrder === 1 ? 'reg-review' : 'main',
     'reg-shot2': retakeOrder === 2 ? 'reg-review' : 'reg-shot1',
     'reg-review': 'reg-shot2',
     'pickup-scan': 'main',
   };
   const goBack = () => {
-    if (busy) return;
+    if (busy || operation.locked) return;
     const target = backTargets[step];
     if (!target) return;
+    if (target === 'main') { reset(); return; }
     if (target !== 'reg-review') setRetakeOrder(null);
     setInlineError('');
     setStep(target);
   };
 
+  // 부모 화면을 유지해 업무 이동 가드·경고 기준 시각·메모리 전용 설정을 공유한다.
+  if (settingsPage) return (
+    <>
+      <KioskNavigationGuard locked={navigationLocked || operation.locked} />
+      <KioskOperationGuard operation={operation}>
+      <Outlet context={{ kiosks, kiosksError, kiosksLoading, setting, onReload,
+        onReturn: () => { setting.cancel(); reset(); } }} />
+      </KioskOperationGuard>
+    </>
+  );
+
   return (
+    <KioskOperationGuard operation={operation}>
     <div className="w-full max-w-xl mx-auto kiosk-frame bg-slate-950 p-6 flex-1 flex flex-col justify-between text-slate-100 min-h-[580px] my-auto relative">
+      <KioskNavigationGuard locked={navigationLocked || operation.locked} />
       {/* Kiosk Header */}
       <div className="flex justify-between items-center border-b border-slate-800 pb-4 gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className={`w-3 h-3 rounded-full shrink-0 ${noKiosk ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`} />
-          {kiosks.length > 1 && step === 'main' ? (
-            <select
-              value={kioskId}
-              onChange={(e) => setKioskId(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-md text-sm font-bold text-slate-300 px-3 py-2 focus:outline-none"
-            >
-              {kiosks.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span className="text-xs font-bold tracking-wider text-slate-300 truncate">{kiosk?.name || '키오스크 미연결'}</span>
-          )}
+          <div className="min-w-0">
+            <span className="text-xs font-bold tracking-wider text-slate-300">{kiosk?.name || '키오스크 설정 필요'}</span>
+            {kiosk?.location_description && <p className="text-[11px] text-slate-500 truncate">{kiosk.location_description}</p>}
+          </div>
         </div>
         <span className="text-[11px] text-slate-500 font-mono whitespace-nowrap">
           {now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
@@ -1481,20 +1546,17 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       {/* 장치 경고 (GET /api/alerts) */}
       {alerts.length > 0 && (
         <div className="space-y-1.5 pt-3">
-          {alerts.map((a, i) => {
+          {alerts.map((a) => {
             const cls = a.severity === 'alarm'
               ? 'bg-rose-950/50 border-rose-500/50 text-rose-300'
               : 'bg-amber-950/40 border-amber-500/40 text-amber-300';
             return (
-              <div key={a.id ?? i} className={`flex items-center justify-between gap-2 border rounded-lg px-3 py-2 text-xs ${cls}`}>
+              <div key={a.id} className={`flex items-center justify-between gap-2 border rounded-lg px-3 py-2 text-xs ${cls}`}>
                 <span className="flex items-center gap-1.5">
                   <TriangleAlert size={13} /> {ALERT_LABELS[a.code] || a.message || a.code || '알 수 없는 경고'}
-                  {a.locker_number ? ` · ${a.locker_number}번` : ''}
+                  {a.locker_number != null && <span className="shrink-0">· {a.locker_number}번 보관함</span>}
                 </span>
-                <button
-                  onClick={() => setAlerts((prev) => prev.filter((_, j) => j !== i))}
-                  className="text-[11px] underline shrink-0"
-                >
+                <button onClick={() => setAlerts(kioskAlerts.dismiss(kioskId, a.id))} className="text-[11px] underline shrink-0">
                   확인
                 </button>
               </div>
@@ -1517,17 +1579,31 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
             <h2 className="text-2xl font-extrabold text-white">무엇을 도와드릴까요?</h2>
             <p className="text-xs text-slate-400 mt-1">원하시는 작업의 버튼을 터치해 주세요.</p>
           </div>
-          {noKiosk && (
+          {(kiosksLoading || kiosksError || kiosks.length === 0) && (
             <div className="text-xs text-rose-300 bg-rose-950/40 border border-rose-500/40 rounded-xl p-3 space-y-1">
-              <p>{kiosksError || '서버에 등록된 키오스크가 없어 이용할 수 없습니다.'}</p>
-              <button onClick={onReload} className="underline inline-flex items-center gap-1">
+              <p>{kiosksLoading ? '키오스크 설정을 확인하는 중입니다.' : kiosksError || '서버에 등록된 키오스크가 없어 이용할 수 없습니다.'}</p>
+              <button onClick={onReload} disabled={kiosksLoading} className="underline inline-flex items-center gap-1">
                 <RefreshCw size={12} /> 다시 불러오기
               </button>
             </div>
           )}
+          {setting.notice && <p role="status" className="text-xs text-amber-300">{setting.notice}</p>}
+          {!pendingWork && !kioskId && (
+            <KioskSettingForm kiosks={kiosks} kiosksError={kiosksError} kiosksLoading={kiosksLoading} setting={setting} />
+          )}
+          {pendingWork && (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-950/30 p-4 space-y-3 text-sm text-amber-200">
+              <p>완료되지 않은 업무가 있어 현재 키오스크를 유지합니다. 화면 초기화는 서버 작업 취소가 아닙니다.</p>
+              {registration || pickup ? (
+                <button onClick={() => setStep(resumeStep.current)} className="bg-amber-500 text-slate-950 rounded-lg px-4 py-2 font-bold">
+                  진행 중인 업무 계속하기
+                </button>
+              ) : <p>요청 결과를 확인하지 못했습니다. 관리자에게 서버의 진행 상태 확인을 요청해 주세요.</p>}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4 pt-2">
             <button
-              disabled={noKiosk}
+              disabled={noKiosk || pendingWork}
               onClick={() => setStep('reg-info')}
               className="p-6 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 border-2 border-indigo-500/50 hover:border-indigo-400 rounded-2xl flex flex-col items-center gap-3 transition-all active:scale-95 shadow-lg"
             >
@@ -1538,7 +1614,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
               <span className="text-[10px] text-slate-400">습득한 물건 보관하기</span>
             </button>
             <button
-              disabled={noKiosk}
+              disabled={noKiosk || pendingWork}
               onClick={() => {
                 setInlineError('');
                 setStep('pickup-scan');
@@ -1842,14 +1918,6 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
             )}
             <button
               disabled={disabled}
-              onClick={reopenPickup}
-              className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 text-xs font-bold rounded-xl shadow inline-flex items-center gap-1"
-            >
-              <RefreshCw size={14} /> 보관함 다시 열기
-            </button>
-          ) : (
-            <button
-              disabled={disabled}
               onClick={completePickup}
               className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow"
             >
@@ -1925,6 +1993,9 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       )}
 
       {/* Kiosk Footer */}
+      {navigationLocked && <p className="mt-4 mb-2 text-[11px] text-slate-400">
+        새로고침하면 진행 화면이 사라질 수 있습니다. 화면을 닫아도 서버 작업은 취소되지 않습니다.
+      </p>}
       <div className="border-t border-slate-800 pt-3 flex justify-between items-center gap-3 text-[11px] text-slate-500">
         <button
           onClick={reset}
@@ -1937,34 +2008,61 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
         <span>도움말: 1588-0000</span>
       </div>
     </div>
+    </KioskOperationGuard>
   );
 }
 
 /* ============================================================
  * App
  * ============================================================ */
+export function WebPage() {
+  const context = useOutletContext();
+  return <WebPortal {...context} />;
+}
+
+export function KioskPage() {
+  return <KioskView {...useOutletContext()} />;
+}
+
+export function DeviceStatusPage() {
+  const context = useOutletContext();
+  return <AdminAlerts {...context} labels={ALERT_LABELS}
+    renderDeviceStatus={(id) => <WebDeviceStatus key={id} {...context} kiosks={context.kiosks.filter((k) => k.id === id)} />} />;
+}
+
 export default function App() {
-  const [mode, setMode] = useState('web');
   const [kiosks, setKiosks] = useState([]);
   const [kiosksError, setKiosksError] = useState('');
+  const [kiosksLoading, setKiosksLoading] = useState(true);
   const [categories, setCategories] = useState([]);
   const [categoriesError, setCategoriesError] = useState('');
-  const [webKey, setWebKey] = useState(0);
+  const dataRequest = useRef(null);
 
   const loadData = useCallback(async () => {
+    dataRequest.current?.abort();
+    const controller = new AbortController();
+    dataRequest.current = controller;
+    const { signal } = controller;
+    setKiosksLoading(true);
     try {
-      const data = await api('/kiosks?limit=100&offset=0');
-      setKiosks(Array.isArray(data) ? data : []);
+      const data = await loadAllKiosks({ signal });
+      signal.throwIfAborted();
+      setKiosks(data);
       setKiosksError('');
     } catch (err) {
+      if (signal.aborted) return;
       setKiosks([]);
       setKiosksError(`키오스크 목록을 불러오지 못했습니다. ${errorText(err)}`);
+    } finally {
+      if (!signal.aborted) setKiosksLoading(false);
     }
     try {
-      const data = await api('/categories');
+      const data = await api('/categories', { signal });
+      signal.throwIfAborted();
       setCategories(Array.isArray(data) ? data : []);
       setCategoriesError('');
     } catch (err) {
+      if (signal.aborted) return;
       setCategories([]);
       setCategoriesError(`카테고리를 불러오지 못했습니다. ${errorText(err)}`);
     }
@@ -1972,20 +2070,15 @@ export default function App() {
 
   useEffect(() => {
     loadData();
+    return () => dataRequest.current?.abort();
   }, [loadData]);
-
-  const switchMode = (next) => {
-    if (next === 'web') setWebKey((k) => k + 1); // 웹 포털은 첫 화면부터 다시 시작
-    setMode(next);
-  };
 
   return (
     <div className="slf-app bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center justify-start p-2 sm:p-6">
       <style>{GLOBAL_STYLE}</style>
 
-      {/* Header & Mode Switcher */}
-      <header className="w-full max-w-5xl mb-6 flex flex-col sm:flex-row justify-between items-center bg-slate-800/80 p-4 rounded-2xl border border-slate-700 backdrop-blur">
-        <div className="flex items-center gap-3 mb-3 sm:mb-0">
+      <header className="w-full max-w-5xl mb-6 flex items-center bg-slate-800/80 p-4 rounded-2xl border border-slate-700 backdrop-blur">
+        <div className="flex items-center gap-3">
           <div className="p-2.5 bg-indigo-600 rounded-xl text-white shadow-lg shadow-indigo-500/30">
             <Boxes size={20} />
           </div>
@@ -1994,39 +2087,10 @@ export default function App() {
             <p className="text-xs text-slate-400">스마트 분실물 안심 보관 시스템</p>
           </div>
         </div>
-        <div className="bg-slate-950 p-1 rounded-xl flex border border-slate-800">
-          <button
-            onClick={() => switchMode('web')}
-            className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all duration-200 inline-flex items-center gap-1.5 ${
-              mode === 'web' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Globe size={14} /> 웹 포털 모드
-          </button>
-          <button
-            onClick={() => switchMode('kiosk')}
-            className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all duration-200 inline-flex items-center gap-1.5 ${
-              mode === 'kiosk' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Monitor size={14} /> 현장 키오스크 모드
-          </button>
-        </div>
       </header>
 
       <main className="w-full max-w-5xl flex-1 flex flex-col">
-        {mode === 'web' ? (
-          <WebPortal
-            key={webKey}
-            kiosks={kiosks}
-            kiosksError={kiosksError}
-            onReload={loadData}
-            onGoKiosk={() => switchMode('kiosk')}
-          />
-        ) : (
-          <KioskView kiosks={kiosks} kiosksError={kiosksError} categories={categories}
-            categoriesError={categoriesError} onReload={loadData} />
-        )}
+        <Outlet context={{ kiosks, kiosksError, kiosksLoading, categories, categoriesError, onReload: loadData }} />
       </main>
     </div>
   );

@@ -45,6 +45,9 @@ class Settings(GeminiSettings):
     # Local fixtures remain separate from deployed API access.
     local_development: bool = False
     business_api_enabled: bool = False
+    # Server-only operator credentials. No configured credentials means no resolution access.
+    admin_username: str = Field(default="", max_length=100)
+    admin_password: SecretStr | None = None
     # Development stand-in for the Pi. Never enable it where real storage is operated.
     dev_fake_device: bool = False
     s3_bucket: str | None = None

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Response
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,6 +14,8 @@ from app.ai_ownership_verification import search_jobs
 from app.ai_ownership_verification.workflow import authorize_return_code
 from app.ai_ownership_verification.workflow_ai import GeminiWorkflowAI
 from app.config import Settings, get_settings
+from app.admin import require_admin
+from app.kiosk_operations import operation_status, require_operational, resolve_alert
 from app.db import SessionLocal, get_session
 from app.dev_device import FakeDeviceGateway
 from app.device_telemetry import kiosk_device_states, recent_alerts
@@ -31,6 +33,7 @@ def require_business_api(settings: Annotated[Settings, Depends(get_settings)]) -
 router = APIRouter(prefix="/api", dependencies=[Depends(require_business_api)])
 DB = Annotated[Session, Depends(get_session)]
 Config = Annotated[Settings, Depends(get_settings)]
+Admin = Annotated[str, Depends(require_admin)]
 
 
 def get_gateway(settings: Config) -> Generator[object, None, None]:
@@ -146,16 +149,61 @@ def kiosk_device_status(kiosk_id: UUID, session: DB):
 
 
 @router.get("/alerts")
-def list_alerts(session: DB, kiosk_id: UUID | None = None,
+def list_alerts(session: DB, response: Response, kiosk_id: UUID | None = None,
                 severity: Annotated[Literal["alarm", "warning"] | None, Query()] = None,
                 since: Annotated[datetime | None, Query()] = None,
+                unresolved_only: bool = False,
                 limit: Annotated[int, Query(ge=1, le=200)] = 50,
                 offset: Annotated[int, Query(ge=0)] = 0):
-    """Alerts received from the devices, newest first. Older than the retention window are gone."""
+    """Device alerts, newest first, including resolution state. Alarm/audit history is retained."""
     if kiosk_id is not None:
         services.kiosk(session, kiosk_id)
+    response.headers["Cache-Control"] = "no-store"
     return recent_alerts(session, kiosk_id=kiosk_id, severity=severity, since=since,
-                         limit=limit, offset=offset)
+                         limit=limit, offset=offset, unresolved_only=unresolved_only)
+
+
+@router.get("/kiosks/{kiosk_id}/operation-status")
+def get_operation_status(kiosk_id: UUID, session: DB, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return operation_status(session, kiosk_id)
+
+
+@router.get("/admin/session")
+def admin_session(actor: Admin, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return {"username": actor}
+
+
+@router.get("/admin/alerts")
+def admin_alerts(actor: Admin, session: DB, response: Response, kiosk_id: UUID,
+                 unresolved_only: bool = False,
+                 limit: Annotated[int, Query(ge=1, le=200)] = 50,
+                 offset: Annotated[int, Query(ge=0)] = 0):
+    services.kiosk(session, kiosk_id)
+    response.headers["Cache-Control"] = "no-store"
+    return recent_alerts(session, kiosk_id=kiosk_id, unresolved_only=unresolved_only,
+                         limit=limit, offset=offset, audit=True)
+
+
+class AlertResolutionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmed: Literal[True]
+    note: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("note")
+    @classmethod
+    def nonblank_note(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A resolution note is required")
+        return value.strip()
+
+
+@router.post("/admin/alerts/{alert_id}/resolve")
+def resolve_device_alert(alert_id: UUID, body: AlertResolutionInput, actor: Admin,
+                          session: DB, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return resolve_alert(session, alert_id, actor, body.note)
 
 
 @router.get("/ai/status")
@@ -223,6 +271,7 @@ def preview(registration_id: UUID, shot_order: ShotOrder, session: DB, store: St
 @router.post("/registrations/{registration_id}/analysis", response_model=RegistrationView)
 def analyze(registration_id: UUID, session: DB, jobs: AnalysisJobs):
     """Start the analysis. Answers within the wait window, otherwise `running` for the client to poll."""
+    require_operational(session, services.registration(session, registration_id).kiosk_id)
     return registration_view(session, jobs.start(session, registration_id))
 
 
@@ -298,6 +347,8 @@ def create_return_code(found_item_id: UUID, body: ReturnCodeInput, response: Res
 def issue_ownership_return_code(found_item_id: UUID, attempt_id: UUID, session: Session, settings: Settings) -> ReturnCodeView:
     if not settings.return_code_ttl_seconds:
         raise IntegrationError("RETURN_CODE_NOT_CONFIGURED")
+    item = services.found_item(session, found_item_id)
+    require_operational(session, services.registration(session, item.registration_id).kiosk_id)
     authorize_return_code(session, attempt_id, found_item_id)
     assignment = services.latest_assignment(session, found_item_id)
     if assignment is None or assignment.status != "stored" or assignment.ended_at is not None:

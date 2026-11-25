@@ -237,7 +237,9 @@ Pi가 [MQTT 규약](mqtt-protocol.md)으로 보낸 센서 상태와 이상 상�
 ```
 
 - `code`는 규약 4절의 6종이지만 그 밖의 값도 올 수 있다. 모르는 `code`는 `message`를 그대로 보여 준다.
-- 보관 기간(기본 14일)이 지난 경고는 지워진다. 경고를 해소 처리하는 API는 없다.
+- 경고 조회는 `unresolved_only` 필터와 `resolved_at`을 지원한다. 오래된 미조치 warning만 기본 14일 후 정리하며 alarm과 조치 이력은 보존한다.
+- `GET /api/kiosks/{id}/operation-status`로 `blocked`, `active_alarm_count`, `alarms`를 조회한다. 페이지 진입 시각과 관계없이 모든 미해결 alarm이 해당 키오스크를 차단한다. 업무 변경 요청은 `423 KIOSK_ALARM_ACTIVE`로 거부한다.
+- 관리자는 `GET /api/admin/session`, `GET /api/admin/alerts?kiosk_id=...`, `POST /api/admin/alerts/{id}/resolve`를 사용한다. 해결 입력은 `{confirmed:true,note:"조치 내용"}`이며 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 인증이 필요하다. 전체 계약·인증·전환 조건은 [F14](../backend/docs/functional-spec.md#f14-운영-중단과-관리자-조치)를 따른다.
 - `MQTT_HOST`를 설정하지 않은 서버에서는 두 경로가 정상 응답하지만 내용이 비어 있다.
 
 ## AI 통신 상태

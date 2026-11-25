@@ -197,10 +197,14 @@ class DeviceAlert(Entity, Base):
     message: Mapped[str | None] = mapped_column(String(500))
     detail: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[str | None] = mapped_column(String(100))
+    resolution_note: Mapped[str | None] = mapped_column(String(2000))
     __table_args__ = (
         CheckConstraint("severity IN ('alarm','warning')", name="device_alert_severity"),
         CheckConstraint("device IN ('capture','locker')", name="device_alert_device"),
         CheckConstraint("locker_number IS NULL OR locker_number > 0", name="device_alert_locker"),
         UniqueConstraint("kiosk_id", "code", "locker_number", "reported_at", name="uq_device_alert_report"),
         Index("ix_device_alerts_recent", "kiosk_id", "reported_at"),
+        Index("ix_device_alerts_unresolved", "kiosk_id", "severity", "resolved_at"),
     )

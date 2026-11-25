@@ -8,11 +8,11 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(path, { method = 'GET', body, signal } = {}) {
+export async function api(path, { method = 'GET', body, signal, headers = {} } = {}) {
   signal?.throwIfAborted();
-  const init = { method, signal };
+  const init = { method, signal, headers, cache: 'no-store' };
   if (body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json' };
+    init.headers = { ...headers, 'Content-Type': 'application/json' };
     init.body = JSON.stringify(body);
   }
   let res, text;

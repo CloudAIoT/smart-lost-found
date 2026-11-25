@@ -20,6 +20,7 @@ from app.db import Base, get_session
 from app.device_telemetry import apply_message, parse_topic, prune_alerts
 from app.errors import BusinessError
 from app.main import app
+from app.kiosk_operations import resolve_alert
 from app.models import DeviceAlert, DeviceState, FoundItem, Kiosk, Registration, ReturnCode, StorageAssignment
 from app.services import issue_return_code, search_stored_items
 
@@ -154,6 +155,12 @@ def test_item_missing_closes_the_assignment_and_revokes_unspent_codes(env, code_
         assert session.query(DeviceAlert).count() == 1
 
     refused = env.client.post("/api/pickup/open", json={"code": code, "kiosk_id": env.kiosk_id})
+    assert refused.status_code == 423
+    assert refused.json()["detail"]["code"] == "KIOSK_ALARM_ACTIVE"
+    with Session(env.engine) as session:
+        resolve_alert(session, session.scalar(select(DeviceAlert.id)), "test-operator", "Incident secured; item remains missing")
+        assert session.get(FoundItem, item_id).status == "missing"
+    refused = env.client.post("/api/pickup/open", json={"code": code, "kiosk_id": env.kiosk_id})
     assert refused.status_code == 409
     assert refused.json()["detail"]["code"] == "ITEM_NOT_STORED"
 
@@ -262,15 +269,20 @@ def test_unknown_kiosk_is_recorded_without_failing(telemetry):
     assert telemetry.session.query(DeviceState).one().connection == "online"
 
 
-def test_prune_drops_only_old_alerts(telemetry):
+def test_prune_keeps_all_alarms_and_resolution_audits(telemetry):
     session = telemetry.session
     now = datetime.now(timezone.utc)
     for age_days, code in ((40, "TAMPER"), (1, "FORCED_OPEN")):
         session.add(DeviceAlert(kiosk_id=KIOSK_ID, code=code, severity="alarm", device="locker",
                                 reported_at=now - timedelta(days=age_days)))
+    session.add(DeviceAlert(kiosk_id=KIOSK_ID, code="OLD_WARNING", severity="warning", device="capture",
+                            reported_at=now - timedelta(days=40)))
+    session.add(DeviceAlert(kiosk_id=KIOSK_ID, code="REVIEWED_WARNING", severity="warning", device="capture",
+                            reported_at=now - timedelta(days=40), resolved_at=now, resolved_by="operator",
+                            resolution_note="Reviewed"))
     session.commit()
     assert prune_alerts(session, 14) == 1
-    assert session.query(DeviceAlert).one().code == "FORCED_OPEN"
+    assert {row.code for row in session.query(DeviceAlert)} == {"FORCED_OPEN", "TAMPER", "REVIEWED_WARNING"}
 
 
 def test_read_apis_expose_state_and_alerts(telemetry):

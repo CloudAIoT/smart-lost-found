@@ -5,9 +5,9 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
-    // 백엔드에 CORS 설정이 없어 개발 서버에서 '/api' 요청을 백엔드로 중계한다.
+    // 업무 API와 문서·상태 경로는 SPA fallback보다 먼저 백엔드로 보낸다.
     proxy: {
-      '/api': {
+      '^/(api(?:/|\\?|$)|docs(?:/|\\?|$)|(?:health|ready|openapi\\.json)(?:\\?|$))': {
         target: process.env.SLF_API_TARGET || 'http://52.78.12.168',
         changeOrigin: true,
       },

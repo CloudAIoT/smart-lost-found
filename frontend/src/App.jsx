@@ -871,16 +871,20 @@ function WebDeviceStatus({ kiosks, kiosksError, onBack }) {
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className="border-t border-slate-800">
-                <td className="py-2 px-3">{r.device === 'capture' ? '촬영 장치' : r.locker_number === 0 ? '보관함 컨트롤러' : `${r.locker_number}번 보관함`}</td>
+                <td className="py-2 px-3">{r.device === 'capture' ? '촬영 장치' : r.locker_number == null ? '보관함 컨트롤러' : `${r.locker_number}번 보관함`}</td>
                 <td className="py-2 px-3">
-                  <span className={`inline-flex items-center gap-1.5 ${r.connection === 'online' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${r.connection === 'online' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                    {r.connection === 'online' ? '온라인' : '오프라인'}
-                  </span>
+                  {r.connection == null ? (
+                    <span className="text-slate-500">-</span>
+                  ) : (
+                    <span className={`inline-flex items-center gap-1.5 ${r.connection === 'online' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${r.connection === 'online' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                      {r.connection === 'online' ? '온라인' : '오프라인'}
+                    </span>
+                  )}
                 </td>
                 <td className="py-2 px-3">{r.door === 'open' ? '열림' : r.door === 'closed' ? '닫힘' : '-'}</td>
                 <td className="py-2 px-3">{r.weight_g ?? '-'}</td>
-                <td className="py-2 px-3">{r.item ? '감지됨' : '-'}</td>
+                <td className="py-2 px-3">{r.item === 'present' ? '감지됨' : '-'}</td>
                 <td className="py-2 px-3 text-slate-500">{r.updated_at ? new Date(r.updated_at).toLocaleTimeString('ko-KR') : '-'}</td>
               </tr>
             ))}
@@ -1060,14 +1064,13 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
   // 수령 상태
   const [code, setCode] = useState('');
   const [pickup, setPickup] = useState(null);
-  const [pickupReady, setPickupReady] = useState(false); // 센서가 개방→폐쇄를 감지하면 true (수령 완료 버튼 활성화)
   const [pickupBlocked, setPickupBlocked] = useState(false); // ITEM_STILL_INSIDE(409) 또는 경고 목록의 ITEM_NOT_TAKEN
 
   // 장치 경고·상태
   const [alerts, setAlerts] = useState([]);
   const alertsSinceRef = useRef(null);
+  const dismissedAlertIdsRef = useRef(new Set()); // '확인'을 누른 경고 id. since가 같은 값을 다시 줘도 재노출하지 않는다
   const pickupOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_TAKEN 경고만 본다
-  const pickupDoorSeenOpenRef = useRef(false); // 수령 중 센서가 '열림'을 감지했는지(개방→폐쇄 판정용)
   const depositOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_DEPOSITED 경고만 본다
   const [deviceStatus, setDeviceStatus] = useState([]); // GET /kiosks/{id}/device-status (장치 온라인/오프라인)
 
@@ -1085,9 +1088,12 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
   // 장치 경고 폴링: GET /api/alerts?kiosk_id=&since= (backend recent_alerts).
   // 응답 필드: { id, kiosk_id, code, severity, device, locker_number, message, detail, reported_at }.
   // 키오스크를 바꾸면 이전 키오스크의 경고·since 기준을 비우고 새로 시작한다.
+  // since를 null로 두면 지난 경고까지 전부 내려오므로, 화면을 연 시각부터로 시작한다.
+  // '확인'한 경고는 id를 기억해 두어, 같은 since로 서버가 그 경고를 다시 돌려줘도 재노출하지 않는다.
   useEffect(() => {
     setAlerts([]);
-    alertsSinceRef.current = null;
+    dismissedAlertIdsRef.current = new Set();
+    alertsSinceRef.current = new Date().toISOString();
     if (!kioskId) return;
     let cancelled = false;
     const poll = async () => {
@@ -1099,9 +1105,11 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
         if (cancelled || list.length === 0) return;
         const latest = list.map((a) => a.reported_at).filter(Boolean).sort().pop();
         if (latest) alertsSinceRef.current = latest;
+        const fresh = list.filter((a) => !dismissedAlertIdsRef.current.has(a.id));
+        if (fresh.length === 0) return;
         setAlerts((prev) => {
           const seen = new Set(prev.map((a) => a.id));
-          return [...list.filter((a) => !seen.has(a.id)), ...prev].slice(0, 5);
+          return [...fresh.filter((a) => !seen.has(a.id)), ...prev].slice(0, 5);
         });
       } catch {
         // 경고 조회 실패는 화면 흐름을 막지 않는다.
@@ -1121,22 +1129,8 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     if (!(step === 'pickup-open' && pickup?.locker_number && !pickup?.dev)) return;
     const hit = alerts.some((a) => a.code === 'ITEM_NOT_TAKEN' && a.locker_number === pickup.locker_number
       && (!pickupOpenedAtRef.current || a.reported_at >= pickupOpenedAtRef.current));
-    if (hit) {
-      setPickupBlocked(true);
-      setPickupReady(false);
-    }
+    if (hit) setPickupBlocked(true);
   }, [alerts, step, pickup?.locker_number, pickup?.dev]);
-
-  // 수령 - 보관함 열림 화면에서, 장치 상태(door)가 개방→폐쇄로 바뀐 것을 감지하면
-  // (남은 물건 경고가 없는 한) '수령 완료' 버튼을 활성화한다. 체크박스 자가 신고 대신 센서 판정을 따른다.
-  useEffect(() => {
-    if (!(step === 'pickup-open' && pickup?.locker_number && !pickup?.dev)) return;
-    const row = deviceStatus.find((d) => d.locker_number === pickup.locker_number);
-    if (!row?.door) return;
-    if (pickupOpenedAtRef.current && row.updated_at && row.updated_at < pickupOpenedAtRef.current) return;
-    if (row.door === 'open') pickupDoorSeenOpenRef.current = true;
-    if (row.door === 'closed' && pickupDoorSeenOpenRef.current && !pickupBlocked) setPickupReady(true);
-  }, [deviceStatus, step, pickup?.locker_number, pickup?.dev, pickupBlocked]);
 
   // 등록 - 보관함 개방 화면에서, 경고 목록에 이 보관함의 ITEM_NOT_DEPOSITED가 있으면 투입 안내를 띄운다.
   useEffect(() => {
@@ -1187,8 +1181,6 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
     setDepositBlocked(false);
     setCode('');
     setPickup(null);
-    setPickupReady(false);
-    pickupDoorSeenOpenRef.current = false;
     setPickupBlocked(false);
   };
 
@@ -1344,8 +1336,6 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       setInlineError('');
       setPickup({ found_item_id: null, kiosk_id: kioskId, locker_number: 0, dev: true });
       setPickupBlocked(false);
-      pickupDoorSeenOpenRef.current = false;
-      setPickupReady(true); // 개발자 테스트 OTP는 센서 연동이 없어 즉시 활성화한다.
       pickupOpenedAtRef.current = new Date().toISOString();
       setStep('pickup-open');
       return;
@@ -1356,8 +1346,6 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
         const data = await api('/pickup/open', { method: 'POST', body: { code: normalized, kiosk_id: kioskId } });
         setPickup(data);
         setPickupBlocked(false);
-        setPickupReady(false);
-        pickupDoorSeenOpenRef.current = false;
         pickupOpenedAtRef.current = new Date().toISOString();
         setStep('pickup-open');
       },
@@ -1470,7 +1458,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
       {/* 장치 온라인/오프라인 (GET /api/kiosks/{kiosk_id}/device-status) */}
       {deviceStatus.length > 0 && (
         <div className="flex flex-wrap gap-3 pt-2 text-[11px] text-slate-400">
-          {deviceStatus.filter((d) => d.locker_number === 0).map((d) => (
+          {deviceStatus.filter((d) => d.locker_number == null).map((d) => (
             <span key={d.device} className="inline-flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${d.connection === 'online' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
               {d.device === 'capture' ? '촬영 장치' : '보관함 컨트롤러'} {d.connection === 'online' ? '온라인' : '오프라인'}
@@ -1490,8 +1478,15 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
               <div key={a.id ?? i} className={`flex items-center justify-between gap-2 border rounded-lg px-3 py-2 text-xs ${cls}`}>
                 <span className="flex items-center gap-1.5">
                   <TriangleAlert size={13} /> {ALERT_LABELS[a.code] || a.message || a.code || '알 수 없는 경고'}
+                  {a.locker_number ? ` · ${a.locker_number}번` : ''}
                 </span>
-                <button onClick={() => setAlerts((prev) => prev.filter((_, j) => j !== i))} className="text-[11px] underline shrink-0">
+                <button
+                  onClick={() => {
+                    if (a.id != null) dismissedAlertIdsRef.current.add(a.id);
+                    setAlerts((prev) => prev.filter((_, j) => j !== i));
+                  }}
+                  className="text-[11px] underline shrink-0"
+                >
                   확인
                 </button>
               </div>
@@ -1837,11 +1832,11 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
             </button>
           ) : (
             <button
-              disabled={disabled || !pickupReady}
+              disabled={disabled}
               onClick={completePickup}
               className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow"
             >
-              {pickupReady ? '수령 완료' : '문 닫힘 감지 대기 중...'}
+              수령 완료
             </button>
           )}
         </div>

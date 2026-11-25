@@ -62,6 +62,18 @@ def test_fake_device_is_absent_unless_requested(tmp_path):
     assert "DEV_FAKE_DEVICE=true" in (tmp_path / "backend.env").read_text()
 
 
+def test_admin_credentials_are_optional_and_only_reach_backend(tmp_path):
+    config = payload()
+    render(config, tmp_path)
+    assert "ADMIN_" not in (tmp_path / "backend.env").read_text()
+    config.update(ADMIN_USERNAME="test-operator", ADMIN_PASSWORD='test$with#"quotes')
+    render(config, tmp_path)
+    backend = (tmp_path / "backend.env").read_text()
+    assert f'ADMIN_USERNAME={config["ADMIN_USERNAME"]}\n' in backend
+    assert f'ADMIN_PASSWORD={config["ADMIN_PASSWORD"]}\n' in backend
+    assert "ADMIN_" not in (tmp_path / "db.env").read_text()
+
+
 def test_pi_settings_are_optional_and_render_when_given(tmp_path):
     config = payload()
     config["COMMAND_TTL_SECONDS"] = "30"

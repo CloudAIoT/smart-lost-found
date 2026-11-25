@@ -146,4 +146,6 @@ jobs:
           PI_DEVICES: ${{ secrets.PI_DEVICES }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: python deploy/publish.py

@@ -1068,8 +1068,8 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
   // 장치 경고·상태
   const [alerts, setAlerts] = useState([]);
-  const alertsSinceRef = useRef(null);
-  const dismissedAlertIdsRef = useRef(new Set()); // '확인'을 누른 경고 id. since가 같은 값을 다시 줘도 재노출하지 않는다
+  const alertsSinceRef = useRef(null); // 화면 진입 시각에 한 번만 고정한다(이후 전진시키지 않음 — F14 요청사항 종합반영2)
+  const seenAlertIdsRef = useRef(new Set()); // 한 번이라도 받은 경고 id 전체. 표시/해제 여부와 무관하게 재노출을 막는다.
   const pickupOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_TAKEN 경고만 본다
   const depositOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_DEPOSITED 경고만 본다
   const [deviceStatus, setDeviceStatus] = useState([]); // GET /kiosks/{id}/device-status (장치 온라인/오프라인)
@@ -1085,32 +1085,41 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
   const kiosk = kiosks.find((k) => k.id === kioskId);
 
-  // 장치 경고 폴링: GET /api/alerts?kiosk_id=&since= (backend recent_alerts).
+  // 장치 경고 폴링: GET /api/alerts?kiosk_id=&since=&limit=&offset= (backend recent_alerts).
   // 응답 필드: { id, kiosk_id, code, severity, device, locker_number, message, detail, reported_at }.
-  // 키오스크를 바꾸면 이전 키오스크의 경고·since 기준을 비우고 새로 시작한다.
-  // since를 null로 두면 지난 경고까지 전부 내려오므로, 화면을 연 시각부터로 시작한다.
-  // '확인'한 경고는 id를 기억해 두어, 같은 since로 서버가 그 경고를 다시 돌려줘도 재노출하지 않는다.
+  // F14 요청사항 종합반영2: since는 화면 진입 시각에 한 번만 고정하고 이후 전진시키지 않는다(늦게 들어오는 경고를 놓치지 않기 위함).
+  // since가 고정이라 누적 건수가 backend limit(기본 50, 최대 200)을 넘을 수 있어 offset으로 끝까지 이어 받는다.
+  // 중복 제거는 화면 표시·'확인' 여부와 무관하게, 지금까지 받은 적 있는 id 전체(seenAlertIdsRef)로 판단한다.
   useEffect(() => {
     setAlerts([]);
-    dismissedAlertIdsRef.current = new Set();
+    seenAlertIdsRef.current = new Set();
     alertsSinceRef.current = new Date().toISOString();
     if (!kioskId) return;
     let cancelled = false;
+    const since = alertsSinceRef.current;
+    const fetchAllSinceEntry = async () => {
+      const collected = [];
+      let offset = 0;
+      const limit = 200;
+      for (;;) {
+        const data = await api(`/alerts?kiosk_id=${kioskId}&since=${encodeURIComponent(since)}&limit=${limit}&offset=${offset}`);
+        const list = Array.isArray(data) ? data : [];
+        collected.push(...list);
+        if (list.length < limit) break;
+        offset += limit;
+      }
+      return collected;
+    };
     const poll = async () => {
       try {
-        const since = alertsSinceRef.current;
-        const q = since ? `&since=${encodeURIComponent(since)}` : '';
-        const data = await api(`/alerts?kiosk_id=${kioskId}${q}`);
-        const list = Array.isArray(data) ? data : [];
+        const list = await fetchAllSinceEntry();
         if (cancelled || list.length === 0) return;
-        const latest = list.map((a) => a.reported_at).filter(Boolean).sort().pop();
-        if (latest) alertsSinceRef.current = latest;
-        const fresh = list.filter((a) => !dismissedAlertIdsRef.current.has(a.id));
+        const fresh = list.filter((a) => a.id != null && !seenAlertIdsRef.current.has(a.id));
         if (fresh.length === 0) return;
-        setAlerts((prev) => {
-          const seen = new Set(prev.map((a) => a.id));
-          return [...fresh.filter((a) => !seen.has(a.id)), ...prev].slice(0, 5);
-        });
+        fresh.forEach((a) => seenAlertIdsRef.current.add(a.id));
+        setAlerts((prev) => [...fresh, ...prev]
+          .sort((a, b) => (b.reported_at || '').localeCompare(a.reported_at || ''))
+          .slice(0, 5));
       } catch {
         // 경고 조회 실패는 화면 흐름을 막지 않는다.
       }
@@ -1481,10 +1490,7 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
                   {a.locker_number ? ` · ${a.locker_number}번` : ''}
                 </span>
                 <button
-                  onClick={() => {
-                    if (a.id != null) dismissedAlertIdsRef.current.add(a.id);
-                    setAlerts((prev) => prev.filter((_, j) => j !== i));
-                  }}
+                  onClick={() => setAlerts((prev) => prev.filter((_, j) => j !== i))}
                   className="text-[11px] underline shrink-0"
                 >
                   확인

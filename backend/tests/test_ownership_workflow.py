@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from contextlib import nullcontext
 from datetime import timedelta
 from threading import Barrier, Event, current_thread
@@ -12,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.ai_ownership_verification import search, search_jobs, workflow
+from app.ai_ownership_verification import search, search_jobs, workflow, workflow_ai
 from app.ai_ownership_verification.api import get_ownership_ai, get_search_ai, get_session_factory
 from app.ai_ownership_verification.search import normalized
 from app.ai_ownership_verification.workflow import get_ownership_result
@@ -26,6 +27,11 @@ from app.errors import IntegrationError
 from app.main import app
 from app.models import (DeviceCommand, FoundItem, ItemImage, Kiosk, Locker, OwnershipAttempt, Registration,
                         ReturnCode, StorageAssignment, now)
+
+EXPECTED_GEMINI_ATTEMPTS = [
+    "gemini-3.5-flash-lite", "gemini-3.5-flash-lite",
+    "gemini-4-hydrogen", "gemini-4-hydrogen",
+]
 
 
 class FakeAI:
@@ -730,41 +736,41 @@ def test_unmapped_english_label_is_translated_and_graded_against_registered_valu
     assert submit(ownership, view, "결이 있는 알루미늄 표면").json()["status"] == "photo_confirmation"
 
 
-def test_gemini_retries_translation_if_labels_are_english_or_missing():
+@pytest.mark.parametrize("success_on_attempt", [2, 4])
+def test_gemini_retries_translation_if_labels_are_english_or_missing(success_on_attempt):
     settings = GeminiSettings(_env_file=None, gemini_api_key="test-key")
-    responses = iter([{"labels": ["Felt", "Mesh"]}, {"labels": ["펠트"]}, {"labels": ["펠트", "그물망"]}])
+    failed = [{"labels": ["Felt", "Mesh"]}, {"labels": ["펠트"]}, {"labels": ["펠트", "Mesh"]}]
+    responses = iter([*failed[:success_on_attempt - 1], {"labels": ["펠트", "그물망"]}])
     calls = []
 
     def handler(request):
-        calls.append(request.url.path.rsplit("/", 1)[-1])
+        calls.append(request.url.path.rsplit("/", 1)[-1].split(":", 1)[0])
         data = json.loads(json.loads(request.content)["contents"][0]["parts"][0]["text"])
         assert data == {"feature_type": "material", "labels": ["Felt", "Mesh"]}
         return gemini_json(next(responses))
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
         assert GeminiWorkflowAI(settings, http).localize("material", ["Felt", "Mesh"]) == ["펠트", "그물망"]
-    assert calls == ["gemini-4-hydrogen:generateContent", "gemini-3.8-flash:generateContent",
-                     "gemini-3.5-flash-lite:generateContent"]
+    assert calls == EXPECTED_GEMINI_ATTEMPTS[:success_on_attempt]
 
 
 def test_gemini_extracts_only_literal_user_clues():
     settings = GeminiSettings(_env_file=None, gemini_api_key="test-key")
-    responses = iter([gemini_json({}), *[gemini_json({"brand": "Carhartt"}) for _ in range(3)]])
+    responses = iter([gemini_json({}), *[gemini_json({"brand": "Carhartt"}) for _ in range(4)]])
     models = []
 
     def handler(request):
         assert request.headers["x-goog-api-key"] == "test-key"
-        models.append(request.url.path.rsplit("/", 1)[-1])
+        models.append(request.url.path.rsplit("/", 1)[-1].split(":", 1)[0])
         return next(responses)
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         ai = GeminiWorkflowAI(settings, client)
         assert not ai.extract("물건을 잃어버렸어요").model_dump(exclude_none=True)
-        assert models == ["gemini-3.5-flash-lite:generateContent"]
+        assert models == ["gemini-3.5-flash-lite"]
         with pytest.raises(IntegrationError, match="OWNERSHIP_UNGROUNDED_CLUE"):
             ai.extract("검은색 필통")
-    assert models[1:] == ["gemini-3.5-flash-lite:generateContent", "gemini-3.1-flash-lite:generateContent",
-                         "gemini-2.5-flash-lite:generateContent"]
+    assert models[1:] == EXPECTED_GEMINI_ATTEMPTS
 
 
 @pytest.mark.parametrize("mode", ["matched", "no_matches", "incomplete"])
@@ -773,7 +779,7 @@ def test_gemini_search_sends_explicit_unknowns_and_checks_full_batch(mode):
     calls = []
 
     def handler(request):
-        calls.append(request.url.path)
+        calls.append(request.url.path.rsplit("/", 1)[-1].split(":", 1)[0])
         payload = json.loads(request.content)
         sent = json.loads(payload["contents"][0]["parts"][0]["text"])
         assert sent == {
@@ -801,45 +807,55 @@ def test_gemini_search_sends_explicit_unknowns_and_checks_full_batch(mode):
         if mode == "incomplete":
             with pytest.raises(IntegrationError, match="OWNERSHIP_AI_INVALID_MATCHES"):
                 ai.similar_items(clues, items)
-            assert len(calls) == 3
+            assert calls == EXPECTED_GEMINI_ATTEMPTS
             return
         result = ai.similar_items(clues, items)
     assert [item.item for item in result] == ([1, 2] if mode == "matched" else [])
-    assert len(calls) == 1
+    assert calls == ["gemini-3.5-flash-lite"]
 
 
 def test_ownership_uses_each_stage_model_chain_until_a_valid_response(ownership):
     settings = GeminiSettings(_env_file=None, gemini_api_key="test-key", gemini_model="registration-only")
     calls = []
+    attempts = Counter()
 
     def handler(request):
         model = request.url.path.rsplit("/", 1)[-1].split(":", 1)[0]
         payload = json.loads(request.content)
         data = json.loads(payload["contents"][0]["parts"][0]["text"])
-        if "text" in data:
-            calls.append(("extract", model))
-            if model == "gemini-3.5-flash-lite":
-                return httpx.Response(429)
-            if model == "gemini-3.1-flash-lite":
-                return gemini_json({"category": "우산"})
-            return gemini_json({"category": "필통", "color": "검은색", "location": "도서관"})
         if model == "gemini-4-hydrogen":
             assert payload["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "LOW"}
-        if "items" in data:
-            calls.append(("search", model))
+        if "text" in data:
+            operation = "extract"
+        elif "items" in data:
+            operation = "search"
+        else:
+            operation = "options"
+        calls.append((operation, model))
+        attempts[operation] += 1
+        attempt = attempts[operation]
+        if attempt == 3:
+            return httpx.Response(503)
+
+        if operation == "extract":
+            if attempt == 1:
+                return httpx.Response(429)
+            if attempt == 2:
+                return gemini_json({"category": "우산"})
+            return gemini_json({"category": "필통", "color": "검은색", "location": "도서관"})
+        if operation == "search":
             rows = [{"item": entry["item"], "decision": "match", "matched_fields": ["category"]}
                     for entry in data["items"]]
-            if model == "gemini-4-hydrogen":
+            if attempt == 1:
                 rows.pop()
-            elif model == "gemini-3.8-flash":
+            elif attempt == 2:
                 rows[0]["matched_fields"] = ["brand"]
             return gemini_json({"results": rows})
 
-        calls.append(("options", model))
-        if model == "gemini-4-hydrogen":
+        if attempt == 1:
             return gemini_json({"labels": data["known_labels"]})
-        if model == "gemini-3.8-flash":
-            return httpx.Response(503)
+        if attempt == 2:
+            return httpx.Response(429)
         return gemini_json({"labels": ["노란 리본", "작은 은색 구슬", "주황색 고리"]})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
@@ -851,10 +867,9 @@ def test_ownership_uses_each_stage_model_chain_until_a_valid_response(ownership)
         "파란 원형 핀", "빨간 사각 핀", "노란 리본", "작은 은색 구슬", "주황색 고리",
     }
     assert calls == [
-        ("extract", "gemini-3.5-flash-lite"), ("extract", "gemini-3.1-flash-lite"),
-        ("extract", "gemini-2.5-flash-lite"), ("search", "gemini-4-hydrogen"),
-        ("search", "gemini-3.8-flash"), ("search", "gemini-3.5-flash-lite"),
-        ("options", "gemini-4-hydrogen"), ("options", "gemini-3.8-flash"), ("options", "gemini-3.5-flash-lite"),
+        (operation, model)
+        for operation in ("extract", "search", "options")
+        for model in EXPECTED_GEMINI_ATTEMPTS
     ]
 
 
@@ -944,12 +959,15 @@ def test_candidate_batches_are_searched_in_parallel_and_reported(ownership, monk
     assert reports == [(0, 2), (2, 2)]
 
 
-def test_the_search_budget_stops_model_fallback_before_the_next_call(ownership):
+def test_the_search_budget_stops_model_fallback_before_the_next_call(monkeypatch):
     settings = GeminiSettings(_env_file=None, gemini_api_key="test-key", gemini_model="gemini-3.5-flash-lite")
     calls = []
+    clock = SimpleNamespace(now=0)
+    monkeypatch.setattr(workflow_ai, "monotonic", lambda: clock.now)
 
     def handler(request):
-        calls.append(request.url.path)
+        calls.append(request.url.path.rsplit("/", 1)[-1].split(":", 1)[0])
+        clock.now += 5
         return httpx.Response(429)
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http:
@@ -961,5 +979,4 @@ def test_the_search_budget_stops_model_fallback_before_the_next_call(ownership):
         ai = GeminiWorkflowAI(settings, http, budget_seconds=5)
         with pytest.raises(IntegrationError, match="OWNERSHIP_AI_RATE_LIMITED"):
             ai.extract("검은색 필통을 잃어버렸어요")
-    # Three extraction models are still tried while the budget lasts.
-    assert len(calls) == 3
+    assert calls == ["gemini-3.5-flash-lite"]

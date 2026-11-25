@@ -5,7 +5,7 @@ import { Link, Outlet, useMatch, useOutletContext } from 'react-router-dom';
 import { loadAllKiosks, useKioskSetting } from './kioskSettings.js';
 import KioskNavigationGuard from './KioskNavigationGuard.jsx';
 import KioskOperationGuard from './KioskOperationGuard.jsx';
-import AdminAlerts from './AdminAlerts.jsx';
+import AdminDashboard from './AdminDashboard.jsx';
 import { aiStatusText as formatAiStatus, analysisPendingText, analyzeAndOpenRegistration, ownershipPendingText, waitForOwnership } from './aiProgress.js';
 import {
   Archive,
@@ -798,31 +798,86 @@ function WebOwnerNotice({ kind, onRetry, onHome }) {
 /* ============================================================
  * 운영자 장치 상태
  * ============================================================ */
-// 장치 상태 보기(관리자): GET /api/kiosks/{id}/device-status, GET /api/alerts 를 보여주는 간단한 표.
-// 프론트 자체 판정 없이 백엔드가 집계한 상태를 그대로 보여준다.
-function WebDeviceStatus({ kiosks, kiosksError }) {
-  const [kioskId, setKioskId] = useState('');
+// 키오스크 한 대의 장치 상태(관리자): GET /api/kiosks/{id}/device-status.
+// 프론트 자체 판정 없이 백엔드가 집계한 상태를 그대로 보여준다. 값이 없으면 '상태 모름'이다.
+// 라즈베리파이 장치 행과 보관함 행은 채워지는 항목이 서로 다르다. 한 표에 섞으면 빈 칸이 열과
+// 어긋나므로, 장치 둘은 카드로 받은 값만 보여 주고 칸은 표로 보여 준다. 촬영 상자는 연결과 함께
+// 무게·물건감지를 보내고(CAPTURE_ITEM_LEFT의 근거), 보관함 컨트롤러는 연결만 보낸다.
+const DEVICE_NAMES = { capture: '촬영 장치', locker: '보관함 컨트롤러' };
+const CONNECTION_STYLES = {
+  online: { label: '온라인', text: 'text-emerald-400', dot: 'bg-emerald-500' },
+  offline: { label: '오프라인', text: 'text-rose-400', dot: 'bg-rose-500' },
+};
+const UNKNOWN_STATE = { label: '상태 모름', text: 'text-slate-500', dot: 'bg-slate-500' };
+const TH = 'px-3 py-2 font-medium';
+const TD = 'px-3 py-2 whitespace-nowrap overflow-hidden text-ellipsis';
+
+function ConnectionCell({ value }) {
+  const style = CONNECTION_STYLES[value] || UNKNOWN_STATE;
+  return (
+    <span className={`inline-flex items-center gap-1.5 ${style.text}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
+      {style.label}
+    </span>
+  );
+}
+
+function updatedText(row) {
+  return row.updated_at ? new Date(row.updated_at).toLocaleTimeString('ko-KR') : '-';
+}
+
+function itemText(value) {
+  return value === 'present' ? '감지됨' : value === 'empty' ? '비어 있음' : '상태 모름';
+}
+
+function doorText(value) {
+  return value === 'open' ? '열림' : value === 'closed' ? '닫힘' : '상태 모름';
+}
+
+function weightText(value) {
+  return typeof value === 'number' ? value.toLocaleString('ko-KR') : '-';
+}
+
+// 장치 하나. 보내지 않은 항목은 줄 자체를 만들지 않는다. 갱신시각은 아래에 붙여 두 카드가 맞물린다.
+function DeviceCard({ row }) {
+  return (
+    <section
+      aria-label={DEVICE_NAMES[row.device] || row.device || '알 수 없는 장치'}
+      className="h-full rounded-xl border border-slate-800 bg-slate-900/60 px-3.5 py-3 flex flex-col gap-2"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-white truncate">{DEVICE_NAMES[row.device] || row.device || '알 수 없는 장치'}</span>
+        <span className="text-[11px] shrink-0"><ConnectionCell value={row.connection} /></span>
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px] mt-auto">
+        {row.item != null && <>
+          <dt className="text-slate-500">물건감지</dt>
+          <dd className="text-slate-300 text-right">{itemText(row.item)}</dd>
+        </>}
+        {typeof row.weight_g === 'number' && <>
+          <dt className="text-slate-500">무게</dt>
+          <dd className="text-slate-300 text-right tabular-nums">{weightText(row.weight_g)} g</dd>
+        </>}
+        <dt className="text-slate-500">갱신시각</dt>
+        <dd className="text-slate-500 text-right">{updatedText(row)}</dd>
+      </dl>
+    </section>
+  );
+}
+
+function KioskDeviceStatus({ kioskId }) {
   const [rows, setRows] = useState([]);
-  const [alerts, setAlerts] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!kioskId && kiosks.length > 0) setKioskId(kiosks[0].id);
-  }, [kiosks, kioskId]);
 
   const load = useCallback(async (signal) => {
     if (!kioskId) return;
     setLoading(true);
-    setError('');
     try {
-      const [status, alertList] = await Promise.all([
-        api(`/kiosks/${kioskId}/device-status`, { signal }),
-        api(`/alerts?kiosk_id=${kioskId}`, { signal }),
-      ]);
+      const status = await api(`/kiosks/${kioskId}/device-status`, { signal });
       signal.throwIfAborted();
       setRows(Array.isArray(status) ? status : []);
-      setAlerts(Array.isArray(alertList) ? alertList.slice(0, 10) : []);
+      setError('');
     } catch (err) {
       if (!signal.aborted) setError(errorText(err));
     } finally {
@@ -837,81 +892,73 @@ function WebDeviceStatus({ kiosks, kiosksError }) {
     return () => { controller.abort(); clearInterval(t); };
   }, [load]);
 
+  // locker_number가 없는 행이 라즈베리파이 장치(촬영 장치·보관함 컨트롤러)다.
+  const devices = rows.filter((r) => r.locker_number == null);
+  const lockers = rows.filter((r) => r.locker_number != null)
+    .sort((a, b) => a.locker_number - b.locker_number);
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-xl font-bold text-white">장치 상태</h2>
-        <p className="text-xs text-slate-400 mt-1">키오스크별 보관함 센서 상태와 최근 경고를 확인합니다.</p>
+    <div className="space-y-4">
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h3 className="text-base font-bold text-white">장치 상태</h3>
+          <p className="text-xs text-slate-400 mt-1">
+            라즈베리파이 장치의 연결과 보관함 센서 값입니다. 보고된 값이 없는 항목은 '상태 모름'입니다.
+          </p>
+        </div>
+        <span className="text-[10px] text-slate-500 shrink-0">{loading ? '갱신 중...' : '10초마다 자동 갱신'}</span>
       </div>
-      {kiosksError && <p className="text-xs text-rose-300">{kiosksError}</p>}
-      <select
-        aria-label="조회할 키오스크"
-        value={kioskId}
-        onChange={(e) => setKioskId(e.target.value)}
-        className="bg-slate-900 border border-slate-700 rounded-md text-sm text-slate-200 px-3 py-2 focus:outline-none"
-      >
-        {kiosks.map((k) => (
-          <option key={k.id} value={k.id}>{k.name}</option>
-        ))}
-      </select>
       {error && <p className="text-xs text-rose-300">{error}</p>}
-      <div className="overflow-x-auto rounded-xl border border-slate-800">
-        <table className="w-full text-xs text-left text-slate-300">
-          <thead className="text-slate-500 uppercase text-[10px] bg-slate-900/60">
+
+      <div className="space-y-2">
+        <h4 className="text-[11px] font-semibold text-slate-400">라즈베리파이 장치</h4>
+        {devices.length === 0 ? (
+          <p className="rounded-xl border border-slate-800 bg-slate-900/60 px-3.5 py-3 text-xs text-slate-500">
+            장치 연결 상태가 아직 보고되지 않았습니다.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-stretch">
+            {devices.map((r, i) => <DeviceCard key={`device-${r.device}-${i}`} row={r} />)}
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <h4 className="text-[11px] font-semibold text-slate-400">보관함</h4>
+        <div className="overflow-x-auto rounded-xl border border-slate-800">
+        <table className="w-full table-fixed text-xs text-left text-slate-300 min-w-[28rem]">
+          <colgroup>
+            <col className="w-[28%]" />
+            <col className="w-[14%]" />
+            <col className="w-[16%]" />
+            <col className="w-[14%]" />
+            <col className="w-[28%]" />
+          </colgroup>
+          <thead className="text-slate-500 text-[10px] bg-slate-900/60">
             <tr>
-              <th className="py-2 px-3">장치</th>
-              <th className="py-2 px-3">연결</th>
-              <th className="py-2 px-3">문</th>
-              <th className="py-2 px-3">무게(g)</th>
-              <th className="py-2 px-3">물건감지</th>
-              <th className="py-2 px-3">갱신시각</th>
+              <th className={TH}>보관함</th>
+              <th className={TH}>문</th>
+              <th className={`${TH} text-right`}>무게(g)</th>
+              <th className={TH}>물건감지</th>
+              <th className={TH}>갱신시각</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className="border-t border-slate-800">
-                <td className="py-2 px-3">{r.device === 'capture' ? '촬영 장치' : r.locker_number === null ? '보관함 컨트롤러' : `${r.locker_number}번 보관함`}</td>
-                <td className="py-2 px-3">
-                  <span className={`inline-flex items-center gap-1.5 ${r.connection === 'online' ? 'text-emerald-400' : r.connection === 'offline' ? 'text-rose-400' : 'text-slate-500'}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${r.connection === 'online' ? 'bg-emerald-500' : r.connection === 'offline' ? 'bg-rose-500' : 'bg-slate-500'}`} />
-                    {r.connection === 'online' ? '온라인' : r.connection === 'offline' ? '오프라인' : '-'}
-                  </span>
-                </td>
-                <td className="py-2 px-3">{r.door === 'open' ? '열림' : r.door === 'closed' ? '닫힘' : '-'}</td>
-                <td className="py-2 px-3">{r.weight_g ?? '-'}</td>
-                <td className="py-2 px-3">{r.item === 'present' ? '감지됨' : r.item === 'empty' ? '비어 있음' : '-'}</td>
-                <td className="py-2 px-3 text-slate-500">{r.updated_at ? new Date(r.updated_at).toLocaleTimeString('ko-KR') : '-'}</td>
+            {lockers.map((r) => (
+              <tr key={`locker-${r.locker_number}`} className="border-t border-slate-800">
+                <td className={TD}>{r.locker_number}번</td>
+                <td className={TD}>{doorText(r.door)}</td>
+                <td className={`${TD} text-right tabular-nums`}>{weightText(r.weight_g)}</td>
+                <td className={TD}>{itemText(r.item)}</td>
+                <td className={`${TD} text-slate-500`}>{updatedText(r)}</td>
               </tr>
             ))}
-            {rows.length === 0 && !loading && (
-              <tr><td colSpan={6} className="py-3 px-3 text-center text-slate-500">표시할 장치 상태가 없습니다.</td></tr>
+            {lockers.length === 0 && (
+              <tr><td colSpan={5} className={`${TD} text-center text-slate-500`}>보관함 센서 상태가 아직 보고되지 않았습니다.</td></tr>
             )}
           </tbody>
         </table>
-      </div>
-      <div className="space-y-1.5">
-        <h3 className="text-xs font-semibold text-slate-400">최근 경고</h3>
-        {alerts.length === 0 ? (
-          <p className="text-xs text-slate-500">최근 경고가 없습니다.</p>
-        ) : (
-          alerts.map((a, i) => {
-            const cls = a.severity === 'alarm'
-              ? 'bg-rose-950/50 border-rose-500/50 text-rose-300'
-              : 'bg-amber-950/40 border-amber-500/40 text-amber-300';
-            return (
-              <div key={a.id ?? i} className={`flex items-center justify-between gap-2 border rounded-lg px-3 py-2 text-xs ${cls}`}>
-                <span className="flex items-center gap-1.5">
-                  <TriangleAlert size={13} /> {ALERT_LABELS[a.code] || a.message || a.code || '알 수 없는 경고'}
-                  {a.locker_number ? ` · ${a.locker_number}번` : ''}
-                  {a.resolved_at ? ' · 조치 완료' : ''}
-                </span>
-                <span className="text-[10px] text-slate-500 shrink-0">
-                  {a.reported_at ? new Date(a.reported_at).toLocaleTimeString('ko-KR') : ''}
-                </span>
-              </div>
-            );
-          })
-        )}
+        </div>
       </div>
     </div>
   );
@@ -2026,8 +2073,8 @@ export function KioskPage() {
 
 export function DeviceStatusPage() {
   const context = useOutletContext();
-  return <AdminAlerts {...context} labels={ALERT_LABELS}
-    renderDeviceStatus={(id) => <WebDeviceStatus key={id} {...context} kiosks={context.kiosks.filter((k) => k.id === id)} />} />;
+  return <AdminDashboard {...context} labels={ALERT_LABELS}
+    renderDeviceStatus={(id) => <KioskDeviceStatus key={id} kioskId={id} />} />;
 }
 
 export default function App() {

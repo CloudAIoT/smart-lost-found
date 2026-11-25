@@ -1,4 +1,5 @@
-import { test, expect, enterKiosk, openPickup, completion, posts, kioskA, kioskB, storageKey, loginAdmin } from './fixture.js';
+import { test, expect, enterKiosk, openPickup, completion, posts, kioskA, kioskB, storageKey,
+  kioskCard, loginAdmin, openKioskDetail } from './fixture.js';
 
 const alarm = (id, kiosk = kioskA) => ({ id, kiosk_id: kiosk, code: 'TAMPER', severity: 'alarm',
   locker_number: 2, message: '장치 점검이 필요합니다', reported_at: '2000-01-01T00:00:00Z' });
@@ -46,6 +47,8 @@ test('admin resolution in another tab releases only after all alarms, preserves 
   const admin = await context.newPage();
   await admin.goto('/admin/devices');
   await loginAdmin(admin);
+  await expect(kioskCard(admin)).toContainText('운영 중단');
+  await openKioskDetail(admin);
   await expect(admin.locator('article')).toHaveCount(2);
   await resolveFirst(admin);
   await expect(admin.locator('article')).toHaveCount(1);
@@ -85,6 +88,7 @@ test('failed admin resolution and failed status polling keep the kiosk blocked',
   const admin = await context.newPage();
   await admin.goto('/admin/devices');
   await loginAdmin(admin);
+  await openKioskDetail(admin);
   model.resolveError = true;
   const card = admin.locator('article').first();
   await card.getByLabel('조치 내용').fill('점검 완료');
@@ -94,8 +98,9 @@ test('failed admin resolution and failed status polling keep the kiosk blocked',
   await page.clock.runFor(2001);
   await expect(dialog(page)).toBeVisible();
   model.resolveError = false;
-  await resolveFirst(admin);
+  // 조회 실패를 먼저 만든다. 조치가 성공해도 키오스크가 운영 상태를 다시 확인하기 전에는 차단을 유지한다.
   model.operationError = true;
+  await resolveFirst(admin);
   await page.clock.runFor(2001);
   await expect(dialog(page)).toBeVisible();
   model.operationError = false;
@@ -152,6 +157,8 @@ test('admin-resolved warnings disappear on the kiosk and credentials are not per
   const admin = await context.newPage();
   await admin.goto('/admin/devices');
   await loginAdmin(admin);
+  await expect(kioskCard(admin)).toContainText('경고 있음');
+  await openKioskDetail(admin);
   const first = admin.locator('article').first();
   await first.getByLabel('조치 내용').fill('확인 및 조치 완료');
   await first.getByRole('checkbox').check();
@@ -164,16 +171,43 @@ test('admin-resolved warnings disappear on the kiosk and credentials are not per
   await expect(admin.getByRole('button', { name: '관리자 로그인', exact: true })).toBeVisible();
 });
 
-test('admin pagination and kiosk selection keep the device table on the reviewed kiosk', async ({ page, model }) => {
+test('the overview uses the aggregate API when the backend provides one', async ({ page, model }) => {
+  model.overview = [
+    { kiosk_id: kioskA, blocked: true, alarm_count: 3, warning_count: 1,
+      last_alert_at: '2026-11-25T02:00:00Z', devices: { total: 2, online: 1, offline: 1, unknown: 0 } },
+    { kiosk_id: kioskB, blocked: false, alarm_count: 0, warning_count: 0, last_alert_at: null,
+      devices: { total: 2, online: 2, offline: 0, unknown: 0 } },
+  ];
+  await page.goto('/admin/devices');
+  await loginAdmin(page);
+  const a = kioskCard(page, '테스트 키오스크 A');
+  await expect(a).toContainText('운영 중단');
+  await expect(a).toContainText('3건');
+  await expect(a).toContainText('장치 1/2 온라인');
+  await expect(kioskCard(page, '테스트 키오스크 B')).toContainText('정상');
+  // 집계 API가 있으면 공개 경고 목록을 직접 세지 않는다.
+  expect(model.requests.filter((r) => r.path === '/api/alerts')).toEqual([]);
+});
+
+test('the overview counts every kiosk and each detail view stays on the kiosk it opened', async ({ page, model }) => {
   model.alerts = Array.from({ length: 51 }, (_, i) => alarm(`page-${i}`));
   model.alerts.push(alarm('b-only', kioskB));
   await page.goto('/admin/devices');
   await loginAdmin(page);
+  await expect(page.getByText('운영 중단', { exact: false }).first()).toBeVisible();
+  await expect(kioskCard(page, '테스트 키오스크 A')).toContainText('51건');
+  await expect(kioskCard(page, '테스트 키오스크 B')).toContainText('1건');
+  const devicePath = () => model.requests.filter((r) => r.path.endsWith('/device-status')).at(-1)?.path;
+  await openKioskDetail(page, '테스트 키오스크 A');
   await expect(page.locator('article')).toHaveCount(50);
   await page.getByRole('button', { name: '다음 경고' }).click();
   await expect(page.locator('article')).toHaveCount(1);
-  await page.getByLabel('조치 대상 키오스크').selectOption(kioskB);
+  await expect.poll(devicePath).toContain(kioskA);
+  await page.getByRole('button', { name: '전체 키오스크 현황으로' }).click();
+  await openKioskDetail(page, '테스트 키오스크 B');
   await expect(page.locator('article')).toHaveCount(1);
-  await expect(page.getByLabel('조회할 키오스크')).toHaveValue(kioskB);
-  await expect.poll(() => model.requests.filter((r) => r.path.endsWith('/device-status')).at(-1)?.path).toContain(kioskB);
+  await expect.poll(devicePath).toContain(kioskB);
+  const listed = model.requests.filter((r) => r.path === '/api/admin/alerts');
+  expect(listed.every((r) => [kioskA, kioskB].includes(r.query.kiosk_id))).toBe(true);
+  expect(model.requests.some((r) => r.path === '/api/admin/kiosks/overview')).toBe(true);
 });

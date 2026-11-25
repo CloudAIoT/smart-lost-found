@@ -1,4 +1,5 @@
-import { test, expect, enterKiosk, openPickup, home, completion, posts, kioskA, regId, loginAdmin } from './fixture.js';
+import { test, expect, enterKiosk, openPickup, home, completion, posts, kioskA, regId,
+  loginAdmin, openKioskDetail } from './fixture.js';
 
 for (const sensor of ['no response', 'no reading', 'old closed reading']) {
   test(`pickup can complete with ${sensor}`, async ({ page, model }) => {
@@ -42,29 +43,39 @@ test('warning dedupe and fixed since survive Home and resume; warnings do not hi
   await expect(page.getByRole('heading', { name: '물건을 찾아가셨습니다' })).toBeVisible();
 });
 
-test('standalone device status supports reload, historical alerts and explicit sensor states', async ({ page, model }) => {
+test('the device tables separate Pi devices from lockers and show explicit sensor states', async ({ page, model }) => {
   model.devices = [
     { device: 'locker', locker_number: null, connection: 'online', item: null },
-    { device: 'capture', locker_number: null, connection: 'offline', item: null },
-    ...['online', 'offline', null].flatMap((connection, i) => ['present', 'empty', null].map((item, j) => ({ device: 'locker', locker_number: i * 3 + j + 1, connection, item, door: 'closed' }))),
+    // 촬영 상자는 연결과 함께 무게·물건감지를 보낸다. 보관함 컨트롤러는 연결만 보낸다.
+    { device: 'capture', locker_number: null, connection: 'offline', weight_g: 0, item: 'empty' },
+    { device: 'locker', locker_number: 1, connection: null, door: 'open', weight_g: 1234, item: 'present' },
+    { device: 'locker', locker_number: 2, connection: null, door: 'closed', weight_g: null, item: 'empty' },
+    { device: 'locker', locker_number: 3, connection: null, door: null, weight_g: null, item: null },
   ];
   model.alerts = [{ id: 'old', kiosk_id: kioskA, code: 'UNKNOWN', message: '과거 장치 경고', reported_at: '2000-01-01T00:00:00Z' }];
   await page.goto('/admin/devices');
   await loginAdmin(page);
-  await expect(page.getByRole('heading', { name: '장치 상태' })).toBeVisible();
   await page.reload();
   await loginAdmin(page);
+  await openKioskDetail(page);
+  await expect(page.getByRole('heading', { name: '장치 상태' })).toBeVisible();
+  // 장치는 받은 값만 카드로, 칸은 표로 보여 준다(빈 칸이 열과 어긋나지 않는다).
+  const controller = page.getByRole('region', { name: '보관함 컨트롤러' });
+  await expect(controller).toContainText('온라인');
+  await expect(controller).not.toContainText('물건감지');
+  await expect(controller).not.toContainText('무게');
+  const capture = page.getByRole('region', { name: '촬영 장치' });
+  await expect(capture).toContainText('오프라인');
+  await expect(capture).toContainText('비어 있음');
+  await expect(capture).toContainText('0 g');
+  const lockers = page.locator('table').locator('tbody tr');
+  await expect(lockers).toHaveCount(3);
+  await expect(lockers.nth(0).locator('td')).toHaveText(['1번', '열림', '1,234', '감지됨', '-']);
+  await expect(lockers.nth(1).locator('td')).toHaveText(['2번', '닫힘', '-', '비어 있음', '-']);
+  await expect(lockers.nth(2).locator('td')).toHaveText(['3번', '상태 모름', '-', '상태 모름', '-']);
+  // 관리자 화면은 과거 경고까지 본다. 키오스크 화면과 달리 since로 자르지 않는다.
   await expect(page.getByText('과거 장치 경고', { exact: true })).toBeVisible();
   expect(model.requests.filter((r) => r.path === '/api/alerts').every((r) => !r.query.since)).toBe(true);
-  const rows = page.locator('tbody tr');
-  await expect(rows).toHaveCount(model.devices.length);
-  for (let i = 0; i < model.devices.length; i++) {
-    const row = model.devices[i];
-    const cells = rows.nth(i).locator('td');
-    await expect(cells.nth(0)).toHaveText(row.locker_number === null ? (row.device === 'capture' ? '촬영 장치' : '보관함 컨트롤러') : `${row.locker_number}번 보관함`);
-    await expect(cells.nth(1)).toHaveText(row.connection === 'online' ? '온라인' : row.connection === 'offline' ? '오프라인' : '-');
-    await expect(cells.nth(4)).toHaveText(row.item === 'present' ? '감지됨' : row.item === 'empty' ? '비어 있음' : '-');
-  }
 });
 
 test('successful deposit releases the guard after both shots and completion', async ({ page, model }) => {

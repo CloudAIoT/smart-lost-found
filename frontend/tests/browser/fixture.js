@@ -39,6 +39,10 @@ export const test = base.extend({
       if (path.startsWith('/api/admin/')) {
         if (request.headers().authorization !== `Basic ${Buffer.from('operator:test-password').toString('base64')}`) return error('ADMIN_UNAUTHORIZED', 401);
         if (path === '/api/admin/session') return reply({ username: 'operator' });
+        if (path === '/api/admin/kiosks/overview') {
+          // 키오스크 현황 집계 API. 기본은 아직 없는 백엔드(404)로 두고 프론트 폴백을 검사한다.
+          return model.overview ? reply(model.overview) : reply({ detail: 'Not Found' }, 404);
+        }
         if (path === '/api/admin/alerts') {
           const list = model.alerts.filter((a) => a.kiosk_id === query.kiosk_id && (query.unresolved_only !== 'true' || !a.resolved_at));
           return reply(list.slice(Number(query.offset), Number(query.offset) + Number(query.limit)));
@@ -52,7 +56,9 @@ export const test = base.extend({
         }
       }
       if (path === '/api/alerts') {
-        const alerts = model.alerts.filter((a) => a.kiosk_id === query.kiosk_id && (!query.since || Date.parse(a.reported_at) >= Date.parse(query.since)))
+        const alerts = model.alerts.filter((a) => (!query.kiosk_id || a.kiosk_id === query.kiosk_id)
+          && (query.unresolved_only !== 'true' || !a.resolved_at)
+          && (!query.since || Date.parse(a.reported_at) >= Date.parse(query.since)))
           .sort((a, b) => Date.parse(b.reported_at) - Date.parse(a.reported_at) || a.id.localeCompare(b.id));
         return reply(alerts.slice(Number(query.offset || 0), Number(query.offset || 0) + Number(query.limit || 50)));
       }
@@ -117,5 +123,13 @@ export async function loginAdmin(page) {
   await page.getByLabel('관리자 계정', { exact: true }).fill('operator');
   await page.getByLabel('비밀번호', { exact: true }).fill('test-password');
   await page.getByRole('button', { name: '관리자 로그인', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '키오스크 장치 현황' })).toBeVisible();
+}
+
+// 현황 카드를 눌러 같은 화면 안에서 그 키오스크의 장치 상태·조치 화면으로 들어간다.
+export const kioskCard = (page, name = '테스트 키오스크 A') => page.getByRole('button', { name: new RegExp(name) });
+
+export async function openKioskDetail(page, name = '테스트 키오스크 A') {
+  await kioskCard(page, name).click();
   await expect(page.getByRole('heading', { name: '경고 검토 및 조치' })).toBeVisible();
 }

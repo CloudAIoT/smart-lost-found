@@ -240,6 +240,7 @@ Pi가 [MQTT 규약](mqtt-protocol.md)으로 보낸 센서 상태와 이상 상�
 - 경고 조회는 `unresolved_only` 필터와 `resolved_at`을 지원한다. 오래된 미조치 warning만 기본 14일 후 정리하며 alarm과 조치 이력은 보존한다.
 - `GET /api/kiosks/{id}/operation-status`로 `blocked`, `active_alarm_count`, `alarms`를 조회한다. 페이지 진입 시각과 관계없이 모든 미해결 alarm이 해당 키오스크를 차단한다. 업무 변경 요청은 `423 KIOSK_ALARM_ACTIVE`로 거부한다.
 - 관리자는 `GET /api/admin/session`, `GET /api/admin/alerts?kiosk_id=...`, `POST /api/admin/alerts/{id}/resolve`를 사용한다. 해결 입력은 `{confirmed:true,note:"조치 내용"}`이며 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 인증이 필요하다. 전체 계약·인증·전환 조건은 [F14](../backend/docs/functional-spec.md#f14-운영-중단과-관리자-조치)를 따른다.
+- 관리자 화면 첫 화면은 모든 키오스크의 미조치 알람·경고 건수를 한 번에 보여 준다. 이를 위한 `GET /api/admin/kiosks/overview`는 아직 구현 전이고 계약은 [프론트 요청](frontend-admin-overview-api.md)에 있다. 그때까지 프론트는 `GET /api/alerts?unresolved_only=true&limit=200`으로 직접 센다.
 - `MQTT_HOST`를 설정하지 않은 서버에서는 두 경로가 정상 응답하지만 내용이 비어 있다.
 
 ## AI 통신 상태

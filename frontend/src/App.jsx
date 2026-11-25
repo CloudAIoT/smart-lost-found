@@ -871,16 +871,20 @@ function WebDeviceStatus({ kiosks, kiosksError, onBack }) {
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className="border-t border-slate-800">
-                <td className="py-2 px-3">{r.device === 'capture' ? '촬영 장치' : r.locker_number === null ? '보관함 컨트롤러' : `${r.locker_number}번 보관함`}</td>
+                <td className="py-2 px-3">{r.device === 'capture' ? '촬영 장치' : r.locker_number == null ? '보관함 컨트롤러' : `${r.locker_number}번 보관함`}</td>
                 <td className="py-2 px-3">
-                  <span className={`inline-flex items-center gap-1.5 ${r.connection === 'online' ? 'text-emerald-400' : r.connection === 'offline' ? 'text-rose-400' : 'text-slate-500'}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${r.connection === 'online' ? 'bg-emerald-500' : r.connection === 'offline' ? 'bg-rose-500' : 'bg-slate-500'}`} />
-                    {r.connection === 'online' ? '온라인' : r.connection === 'offline' ? '오프라인' : '-'}
-                  </span>
+                  {r.connection == null ? (
+                    <span className="text-slate-500">-</span>
+                  ) : (
+                    <span className={`inline-flex items-center gap-1.5 ${r.connection === 'online' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${r.connection === 'online' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                      {r.connection === 'online' ? '온라인' : '오프라인'}
+                    </span>
+                  )}
                 </td>
                 <td className="py-2 px-3">{r.door === 'open' ? '열림' : r.door === 'closed' ? '닫힘' : '-'}</td>
                 <td className="py-2 px-3">{r.weight_g ?? '-'}</td>
-                <td className="py-2 px-3">{r.item === 'present' ? '감지됨' : r.item === 'empty' ? '비어 있음' : '-'}</td>
+                <td className="py-2 px-3">{r.item === 'present' ? '감지됨' : '-'}</td>
                 <td className="py-2 px-3 text-slate-500">{r.updated_at ? new Date(r.updated_at).toLocaleTimeString('ko-KR') : '-'}</td>
               </tr>
             ))}
@@ -1064,7 +1068,8 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
   // 장치 경고·상태
   const [alerts, setAlerts] = useState([]);
-  const alertsSinceRef = useRef(null);
+  const alertsSinceRef = useRef(null); // 화면 진입 시각에 한 번만 고정한다(이후 전진시키지 않음 — F14 요청사항 종합반영2)
+  const seenAlertIdsRef = useRef(new Set()); // 한 번이라도 받은 경고 id 전체. 표시/해제 여부와 무관하게 재노출을 막는다.
   const pickupOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_TAKEN 경고만 본다
   const depositOpenedAtRef = useRef(null); // 보관함을 연 시각(ISO). 그 이후의 ITEM_NOT_DEPOSITED 경고만 본다
   const [deviceStatus, setDeviceStatus] = useState([]); // GET /kiosks/{id}/device-status (장치 온라인/오프라인)
@@ -1080,27 +1085,41 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
 
   const kiosk = kiosks.find((k) => k.id === kioskId);
 
-  // 장치 경고 폴링: GET /api/alerts?kiosk_id=&since= (backend recent_alerts).
+  // 장치 경고 폴링: GET /api/alerts?kiosk_id=&since=&limit=&offset= (backend recent_alerts).
   // 응답 필드: { id, kiosk_id, code, severity, device, locker_number, message, detail, reported_at }.
-  // 키오스크를 바꾸면 이전 키오스크의 경고·since 기준을 비우고 새로 시작한다.
+  // F14 요청사항 종합반영2: since는 화면 진입 시각에 한 번만 고정하고 이후 전진시키지 않는다(늦게 들어오는 경고를 놓치지 않기 위함).
+  // since가 고정이라 누적 건수가 backend limit(기본 50, 최대 200)을 넘을 수 있어 offset으로 끝까지 이어 받는다.
+  // 중복 제거는 화면 표시·'확인' 여부와 무관하게, 지금까지 받은 적 있는 id 전체(seenAlertIdsRef)로 판단한다.
   useEffect(() => {
     setAlerts([]);
-    alertsSinceRef.current = null;
+    seenAlertIdsRef.current = new Set();
+    alertsSinceRef.current = new Date().toISOString();
     if (!kioskId) return;
     let cancelled = false;
+    const since = alertsSinceRef.current;
+    const fetchAllSinceEntry = async () => {
+      const collected = [];
+      let offset = 0;
+      const limit = 200;
+      for (;;) {
+        const data = await api(`/alerts?kiosk_id=${kioskId}&since=${encodeURIComponent(since)}&limit=${limit}&offset=${offset}`);
+        const list = Array.isArray(data) ? data : [];
+        collected.push(...list);
+        if (list.length < limit) break;
+        offset += limit;
+      }
+      return collected;
+    };
     const poll = async () => {
       try {
-        const since = alertsSinceRef.current;
-        const q = since ? `&since=${encodeURIComponent(since)}` : '';
-        const data = await api(`/alerts?kiosk_id=${kioskId}${q}`);
-        const list = Array.isArray(data) ? data : [];
+        const list = await fetchAllSinceEntry();
         if (cancelled || list.length === 0) return;
-        const latest = list.map((a) => a.reported_at).filter(Boolean).sort().pop();
-        if (latest) alertsSinceRef.current = latest;
-        setAlerts((prev) => {
-          const seen = new Set(prev.map((a) => a.id));
-          return [...list.filter((a) => !seen.has(a.id)), ...prev].slice(0, 5);
-        });
+        const fresh = list.filter((a) => a.id != null && !seenAlertIdsRef.current.has(a.id));
+        if (fresh.length === 0) return;
+        fresh.forEach((a) => seenAlertIdsRef.current.add(a.id));
+        setAlerts((prev) => [...fresh, ...prev]
+          .sort((a, b) => (b.reported_at || '').localeCompare(a.reported_at || ''))
+          .slice(0, 5));
       } catch {
         // 경고 조회 실패는 화면 흐름을 막지 않는다.
       }
@@ -1470,8 +1489,12 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
               <div key={a.id ?? i} className={`flex items-center justify-between gap-2 border rounded-lg px-3 py-2 text-xs ${cls}`}>
                 <span className="flex items-center gap-1.5">
                   <TriangleAlert size={13} /> {ALERT_LABELS[a.code] || a.message || a.code || '알 수 없는 경고'}
+                  {a.locker_number ? ` · ${a.locker_number}번` : ''}
                 </span>
-                <button onClick={() => setAlerts((prev) => prev.filter((_, j) => j !== i))} className="text-[11px] underline shrink-0">
+                <button
+                  onClick={() => setAlerts((prev) => prev.filter((_, j) => j !== i))}
+                  className="text-[11px] underline shrink-0"
+                >
                   확인
                 </button>
               </div>
@@ -1817,6 +1840,14 @@ function KioskView({ kiosks, kiosksError, categories, categoriesError, onReload 
                 <RefreshCw size={14} /> 보관함 다시 열기
               </button>
             )}
+            <button
+              disabled={disabled}
+              onClick={reopenPickup}
+              className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 text-xs font-bold rounded-xl shadow inline-flex items-center gap-1"
+            >
+              <RefreshCw size={14} /> 보관함 다시 열기
+            </button>
+          ) : (
             <button
               disabled={disabled}
               onClick={completePickup}

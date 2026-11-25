@@ -30,6 +30,7 @@ Swagger 주소는 `http://52.78.12.168/docs`다. 업무 API는 GitHub production
 | Variable | S3_BUCKET | smart-lost-found-images-s3 |
 | Variable | BUSINESS_API_ENABLED | true: 업무 API 활성화, false 또는 미등록: 비활성화 |
 | Secret | POSTGRES_PASSWORD | 생성된 32자 이상 임의 비밀번호 |
+| Secret | ADMIN_USERNAME / ADMIN_PASSWORD | 관리자 로그인 계정. 둘 다 설정해야 경고 조회·조치 API를 사용할 수 있다. 미설정 시 503 ADMIN_NOT_CONFIGURED |
 | Variable | API_DOMAIN | DNS 연결 후 입력. 현재 생략 |
 | Variable | TLS_EMAIL | 도메인 설정 시 함께 입력할 인증서 연락 이메일 |
 | Secret | PI_DEVICES | 키오스크 ID별 Pi 주소·API 키 JSON. Pi API 키가 들어 있어 Variable이 아닌 Secret으로 둔다 |

@@ -20,8 +20,10 @@ from .workflow_schemas import Distractors, KoreanLabels, SearchClues, SearchMatc
 
 logger = logging.getLogger(__name__)
 
-EXTRACTION_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite")
-MATCHING_MODELS = ("gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.5-flash-lite")
+MODEL_ATTEMPTS = (
+    "gemini-3.5-flash-lite", "gemini-3.5-flash-lite",
+    "gemini-4-hydrogen", "gemini-4-hydrogen",
+)
 FALLBACK_ERRORS = frozenset({
     "OWNERSHIP_AI_AUTHENTICATION_FAILED", "OWNERSHIP_AI_MODEL_UNAVAILABLE", "OWNERSHIP_AI_RATE_LIMITED",
     "OWNERSHIP_AI_REQUEST_FAILED", "OWNERSHIP_AI_RESPONSE_TOO_LARGE", "OWNERSHIP_AI_TIMEOUT",
@@ -125,7 +127,7 @@ class GeminiWorkflowAI:
     def __init__(self, settings: GeminiSettings, client: httpx.Client, *, budget_seconds: float | None = None):
         self.settings = settings
         self.client = client
-        # Three stages of model fallback multiply the per-call timeout, so one search needs a
+        # Model retries multiply the per-call timeout, so one search needs a
         # deadline of its own. Without a budget the client behaves as it did before.
         self.deadline = monotonic() + budget_seconds if budget_seconds is not None else None
 
@@ -147,7 +149,7 @@ class GeminiWorkflowAI:
                 raise IntegrationError("OWNERSHIP_UNGROUNDED_CLUE")
             return clues
 
-        return self._with_fallback("extract", EXTRACTION_MODELS, extract_with)
+        return self._with_fallback("extract", extract_with)
 
     def similar_items(self, clues: dict[str, str], items: dict[int, dict[str, list[str]]]) -> list[SearchMatch]:
         payload = {
@@ -168,7 +170,7 @@ class GeminiWorkflowAI:
             validate_search_matches(clues, items, matches)
             return matches
 
-        return self._with_fallback("search", MATCHING_MODELS, compare_with)
+        return self._with_fallback("search", compare_with)
 
     def distractors(self, field: str, known: list[str], count: int, *,
                     validate: Callable[[list[str]], list[str]]) -> list[str]:
@@ -178,7 +180,7 @@ class GeminiWorkflowAI:
             result = self._request(model, DISTRACT, payload, Distractors, operation="options")
             return validate(result.labels)
 
-        return self._with_fallback("distractors", MATCHING_MODELS, generate_with)
+        return self._with_fallback("distractors", generate_with)
 
     def localize(self, field: str, labels: list[str]) -> list[str]:
         payload = {"feature_type": field, "labels": labels}
@@ -189,11 +191,11 @@ class GeminiWorkflowAI:
                 raise IntegrationError("OWNERSHIP_AI_INVALID_OPTIONS")
             return translated
 
-        return self._with_fallback("localize", MATCHING_MODELS, translate_with)
+        return self._with_fallback("localize", translate_with)
 
-    def _with_fallback[T](self, operation: str, models: tuple[str, ...], run: Callable[[str], T]) -> T:
+    def _with_fallback[T](self, operation: str, run: Callable[[str], T]) -> T:
         last: IntegrationError | None = None
-        for model in models[:-1]:
+        for attempt, model in enumerate(MODEL_ATTEMPTS[:-1], start=1):
             self._require_budget(last)
             try:
                 return run(model)
@@ -201,9 +203,9 @@ class GeminiWorkflowAI:
                 if exc.code not in FALLBACK_ERRORS:
                     raise
                 last = exc
-                logger.warning("Gemini %s via %s failed (%s), trying the next model", operation, model, exc.code)
+                logger.warning("Gemini %s attempt %d via %s failed (%s)", operation, attempt, model, exc.code)
         self._require_budget(last)
-        return run(models[-1])
+        return run(MODEL_ATTEMPTS[-1])
 
     def _request[T: BaseModel](self, model: str, instruction: str, data: dict, schema: type[T], *,
                                json_schema: dict | None = None, operation: str = "generate") -> T:

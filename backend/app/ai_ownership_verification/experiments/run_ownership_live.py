@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.ai_ownership_verification.api import get_ownership_ai
 from app.ai_ownership_verification.search import find_candidates, normalized, stored_items
 from app.ai_ownership_verification.workflow import get_ownership_result
-from app.ai_ownership_verification.workflow_ai import EXTRACTION_MODELS, MATCHING_MODELS, GeminiWorkflowAI
+from app.ai_ownership_verification.workflow_ai import MODEL_ATTEMPTS, GeminiWorkflowAI
 from app.ai_ownership_verification.workflow_schemas import SearchClues
 from app.api import get_store
 from app.config import Settings, get_settings
@@ -357,7 +357,8 @@ def main():
                     "experiments/ownership_live_corpus.py", "experiments/run_ownership_live.py"]
     report = {
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "models": {"extraction": EXTRACTION_MODELS, "candidate_search_and_distractors": MATCHING_MODELS},
+        "models": {"extraction": MODEL_ATTEMPTS, "candidate_search_and_distractors": MODEL_ATTEMPTS,
+                   "localization": MODEL_ATTEMPTS},
         "suite": args.suite,
         "data": {"synthetic": True, "item_count": item_count, "searchable_count": searchable_count,
                  "distribution": distribution},

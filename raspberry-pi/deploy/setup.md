@@ -125,7 +125,7 @@ systemctl status slf-pi       # active (running)이면 정상
 journalctl -u slf-pi -f       # 로그 보기
 ```
 
-코드를 고친 뒤에는 `git pull` 후 `sudo systemctl restart slf-pi`로 다시 띄운다.
+main에 병합된 코드는 Pi에 저절로 들어오지 않는다. 코드가 바뀌면 열린 칸이 없을 때 Pi마다 `git pull --ff-only` 후 `sudo systemctl restart slf-pi`로 다시 띄우고, `git log -1`과 (보관함 Pi는) `tools/sim.py state`의 `auto`로 확인한다. 가상 무게는 파일에 저장되어 재시작해도 남는다.
 
 2026-11-13에 두 Pi에 등록했다. 촬영 Pi는 실제 카메라 모드로 돈다. 보관함 Pi는 가짜 모드로 돌다가 2026-11-17부터 실제 모드([LED·버튼](../README.md#보관함-led버튼-보관함-pi))로 돈다.
 
